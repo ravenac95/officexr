@@ -16,6 +16,7 @@ import type {
   Store,
   SyncEngine,
   SnapshotHandshake,
+  TrackerOutput,
   Vec3,
 } from '@officexr/sdk';
 import type { BotPool } from '../bot/BotPool.ts';
@@ -249,10 +250,15 @@ export function Scene(props: SceneProps) {
   // animation for the self avatar without triggering re-renders.
   const isAirborneRef = useRef<boolean>(false);
 
-  // Updated each frame by `ProximityGlow`'s tracker: the local player's
+  // Written by `SceneFrame`, read by `ProximityGlow`, which must mount after it so same-priority
+  // useFrames run in that order; the tracker reuses its maps, so a stale read would also be a mutated one.
+  const proximityOutputRef = useRef<TrackerOutput | null>(null);
+
+  // Updated each frame by `ProximityGlow` from the proximity output: the local player's
   // current MeetingArea centroid (at the local player's feet height), or `null`
   // when not in a conversation. `CameraRig` reads it to drive the
-  // damped conversation-view blend.
+  // damped conversation-view blend. CameraRig mounts before SceneFrame (movement reads its yaw),
+  // so it sees the previous frame's focus; one frame is invisible against the 0.35 s blend.
   const conversationFocusRef = useRef<
     { x: number; y: number; z: number } | null
   >(null);
@@ -387,26 +393,6 @@ export function Scene(props: SceneProps) {
           selfPosRef={selfPosRef}
         />
 
-        <ProximityGlow
-          store={store}
-          bus={props.bus}
-          selfId={selfId}
-          discRadius={proximity.discRadius}
-          outerRadius={proximity.outerRadius}
-          pulseSpeed={proximity.pulseSpeed}
-          intensity={proximity.intensity}
-          enteringColor={proximity.enteringColor}
-          enteredColor={proximity.enteredColor}
-          exitingColor={proximity.exitingColor}
-          meetingBorderInset={proximity.meetingBorderInset}
-          meetingBorderOutset={proximity.meetingBorderOutset}
-          sparkleSpeed={proximity.sparkleSpeed}
-          sparkleFloatHeight={proximity.sparkleFloatHeight}
-          sparkleSize={proximity.sparkleSize}
-          cameraMode={cameraMode}
-          conversationFocusRef={conversationFocusRef}
-        />
-
         <CameraRig
           mode={cameraMode}
           playerPosRef={selfPosRef}
@@ -427,6 +413,7 @@ export function Scene(props: SceneProps) {
         {props.viewYaw && <ViewYawProbe viewYaw={props.viewYaw} />}
 
         <SceneFrame
+          proximityOutputRef={proximityOutputRef}
           store={props.store}
           actions={props.actions}
           rules={props.rules}
@@ -451,6 +438,25 @@ export function Scene(props: SceneProps) {
           spawnPoints={props.spawnPoints}
           isAirborneRef={isAirborneRef}
           xrPresenting={xrPresenting}
+        />
+        <ProximityGlow
+          proximityOutputRef={proximityOutputRef}
+          store={store}
+          selfId={selfId}
+          discRadius={proximity.discRadius}
+          outerRadius={proximity.outerRadius}
+          pulseSpeed={proximity.pulseSpeed}
+          intensity={proximity.intensity}
+          enteringColor={proximity.enteringColor}
+          enteredColor={proximity.enteredColor}
+          exitingColor={proximity.exitingColor}
+          meetingBorderInset={proximity.meetingBorderInset}
+          meetingBorderOutset={proximity.meetingBorderOutset}
+          sparkleSpeed={proximity.sparkleSpeed}
+          sparkleFloatHeight={proximity.sparkleFloatHeight}
+          sparkleSize={proximity.sparkleSize}
+          cameraMode={cameraMode}
+          conversationFocusRef={conversationFocusRef}
         />
         <StandingCheck store={store} seating={props.seating} selfBodyRef={selfBodyRef} />
         {props.onModelsReady && (

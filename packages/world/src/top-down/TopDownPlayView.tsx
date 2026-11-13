@@ -240,7 +240,10 @@ export function TopDownPlayView(props: TopDownPlayViewProps) {
         nowMs: now,
       });
       const state = store.getState();
-      tickProximity(tracker, { players: state.players, voiceZones: state.voiceZones, selfId, bus, settings: state.worldSettings, nowMs: now, dtSec });
+      const proximity = tickProximity(tracker, { players: state.players, voiceZones: state.voiceZones, selfId, settings: state.worldSettings, nowMs: now, dtSec });
+      for (const e of proximity.events) {
+        bus.emit(e);
+      }
 
       const canvas = canvasRef.current;
       const ctx = canvas?.getContext('2d');

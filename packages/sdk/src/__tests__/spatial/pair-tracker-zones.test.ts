@@ -21,15 +21,17 @@ function world() {
   const frames = (players: PlayerState[], n = 30) => {
     for (let i = 0; i < n; i++) {
       now += 16;
-      tickProximity(tracker, {
+      const out = tickProximity(tracker, {
         players: Object.fromEntries(players.map((p) => [p.id, p])),
         voiceZones: [zone],
         selfId: 'alice',
-        bus,
         settings: settings as never,
         nowMs: now,
         dtSec: 0.016,
       });
+      for (const e of out.events) {
+        bus.emit(e);
+      }
     }
   };
   return { events, frames };
