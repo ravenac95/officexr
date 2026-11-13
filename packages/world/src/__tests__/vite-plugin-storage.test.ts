@@ -12,6 +12,7 @@ import studioStorage, {
   dataDirOptions,
 } from '../../vite-plugin-storage.ts';
 import { Document, NodeIO } from '@gltf-transform/core';
+import { buildColliderExtras, parseEmbeddedColliders } from '../app/baked-collider-extras.ts';
 import { compressDocument, registerCompressionCodecs } from '../app/glb-compression.ts';
 import { newPlaceObject } from '../scenes/commands.ts';
 import { emptyMapDocument, type MapDocumentV1 } from '../scenes/map-document.ts';
@@ -270,8 +271,9 @@ describe('studio storage plugin: binary resources', () => {
     expect(await readdir(path.join(dir, 'baked-layouts'))).toEqual(['hq.glb']);
   });
 
-  it('serves a baked layout without meshopt or quantization at <name>.decoded.glb', async () => {
+  it('serves a baked layout without meshopt or quantization, keeping its collider extras, at <name>.decoded.glb', async () => {
     const doc = new Document();
+    const colliders = [{ type: 'cuboid' as const, center: { x: 1, y: 0.5, z: 0 }, halfExtents: { x: 1, y: 0.5, z: 1 } }];
     const buffer = doc.createBuffer();
     const position = doc
       .createAccessor()
@@ -279,7 +281,10 @@ describe('studio storage plugin: binary resources', () => {
       .setArray(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]))
       .setBuffer(buffer);
     const prim = doc.createPrimitive().setAttribute('POSITION', position);
-    doc.createScene().addChild(doc.createNode().setMesh(doc.createMesh().addPrimitive(prim)));
+    doc
+      .createScene()
+      .setExtras(buildColliderExtras(colliders))
+      .addChild(doc.createNode().setMesh(doc.createMesh().addPrimitive(prim)));
     await doc.transform(compressDocument);
     const io = await registerCompressionCodecs(new NodeIO());
     const compressed = await io.writeBinary(doc);
@@ -291,6 +296,8 @@ describe('studio storage plugin: binary resources', () => {
     const decoded = await new NodeIO().readBinary(new Uint8Array(await get.arrayBuffer()));
     expect(decoded.getRoot().listExtensionsUsed()).toEqual([]);
     expect(decoded.getRoot().listAccessors()[0].getArray()).toBeInstanceOf(Float32Array);
+    // The native client reads its baked colliders from these scene extras.
+    expect(parseEmbeddedColliders(decoded.getRoot().listScenes()[0].getExtras())).toEqual(colliders);
   });
 });
 
