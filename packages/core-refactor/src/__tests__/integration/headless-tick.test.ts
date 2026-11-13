@@ -24,15 +24,17 @@ function headless(client: ClientHandle) {
   const frame = (nowMs: number, dtSec: number) => {
     prevState = tickSession({ ...client, prevState, nowMs });
     const state = client.store.getState();
-    tickProximity(tracker, {
+    const out = tickProximity(tracker, {
       players: state.players,
       voiceZones: state.voiceZones,
       selfId: client.id,
-      bus: client.bus,
       settings: state.worldSettings,
       nowMs,
       dtSec,
     });
+    for (const e of out.events) {
+      client.bus.emit(e);
+    }
   };
   return { client, voice, frame, entered, comm };
 }

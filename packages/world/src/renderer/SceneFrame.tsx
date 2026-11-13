@@ -10,6 +10,7 @@ import type {
   SyncEngine,
   SnapshotHandshake,
   Bus,
+  TrackerOutput,
   Vec3,
 } from '@officexr/sdk';
 import { tickSession } from '@officexr/sdk';
@@ -21,7 +22,6 @@ import { resolveCharacterTunables } from '../characters/resolve.ts';
 import { fixedMovementYaw, yawFromDirection, type ViewOffsets } from './lookControls.ts';
 import { moveIntent, type AutoWalkSource, type MoveInput } from './moveIntent.ts';
 import { sitOnPress, stepSeated, type SeatingSource } from './seated.ts';
-import { extrapolatePos } from './Players.tsx';
 import { useStoreWorldObjects } from './useStoreWorldObjects.ts';
 import type { SimBakedColliders, SimCore, SimPeer } from '../sim/SimCore.ts';
 
@@ -48,6 +48,8 @@ interface SceneFrameProps {
   selfId: string;
   /** Set by `Players` when the self avatar's RigidBody mounts; mirrors the sim's position for the proximity sensors. */
   selfBodyRef: React.MutableRefObject<RapierRigidBody | null>;
+  /** Each frame's proximity result, for `ProximityGlow` to render. */
+  proximityOutputRef: React.MutableRefObject<TrackerOutput | null>;
   /** Builds the local player's movement simulation; called once per mount, after Rapier has loaded. */
   createSim: (charRadius: number) => SimCore;
   /** Loaded baked layouts' colliders; their rooms' instances collide through these instead. */
@@ -80,7 +82,6 @@ interface SceneFrameProps {
 }
 
 const headsetForward = new THREE.Vector3();
-const peerPos = new THREE.Vector3();
 
 const ARROW_KEYS = new Set([
   'ArrowUp',
@@ -115,6 +116,7 @@ export function SceneFrame({
   seating,
   selfId,
   selfBodyRef,
+  proximityOutputRef,
   createSim,
   bakedColliders,
   onBakedCollidersApplied,
@@ -273,11 +275,22 @@ export function SceneFrame({
       const peers: SimPeer[] = [];
       for (const [id, p] of Object.entries(stateSnapshot.players)) {
         if (id !== selfId) {
-          const { x, y, z } = extrapolatePos(p, now, peerPos);
-          peers.push({ id, pos: { x, y, z } });
+          peers.push({ id, pos: sim.extrapolatePeer(p, now) });
         }
       }
       sim.syncPeers(peers, worldSettings.charRadius);
+
+      const proximity = sim.tickProximity(stateSnapshot.players, {
+        voiceZones: stateSnapshot.voiceZones,
+        selfId,
+        settings: worldSettings,
+        nowMs: now,
+        dtSec,
+      });
+      for (const event of proximity.events) {
+        bus.emit(event);
+      }
+      proximityOutputRef.current = proximity;
     }
 
     if (self?.seat != null && body) {

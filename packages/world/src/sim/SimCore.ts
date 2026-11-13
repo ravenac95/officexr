@@ -1,7 +1,16 @@
-import type { PlayerId, Vec3, WorldObjects, WorldSettings } from '@officexr/sdk';
+import type {
+  PlayerId,
+  PlayerState,
+  ProximityTickInput,
+  TrackerOutput,
+  Vec3,
+  WorldObjects,
+  WorldSettings,
+} from '@officexr/sdk';
 import type { CharacterMoveResult } from '../physics/character-movement.ts';
 import type { ColliderDescriptor } from '../physics/rules.ts';
 import type { WorldObjectKind } from '../scenes/world-object-kinds-schema.ts';
+import type { Extrapolatable } from './extrapolate.ts';
 
 /** The kind fields static colliders derive from, with the voxel size instance positions are in. */
 export interface SimKinds {
@@ -58,6 +67,9 @@ export interface SimStepResult extends CharacterMoveResult {
   respawned: boolean;
 }
 
+/** One frame of proximity input; `players` travel separately. */
+export type SimProximityInput = Omit<ProximityTickInput, 'players'>;
+
 /**
  * The local player's deterministic movement simulation: its own physics
  * world of static colliders and peer mirrors, and the character step.
@@ -72,6 +84,14 @@ export interface SimCore {
   /** Peers absent from `peers` lose their mirrors. */
   syncPeers(peers: readonly SimPeer[], charRadius: number): void;
   step(input: SimInput): SimStepResult;
+  /**
+   * Advances proximity pairing and MeetingAreas one frame. `events` in the
+   * result are for the caller to emit; the output's collections are reused
+   * by the next call.
+   */
+  tickProximity(players: Record<PlayerId, PlayerState>, input: SimProximityInput): TrackerOutput;
+  /** Where a peer is drawn and collides this frame. */
+  extrapolatePeer(peer: Extrapolatable, nowMs: number): Vec3;
   /** The player's body-root position as of the last step or teleport. */
   position(): Vec3;
   /** Moves the player to `pos` and clears its fall and jump state. */

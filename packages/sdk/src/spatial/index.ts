@@ -4,6 +4,7 @@ export {
   type MeetingArea,
   type PairState,
   type PlayerVisibilityState,
+  type ProximityEvent,
   type TrackerOptions,
   type TrackerOutput,
 } from './pair-tracker.ts';

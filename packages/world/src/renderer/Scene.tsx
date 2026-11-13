@@ -16,6 +16,7 @@ import type {
   Store,
   SyncEngine,
   SnapshotHandshake,
+  TrackerOutput,
   Vec3,
 } from '@officexr/sdk';
 import type { BotPool } from '../bot/BotPool.ts';
@@ -249,7 +250,9 @@ export function Scene(props: SceneProps) {
   // animation for the self avatar without triggering re-renders.
   const isAirborneRef = useRef<boolean>(false);
 
-  // Updated each frame by `ProximityGlow`'s tracker: the local player's
+  const proximityOutputRef = useRef<TrackerOutput | null>(null);
+
+  // Updated each frame by `ProximityGlow` from the proximity output: the local player's
   // current MeetingArea centroid (at the local player's feet height), or `null`
   // when not in a conversation. `CameraRig` reads it to drive the
   // damped conversation-view blend.
@@ -388,8 +391,8 @@ export function Scene(props: SceneProps) {
         />
 
         <ProximityGlow
+          proximityOutputRef={proximityOutputRef}
           store={store}
-          bus={props.bus}
           selfId={selfId}
           discRadius={proximity.discRadius}
           outerRadius={proximity.outerRadius}
@@ -427,6 +430,7 @@ export function Scene(props: SceneProps) {
         {props.viewYaw && <ViewYawProbe viewYaw={props.viewYaw} />}
 
         <SceneFrame
+          proximityOutputRef={proximityOutputRef}
           store={props.store}
           actions={props.actions}
           rules={props.rules}

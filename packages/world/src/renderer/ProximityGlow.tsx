@@ -7,16 +7,15 @@ import React, {
 } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import type { Bus, OfficeState, PlayerId, Store } from '@officexr/sdk';
-import { PairTracker, tickProximity, type MeetingArea } from '@officexr/sdk';
-import { extrapolatePos } from './Players.tsx';
+import type { MeetingArea, OfficeState, PlayerId, Store, TrackerOutput } from '@officexr/sdk';
+import { extrapolatePos } from '../sim/extrapolate.ts';
 import { feetPosition } from '../physics/rules.ts';
 import type { CameraMode } from './config.ts';
 import { BubbleParticles, radialTexture } from './proximity/BubbleParticles.tsx';
 
 interface ProximityGlowProps {
   store: Store;
-  bus: Bus;
+  proximityOutputRef: React.MutableRefObject<TrackerOutput | null>;
   selfId: PlayerId;
   /** Visual size of the per-player disc on the ground (shown for
    * `entering` and `exiting` states only). */
@@ -70,8 +69,8 @@ interface DiscRegistration {
 }
 
 /**
- * Conversation glow + approach sparkles, driven by the position-based
- * `PairTracker` from `@officexr/sdk/spatial`.
+ * Conversation glow + approach sparkles, rendering the
+ * proximity output `SimCore` computes each frame.
  *
  * Visual layout:
  *   - `entering` players (approaching the outer ring of a peer): a
@@ -94,7 +93,7 @@ interface DiscRegistration {
  */
 export function ProximityGlow({
   store,
-  bus,
+  proximityOutputRef,
   selfId,
   discRadius,
   outerRadius,
@@ -132,8 +131,6 @@ export function ProximityGlow({
     });
   }, [store]);
 
-  // Single source-of-truth tracker.
-  const tracker = useMemo(() => new PairTracker(), []);
   // Players that should show approach sparkles this frame (self-involved
   // `entering` pairs).
   const sparklingIds = useRef<Set<PlayerId>>(new Set());
@@ -174,8 +171,6 @@ export function ProximityGlow({
   const areaRadiusEased = useRef<Map<string, number>>(new Map());
   const areaOpacity = useRef<Map<string, number>>(new Map());
 
-  const tmpVec = useMemo(() => new THREE.Vector3(), []);
-
   useFrame((state, dt) => {
     const t = state.clock.getElapsedTime();
     const now = performance.now();
@@ -184,15 +179,10 @@ export function ProximityGlow({
     const players = officeState.players;
     const ws = officeState.worldSettings;
 
-    const out = tickProximity(tracker, {
-      players,
-      voiceZones: officeState.voiceZones,
-      selfId,
-      bus,
-      settings: ws,
-      nowMs: now,
-      dtSec: dt,
-    });
+    const out = proximityOutputRef.current;
+    if (!out) {
+      return;
+    }
 
     // Update conversation focus ref for the camera.
     const selfPlayer = players[selfId];
@@ -231,7 +221,7 @@ export function ProximityGlow({
     for (const [id, p] of Object.entries(players)) {
       const reg = registry.current.get(id);
       if (!reg) continue;
-      const renderPos = extrapolatePos(p, now, tmpVec);
+      const renderPos = extrapolatePos(p, now);
       reg.mesh.position.set(renderPos.x, p.pos.y + 0.15, renderPos.z);
 
       const discState = out.playerStates.get(id) ?? null;
@@ -413,7 +403,7 @@ function PlayerProximityFx({
     const p = store.getState().players[playerId];
     if (!p) return;
     const now = performance.now();
-    const rp = extrapolatePos(p, now, tmpVec);
+    const rp = extrapolatePos(p, now);
     groupRef.current.position.set(rp.x, p.pos.y, rp.z);
   });
 
