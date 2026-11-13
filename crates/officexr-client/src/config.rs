@@ -1,5 +1,6 @@
-pub const USAGE: &str = "usage: officexr-client --web-url <url> --realtime-url <ws url> \
---office-id <id> --cookie <Cookie header>";
+pub const USAGE: &str = "usage: OFFICEXR_SESSION_COOKIE=<Cookie header> officexr-client \
+--web-url <url> --realtime-url <ws url> --office-id <id>
+(--cookie <Cookie header> also works, but shows the cookie in process listings)";
 
 pub struct Config {
     /// Serves `/api/*` and `/models/*`.

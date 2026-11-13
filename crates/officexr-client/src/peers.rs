@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use officexr_render::{PlayerRender, Players};
 use officexr_sim::{Vec3 as SimVec3, extrapolate_pos};
-use serde::Deserialize;
 
 const CHARACTERS: [&str; 6] = [
     "Barbarian",
@@ -14,13 +13,12 @@ const CHARACTERS: [&str; 6] = [
     "Rogue_Hooded",
 ];
 
-#[derive(Deserialize, Clone, Copy)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Copy)]
 pub struct Position {
-    pos: SimVec3,
-    vel: SimVec3,
-    yaw: f64,
-    is_airborne: bool,
+    pub pos: SimVec3,
+    pub vel: SimVec3,
+    pub yaw: f64,
+    pub is_airborne: bool,
 }
 
 #[derive(Message)]

@@ -11,6 +11,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 // the Vite config. Bypassing the barrel keeps the Node-side import
 // graph free of any `.json` modules.
 import { isValidSceneName } from './src/scenes/storage.ts';
+import { NodeIO } from '@gltf-transform/core';
+import { decodeCompressedGlb, registerCompressionCodecs } from './src/app/glb-compression.ts';
 import type { SoundCatalogEntry } from './src/app/asset-url.ts';
 import {
   deserializeMap,
@@ -264,6 +266,7 @@ export function createStudioStorage(options: StudioStoragePluginOptions = {}): S
         extension: '.glb',
         contentType: 'model/gltf-binary',
         listKey: 'bakedLayouts',
+        decode: decodeBakedLayout,
       }),
     );
     use(
@@ -452,6 +455,8 @@ interface BinaryResourceOpts extends BinaryResourceHooks {
   listKey: string;
   /** Reject names that still contain a dot after the extension is stripped. */
   rejectDots?: boolean;
+  /** When set, `GET /:name.decoded<ext>` serves the file through this transform. */
+  decode?: (data: Buffer) => Promise<Uint8Array>;
 }
 
 /**
@@ -466,6 +471,14 @@ interface BinaryResourceOpts extends BinaryResourceHooks {
  * `:name` is the bare name, optionally with the extension;
  * `isValidSceneName` is checked on the bare name.
  */
+let decoderIo: Promise<NodeIO> | undefined;
+
+/** For the native client, whose glTF loader reads neither meshopt nor quantized meshes. */
+async function decodeBakedLayout(glb: Buffer): Promise<Uint8Array> {
+  decoderIo ??= registerCompressionCodecs(new NodeIO());
+  return decodeCompressedGlb(await decoderIo, glb);
+}
+
 function makeBinaryResourceMiddleware(
   opts: BinaryResourceOpts,
 ): Connect.NextHandleFunction {
@@ -483,7 +496,9 @@ function makeBinaryResourceMiddleware(
 
       // Names look like "foo" or "foo<ext>". Normalise to bare name for
       // validation, keep the extension for the actual filename.
-      const bareName = slug.endsWith(opts.extension) ? slug.slice(0, -opts.extension.length) : slug;
+      const stem = slug.endsWith(opts.extension) ? slug.slice(0, -opts.extension.length) : slug;
+      const decodedName = opts.decode && req.method === 'GET' ? stem.match(/^(.+)\.decoded$/)?.[1] : undefined;
+      const bareName = decodedName ?? stem;
       if (!isValidSceneName(bareName) || (opts.rejectDots && bareName.includes('.'))) {
         return jsonResponse(res, 400, { error: 'invalid resource name' });
       }
@@ -503,7 +518,7 @@ function makeBinaryResourceMiddleware(
           }
           res.statusCode = 200;
           res.setHeader('content-type', opts.contentType);
-          res.end(data);
+          res.end(decodedName && opts.decode ? await opts.decode(data) : data);
           return;
         }
         case 'HEAD': {

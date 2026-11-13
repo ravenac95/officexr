@@ -5,7 +5,7 @@
 
 import type { Transform, PlatformIO } from '@gltf-transform/core';
 import { EXTMeshoptCompression, KHRMeshQuantization } from '@gltf-transform/extensions';
-import { meshopt } from '@gltf-transform/functions';
+import { dequantize, meshopt } from '@gltf-transform/functions';
 import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 
 /** Quantizes and meshopt-compresses every mesh (the transform also reorders). */
@@ -24,4 +24,21 @@ export async function registerCompressionCodecs<T extends PlatformIO>(
     'meshopt.decoder': MeshoptDecoder,
   });
   return io;
+}
+
+const COMPRESSION_EXTENSIONS = new Set<string>([EXTMeshoptCompression.EXTENSION_NAME, KHRMeshQuantization.EXTENSION_NAME]);
+
+/**
+ * Re-encodes a compressed GLB without meshopt or quantization, for loaders
+ * (Bevy's) that read neither. `io` must have `registerCompressionCodecs` applied.
+ */
+export async function decodeCompressedGlb(io: PlatformIO, glb: Uint8Array): Promise<Uint8Array> {
+  const doc = await io.readBinary(glb);
+  await doc.transform(dequantize());
+  for (const ext of doc.getRoot().listExtensionsUsed()) {
+    if (COMPRESSION_EXTENSIONS.has(ext.extensionName)) {
+      ext.dispose();
+    }
+  }
+  return io.writeBinary(doc);
 }
