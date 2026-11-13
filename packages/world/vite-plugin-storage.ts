@@ -459,18 +459,6 @@ interface BinaryResourceOpts extends BinaryResourceHooks {
   decode?: (data: Buffer) => Promise<Uint8Array>;
 }
 
-/**
- * Middleware for a directory of binary files with one extension.
- *
- *   GET  /:name     → file bytes or 404
- *   HEAD /:name     → 200 + size or 404
- *   PUT  /:name     → 204 (body = bytes)
- *   DELETE /:name   → 204
- *   GET  /          → { [listKey]: [{ name, size, updatedAt }] }
- *
- * `:name` is the bare name, optionally with the extension;
- * `isValidSceneName` is checked on the bare name.
- */
 let decoderIo: Promise<NodeIO> | undefined;
 
 /** For the native client, whose glTF loader reads neither meshopt nor quantized meshes. */
@@ -479,6 +467,19 @@ async function decodeBakedLayout(glb: Buffer): Promise<Uint8Array> {
   return decodeCompressedGlb(await decoderIo, glb);
 }
 
+/**
+ * Middleware for a directory of binary files with one extension.
+ *
+ *   GET  /:name     → file bytes or 404
+ *   GET  /:name.decoded<ext> → `decode(file bytes)` or 404, when `decode` is set
+ *   HEAD /:name     → 200 + size or 404
+ *   PUT  /:name     → 204 (body = bytes)
+ *   DELETE /:name   → 204
+ *   GET  /          → { [listKey]: [{ name, size, updatedAt }] }
+ *
+ * `:name` is the bare name, optionally with the extension;
+ * `isValidSceneName` is checked on the bare name.
+ */
 function makeBinaryResourceMiddleware(
   opts: BinaryResourceOpts,
 ): Connect.NextHandleFunction {

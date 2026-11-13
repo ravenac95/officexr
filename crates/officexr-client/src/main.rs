@@ -4,8 +4,8 @@
 //!   --web-url http://localhost:5173 --realtime-url ws://localhost:8787 --office-id <uuid>
 //!
 //! Each flag falls back to an env var: `OFFICEXR_WEB_URL`, `OFFICEXR_REALTIME_URL`,
-//! `OFFICEXR_OFFICE_ID`, `OFFICEXR_SESSION_COOKIE` (prefer it to `--cookie`, which `ps` shows). With `OFFICEXR_SCREENSHOT=out.png`
-//! it saves one frame after `OFFICEXR_SCREENSHOT_FRAME` (default 600) frames, then exits.
+//! `OFFICEXR_OFFICE_ID`, `OFFICEXR_SESSION_COOKIE` (prefer it to `--cookie`, which `ps`
+//! shows). With `OFFICEXR_SCREENSHOT=out.png` it saves one frame after `OFFICEXR_SCREENSHOT_FRAME` (default 600) frames, then exits.
 
 mod camera;
 mod config;

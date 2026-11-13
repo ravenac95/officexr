@@ -146,11 +146,22 @@ async fn fetch_kinds(url: &str, cookie: &str) -> Result<Vec<WorldObjectKind>, re
 }
 
 /// The office map's baked layout placements, served decoded for Bevy's glTF loader.
+/// `{web_url}/api/{segments...}`, with each segment percent-encoded.
+fn api_url(web_url: &str, segments: &[&str]) -> Result<reqwest::Url, String> {
+    let mut url = reqwest::Url::parse(web_url).map_err(|err| format!("{web_url}: {err}"))?;
+    url.path_segments_mut()
+        .map_err(|()| format!("{web_url}: not a base URL"))?
+        .pop_if_empty()
+        .push("api")
+        .extend(segments);
+    Ok(url)
+}
+
 async fn fetch_layouts(
     web_url: &str,
     office_id: &str,
     cookie: &str,
-) -> Result<Vec<BakedLayoutPlacement>, reqwest::Error> {
+) -> Result<Vec<BakedLayoutPlacement>, String> {
     #[derive(Deserialize)]
     struct Office {
         map_name: Option<String>,
@@ -164,20 +175,36 @@ async fn fetch_layouts(
         #[serde(rename = "layoutName")]
         layout_name: Option<String>,
     }
-    let office: Office = get_json(&format!("{web_url}/api/offices/{office_id}"), cookie).await?;
+    let office_url = api_url(web_url, &["offices", office_id])?;
+    let office: Office = get_json(office_url.as_str(), cookie)
+        .await
+        .map_err(|err| err.to_string())?;
     // As the server's `DEFAULT_MAP`.
     let map_name = office.map_name.unwrap_or_else(|| "default".into());
-    let map: Map = get_json(&format!("{web_url}/api/maps/{map_name}"), cookie).await?;
+    let map_url = api_url(web_url, &["maps", &map_name])?;
+    let map: Map = get_json(map_url.as_str(), cookie)
+        .await
+        .map_err(|err| err.to_string())?;
     let mut layout_of = HashMap::new();
     for instance in &map.rooms {
-        if !layout_of.contains_key(&instance.room_name) {
-            let room: Room = get_json(
-                &format!("{web_url}/api/rooms/{}", instance.room_name),
-                cookie,
-            )
-            .await?;
-            layout_of.insert(instance.room_name.clone(), room.layout_name);
+        if layout_of.contains_key(&instance.room_name) {
+            continue;
         }
+        // As `mapLayoutPlacements`: a room that fails to load just has no layout.
+        let layout = match api_url(web_url, &["rooms", &instance.room_name]) {
+            Ok(url) => match get_json::<Room>(url.as_str(), cookie).await {
+                Ok(room) => room.layout_name,
+                Err(err) => {
+                    warn!("GET {url}: {err}");
+                    None
+                }
+            },
+            Err(err) => {
+                warn!("{err}");
+                None
+            }
+        };
+        layout_of.insert(instance.room_name.clone(), layout);
     }
     Ok(placements(&map.rooms, &layout_of))
 }
