@@ -6,6 +6,7 @@
 //! [`WorldSceneData`] and a [`SceneCamera`]. Changing either respawns the
 //! scene.
 
+mod avatars;
 mod layouts;
 mod lighting;
 mod objects;
@@ -21,6 +22,7 @@ use bevy::light::GlobalAmbientLight;
 use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 
+pub use avatars::{Motion, PlayerRender, Players, next_motion};
 pub use layouts::PendingLayouts;
 pub use lighting::{HemisphereFill, ObjectMaterial, snap_to_shadow_texel};
 pub use objects::{PendingKinds, apply_overrides};
@@ -93,6 +95,7 @@ impl Plugin for OfficeXrRenderPlugin {
             MaterialPlugin::<ObjectMaterial>::default(),
             MaterialPlugin::<SkyMaterial>::default(),
             lighting::plugin,
+            avatars::plugin,
         ))
         .insert_resource(GlobalAmbientLight::NONE)
         .init_resource::<objects::PendingKinds>()
@@ -105,6 +108,7 @@ impl Plugin for OfficeXrRenderPlugin {
                     spawn_camera,
                     lighting::spawn_lights,
                     objects::request_kinds,
+                    objects::spawn_primitives,
                     layouts::request_layouts,
                 )
                     .chain()

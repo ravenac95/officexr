@@ -128,7 +128,7 @@ test(`three.js vs Bevy render of a placed "${LAYOUT}" layout`, async ({ page }) 
   const bevyStdout = execFileSync(
     'cargo',
     [
-      'run', '-q', '-p', 'officexr-render', '--bin', 'render', '--',
+      'run', '-q', '-p', 'officexr-render', '--features', 'mugshot', '--bin', 'render', '--',
       scene, out('bevy.png'), `${SIZE.width}x${SIZE.height}`,
       camera.position.join(','), camera.target.join(','),
       String(camera.fov), String(camera.near), String(camera.far),
