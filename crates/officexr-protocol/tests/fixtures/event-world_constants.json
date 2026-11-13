@@ -1,0 +1,81 @@
+{
+  "v": 1,
+  "actorId": "alice",
+  "seq": 7,
+  "t": 1700000000000,
+  "kind": "world:constants",
+  "constants": {
+    "schemaVersion": 1,
+    "animation": {
+      "idleSpeed": 1,
+      "walkSpeed": 1,
+      "runSpeed": 1,
+      "turnSpeed": 16,
+      "playerSpeed": 3,
+      "runMultiplier": 2,
+      "movementBlockThreshold": 0.9
+    },
+    "jump": {
+      "jumpVelocity": 8,
+      "airControl": 0.2,
+      "maxJumps": 2,
+      "landingEaseMs": 120
+    },
+    "proximity": {
+      "sensorRadius": 3,
+      "outerRadius": 6,
+      "enterDebounceMs": 500,
+      "discRadius": 1.6,
+      "pulseSpeed": 0.8,
+      "intensity": 1,
+      "enteringColor": "#ffd24a",
+      "enteredColor": "#7be67b",
+      "exitingColor": "#ff8c42",
+      "meetingBorderInset": 0.05,
+      "meetingBorderOutset": 0.05,
+      "sparkleSpeed": 1.5,
+      "sparkleFloatHeight": 1.5,
+      "conversationDistance": 7,
+      "conversationHeight": 5,
+      "sparkleSize": 1
+    },
+    "lighting": {
+      "sunPosition": [
+        20,
+        40,
+        20
+      ],
+      "sunColor": "#ffffff",
+      "sunIntensity": 1.4,
+      "ambientIntensity": 0.15,
+      "castShadow": true,
+      "shadowRange": 40,
+      "shadowMapSize": 2048,
+      "shadowBias": -0.0005,
+      "shadowNormalBias": 0.02,
+      "auxLightType": "none",
+      "auxIntensity": 1,
+      "auxDistance": 0,
+      "auxAngle": 0.5235987755982988,
+      "auxPenumbra": 0.2,
+      "auxDecay": 2,
+      "showSunDisc": true,
+      "sunDiscRadius": 3,
+      "sunDiscIntensity": 2
+    },
+    "background": {
+      "topColor": "#02030a",
+      "bottomColor": "#1a1238"
+    },
+    "fixedCamera": {
+      "azimuthDeg": 202.5,
+      "pitchDeg": -35,
+      "height": 25,
+      "maxOnScreenFrac": 0.25,
+      "minOnScreenFrac": 0.08,
+      "lateralFrac": 0.4,
+      "fov": 50,
+      "movementYawOffsetDeg": 0
+    }
+  }
+}

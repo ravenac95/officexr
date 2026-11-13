@@ -13,4 +13,4 @@ Dev builds use `opt-level = 1` for workspace crates and `3` for dependencies. On
 
 Bevy crates should enable Bevy's `dynamic_linking` feature for local dev builds only (`cargo run --features bevy/dynamic_linking`); release and CI builds must link statically.
 
-The wire protocol is exported from the zod schemas to `schemas/protocol.schema.json` (`pnpm --filter @officexr/realtime-server gen:protocol-schema`); Rust protocol types are meant to be generated from that file rather than hand-written.
+The wire protocol is exported from the zod schemas to `schemas/protocol.schema.json` (`pnpm --filter @officexr/realtime-server gen:protocol-schema`); `crates/officexr-protocol` generates its types from that file at build time (`build.rs`) and ships a websocket client. Its round-trip fixtures in `tests/fixtures/` come from `pnpm --filter @officexr/realtime-server gen:rust-fixtures`; rerun it when the protocol changes. Its integration test spawns the real realtime server with `node --import tsx`, so run `pnpm install` first.

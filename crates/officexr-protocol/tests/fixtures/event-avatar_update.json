@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "actorId": "alice",
+  "seq": 7,
+  "t": 1700000000000,
+  "kind": "avatar:update",
+  "avatar": {
+    "model": "gnome",
+    "viewMode": "3d",
+    "colors": {
+      "hair": "#000"
+    },
+    "accessories": [
+      "hat"
+    ]
+  },
+  "name": "Alice"
+}
