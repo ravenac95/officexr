@@ -21,8 +21,9 @@ use bevy::light::GlobalAmbientLight;
 use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 
+pub use layouts::PendingLayouts;
 pub use lighting::{HemisphereFill, ObjectMaterial, snap_to_shadow_texel};
-pub use objects::apply_overrides;
+pub use objects::{PendingKinds, apply_overrides};
 pub use scene::*;
 pub use sky::{SkyMaterial, sun_sky_params};
 
@@ -74,6 +75,8 @@ pub struct SceneCamera {
     pub position: [f32; 3],
     pub look_at: [f32; 3],
     pub fov_deg: f32,
+    pub near: f32,
+    pub far: f32,
 }
 
 /// Marks everything the plugin spawned for the current scene.
@@ -134,22 +137,32 @@ fn spawn_camera(
     mut meshes: ResMut<Assets<Mesh>>,
     mut skies: ResMut<Assets<SkyMaterial>>,
 ) {
-    let sky = SkyMaterial::new(&scene.background, &scene.lighting);
-    commands
-        .spawn((
-            SceneEntity,
-            Camera3d::default(),
-            Projection::Perspective(PerspectiveProjection {
-                fov: camera.fov_deg.to_radians(),
-                near: 0.1,
-                far: CAMERA_FAR,
+    let mut entity = commands.spawn((
+        SceneEntity,
+        Camera3d::default(),
+        Projection::Perspective(PerspectiveProjection {
+            fov: camera.fov_deg.to_radians(),
+            near: camera.near,
+            far: camera.far,
+            ..default()
+        }),
+        Tonemapping::AcesFitted,
+        // An exposure multiplier of 1 / 0.6: three.js scales by that before its ACES fit.
+        Exposure { ev100: -1.0 },
+        Transform::from_translation(camera.position.into())
+            .looking_at(camera.look_at.into(), Vec3::Y),
+    ));
+    match scene.clear_color {
+        // The clear colour skips tonemapping, as three.js's `scene.background` does.
+        Some(color) => {
+            entity.insert(Camera {
+                clear_color: ClearColorConfig::Custom(color),
                 ..default()
-            }),
-            Tonemapping::AcesFitted,
-            // An exposure multiplier of 1 / 0.6: three.js scales by that before its ACES fit.
-            Exposure { ev100: -1.0 },
-            Transform::from_translation(camera.position.into())
-                .looking_at(camera.look_at.into(), Vec3::Y),
-        ))
-        .with_child(sky::sky_bundle(&mut meshes, &mut skies, sky));
+            });
+        }
+        None => {
+            let sky = SkyMaterial::new(&scene.background, &scene.lighting);
+            entity.with_child(sky::sky_bundle(&mut meshes, &mut skies, sky));
+        }
+    }
 }

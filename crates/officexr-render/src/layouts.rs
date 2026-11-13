@@ -11,7 +11,13 @@ use crate::scene::{BakedLayoutPlacement, WorldSceneData};
 use crate::{AssetBase, SceneEntity};
 
 #[derive(Resource, Default)]
-pub(crate) struct PendingLayouts(Vec<(BakedLayoutPlacement, Handle<Gltf>)>);
+pub struct PendingLayouts(Vec<(BakedLayoutPlacement, Handle<Gltf>)>);
+
+impl PendingLayouts {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
 
 pub(crate) fn request_layouts(
     scene: Res<WorldSceneData>,

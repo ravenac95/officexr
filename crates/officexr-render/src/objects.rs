@@ -15,7 +15,13 @@ use crate::{AssetBase, SceneEntity};
 
 /// Kinds whose glTF is still loading, with their instances.
 #[derive(Resource, Default)]
-pub(crate) struct PendingKinds(Vec<(WorldObjectKind, Handle<Gltf>, Vec<ObjectInstance>)>);
+pub struct PendingKinds(Vec<(WorldObjectKind, Handle<Gltf>, Vec<ObjectInstance>)>);
+
+impl PendingKinds {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
 
 pub(crate) fn request_kinds(
     scene: Res<WorldSceneData>,

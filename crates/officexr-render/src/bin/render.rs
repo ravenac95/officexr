@@ -1,7 +1,7 @@
 //! Renders a scene offscreen and writes a PNG, then prints the mean frame
 //! time.
 //!
-//! render <scene.json> <out.png> <width>x<height> <px,py,pz> <tx,ty,tz> <fov°> [asset base]
+//! render <scene.json> <out.png> <width>x<height> <px,py,pz> <tx,ty,tz> <fov°> <near> <far> [asset base]
 //!
 //! The camera is the one `renderFraming.ts`'s `frameCamera` returns; the
 //! asset base is as for the `viewer` example.
@@ -14,7 +14,9 @@ use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::ExitCondition;
-use officexr_render::{AssetBase, OfficeXrRenderPlugin, SceneCamera, WorldSceneData};
+use officexr_render::{
+    AssetBase, OfficeXrRenderPlugin, PendingKinds, PendingLayouts, SceneCamera, WorldSceneData,
+};
 
 // ponytail: fixed frame budgets, not a load signal; too short if models take longer to arrive.
 const MEASURE_FROM: u32 = 200;
@@ -38,9 +40,9 @@ fn parse_vec3(s: &str) -> [f32; 3] {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.len() < 6 {
+    if args.len() < 8 {
         eprintln!(
-            "usage: render <scene.json> <out.png> <w>x<h> <px,py,pz> <tx,ty,tz> <fov> [asset base]"
+            "usage: render <scene.json> <out.png> <w>x<h> <px,py,pz> <tx,ty,tz> <fov> <near> <far> [asset base]"
         );
         std::process::exit(2);
     }
@@ -52,7 +54,7 @@ fn main() {
         .split_once('x')
         .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)))
         .unwrap_or_else(|| panic!("{}: expected <w>x<h>", args[2]));
-    let base = AssetBase::parse(args.get(6).cloned().unwrap_or_else(|| {
+    let base = AssetBase::parse(args.get(8).cloned().unwrap_or_else(|| {
         concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/studio/public").into()
     }));
 
@@ -81,6 +83,8 @@ fn main() {
             position: parse_vec3(&args[3]),
             look_at: parse_vec3(&args[4]),
             fov_deg: args[5].parse().expect("fov"),
+            near: args[6].parse().expect("near"),
+            far: args[7].parse().expect("far"),
         })
         .insert_resource(Output {
             image,
@@ -102,12 +106,15 @@ fn target_image(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn capture_and_exit(
     mut commands: Commands,
     mut frame: Local<u32>,
     mut measured: Local<Duration>,
     time: Res<Time<Real>>,
     output: Res<Output>,
+    kinds: Res<PendingKinds>,
+    layouts: Res<PendingLayouts>,
     mut exit: MessageWriter<AppExit>,
 ) {
     *frame += 1;
@@ -116,6 +123,9 @@ fn capture_and_exit(
     }
     if *frame == CAPTURE_AT {
         let mean = *measured / (CAPTURE_AT - MEASURE_FROM);
+        if !kinds.is_empty() || !layouts.is_empty() {
+            warn!("capturing with models still loading");
+        }
         println!("frame_ms={:.2}", mean.as_secs_f64() * 1e3);
         commands
             .spawn(Screenshot::image(output.image.clone()))

@@ -16,6 +16,9 @@ pub struct WorldSceneData {
     pub background: BackgroundConfig,
     #[serde(default)]
     pub baked_layouts: Vec<BakedLayoutPlacement>,
+    /// A flat background instead of the sky, as the studio's editor canvases draw.
+    #[serde(default, deserialize_with = "opt_hex")]
+    pub clear_color: Option<Color>,
 }
 
 /// One room placement of a baked layout GLB.

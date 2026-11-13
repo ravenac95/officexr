@@ -15,6 +15,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NodeIO } from '@gltf-transform/core';
+import { EXTMeshoptCompression, KHRMeshQuantization } from '@gltf-transform/extensions';
 import { dequantize } from '@gltf-transform/functions';
 import { DEFAULT_WORLD_CONSTANTS } from '@officexr/sdk';
 import { registerCompressionCodecs } from '../src/app/glb-compression.ts';
@@ -32,13 +33,19 @@ import { validateWorldObjectKindCatalog } from '../src/scenes/world-object-kinds
 const WORLD_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STUDIO_PUBLIC = path.resolve(WORLD_ROOT, '../studio/public');
 const EDITOR_BACKGROUND = '#1b1d22';
+const COMPRESSION_EXTENSIONS = new Set([EXTMeshoptCompression.EXTENSION_NAME, KHRMeshQuantization.EXTENSION_NAME]);
 
 // ponytail: decoded offline; serving `/api/baked-layouts` to Bevy directly needs a Rust meshopt decoder.
 async function decodeBakedLayout(io: NodeIO, name: string): Promise<string> {
-  const doc = await io.read(path.resolve(WORLD_ROOT, 'baked-layouts', `${name}.glb`));
+  const baked = path.resolve(WORLD_ROOT, 'baked-layouts', `${name}.glb`);
+  const doc = await io.read(baked).catch((err: unknown) => {
+    throw new Error(`cannot read ${baked}; run \`pnpm --filter @officexr/world bake:layout ${name}\``, { cause: err });
+  });
   await doc.transform(dequantize());
   for (const ext of doc.getRoot().listExtensionsUsed()) {
-    ext.dispose();
+    if (COMPRESSION_EXTENSIONS.has(ext.extensionName)) {
+      ext.dispose();
+    }
   }
   const gltfPath = `/baked-layouts/${name}.glb`;
   await fs.mkdir(path.resolve(STUDIO_PUBLIC, 'baked-layouts'), { recursive: true });
@@ -85,9 +92,8 @@ async function main(mapName: string, outFile: string, editorLighting: boolean): 
     kinds: catalog.getCatalog().kinds.filter((k) => usedKindIds.has(k.id)),
     objects,
     lighting: editorLighting ? DEFAULT_EDITOR_LIGHTING : DEFAULT_WORLD_CONSTANTS.lighting,
-    background: editorLighting
-      ? { topColor: EDITOR_BACKGROUND, bottomColor: EDITOR_BACKGROUND }
-      : DEFAULT_WORLD_CONSTANTS.background,
+    background: DEFAULT_WORLD_CONSTANTS.background,
+    clearColor: editorLighting ? EDITOR_BACKGROUND : undefined,
     bakedLayouts: bakedLayouts.map((p) => ({
       gltfPath: gltfPaths.get(p.layoutName),
       position: p.position,

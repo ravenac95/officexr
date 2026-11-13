@@ -132,4 +132,19 @@ mod tests {
         let b = mesh_transform(&inst([0.0; 3], 270.0), &kind([0.0; 3], [4.0, 1.0, 1.0]));
         assert_eq!(a.translation, b.translation);
     }
+
+    #[test]
+    fn baked_layout_places_in_voxels_and_quarter_turns() {
+        let t = baked_layout_transform(&BakedLayoutPlacement {
+            gltf_path: "/l.glb".into(),
+            position: [2.0, 0.0, 4.0],
+            rotation_y: 1,
+        });
+        assert_eq!(t.translation, Vec3::new(1.0, 0.0, 2.0));
+        assert!(
+            t.rotation
+                .angle_between(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2))
+                < 1e-3
+        );
+    }
 }
