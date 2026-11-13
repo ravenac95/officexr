@@ -3,11 +3,12 @@ name: Pages deploy
 # Builds the SPA (web at /, studio at /studio/) and deploys it to Cloudflare
 # Pages: pushes to main go to production, every other branch to a preview.
 # Skips the deploy when the Cloudflare secrets or project name are missing,
-# as on fork PRs.
+# as on fork PRs. Run it by hand to deploy a branch without pushing.
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: pages-${{ github.ref }}
@@ -71,6 +72,10 @@ jobs:
           BRANCH: ${{ github.head_ref || github.ref_name }}
           WRANGLER_OUTPUT_FILE_DIRECTORY: ${{ runner.temp }}/wrangler
         run: |
+          # A missing project would make `pages deploy` prompt; create it as a Direct Upload project
+          # with main as production. An existing one makes this fail harmlessly, so the deploy's own
+          # error is the one that reports a bad token.
+          npx --yes wrangler@4.20.0 pages project create "$PROJECT" --production-branch=main || true
           npx --yes wrangler@4.20.0 pages deploy packages/web/dist --project-name="$PROJECT" --branch="$BRANCH"
           url=$(jq -rs 'map(select(.type == "pages-deploy-detailed")) | last | .url' "$WRANGLER_OUTPUT_FILE_DIRECTORY"/*.json)
           if [ -z "$url" ] || [ "$url" = "null" ]; then
