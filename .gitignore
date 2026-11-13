@@ -66,6 +66,7 @@ playwright-report/
 # Baked layout GLBs — generated artifacts, do NOT commit.
 # Layout JSON sources (packages/world/layouts/) are tracked.
 packages/world/baked-layouts/
+packages/studio/public/baked-layouts/
 
 # Server-generated model derivatives (see studio-server uploadedModelsDir).
 packages/world/uploaded-models/

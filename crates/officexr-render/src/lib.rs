@@ -1,11 +1,12 @@
-//! Bevy renderer for OfficeXR world objects, lighting, shadows and sky,
-//! matching `packages/world/src/renderer/`.
+//! Bevy renderer for OfficeXR world objects, baked layouts, lighting,
+//! shadows and sky, matching `packages/world/src/renderer/`.
 //!
 //! Add [`AssetBase`] before `DefaultPlugins` (asset sources must exist
 //! before `AssetPlugin`), then [`OfficeXrRenderPlugin`], and insert a
 //! [`WorldSceneData`] and a [`SceneCamera`]. Changing either respawns the
 //! scene.
 
+mod layouts;
 mod lighting;
 mod objects;
 pub mod placement;
@@ -20,8 +21,9 @@ use bevy::light::GlobalAmbientLight;
 use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 
+pub use layouts::PendingLayouts;
 pub use lighting::{HemisphereFill, ObjectMaterial, snap_to_shadow_texel};
-pub use objects::apply_overrides;
+pub use objects::{PendingKinds, apply_overrides};
 pub use scene::*;
 pub use sky::{SkyMaterial, sun_sky_params};
 
@@ -37,6 +39,15 @@ pub enum AssetBase {
 }
 
 impl AssetBase {
+    /// An `http(s)://` origin, else a directory.
+    pub fn parse(base: String) -> Self {
+        if base.starts_with("http://") || base.starts_with("https://") {
+            AssetBase::Http(base)
+        } else {
+            AssetBase::Path(base)
+        }
+    }
+
     pub fn asset_path(&self, gltf_path: &str) -> String {
         let rel = gltf_path.trim_start_matches('/');
         match self {
@@ -64,6 +75,8 @@ pub struct SceneCamera {
     pub position: [f32; 3],
     pub look_at: [f32; 3],
     pub fov_deg: f32,
+    pub near: f32,
+    pub far: f32,
 }
 
 /// Marks everything the plugin spawned for the current scene.
@@ -83,6 +96,7 @@ impl Plugin for OfficeXrRenderPlugin {
         ))
         .insert_resource(GlobalAmbientLight::NONE)
         .init_resource::<objects::PendingKinds>()
+        .init_resource::<layouts::PendingLayouts>()
         .add_systems(
             Update,
             (
@@ -91,10 +105,12 @@ impl Plugin for OfficeXrRenderPlugin {
                     spawn_camera,
                     lighting::spawn_lights,
                     objects::request_kinds,
+                    layouts::request_layouts,
                 )
                     .chain()
                     .run_if(scene_changed),
-                objects::spawn_loaded_kinds.run_if(resource_exists::<WorldSceneData>),
+                (objects::spawn_loaded_kinds, layouts::spawn_loaded_layouts)
+                    .run_if(resource_exists::<WorldSceneData>),
             )
                 .chain(),
         );
@@ -121,22 +137,32 @@ fn spawn_camera(
     mut meshes: ResMut<Assets<Mesh>>,
     mut skies: ResMut<Assets<SkyMaterial>>,
 ) {
-    let sky = SkyMaterial::new(&scene.background, &scene.lighting);
-    commands
-        .spawn((
-            SceneEntity,
-            Camera3d::default(),
-            Projection::Perspective(PerspectiveProjection {
-                fov: camera.fov_deg.to_radians(),
-                near: 0.1,
-                far: CAMERA_FAR,
+    let mut entity = commands.spawn((
+        SceneEntity,
+        Camera3d::default(),
+        Projection::Perspective(PerspectiveProjection {
+            fov: camera.fov_deg.to_radians(),
+            near: camera.near,
+            far: camera.far,
+            ..default()
+        }),
+        Tonemapping::AcesFitted,
+        // An exposure multiplier of 1 / 0.6: three.js scales by that before its ACES fit.
+        Exposure { ev100: -1.0 },
+        Transform::from_translation(camera.position.into())
+            .looking_at(camera.look_at.into(), Vec3::Y),
+    ));
+    match scene.clear_color {
+        // The clear colour skips tonemapping, as three.js's `scene.background` does.
+        Some(color) => {
+            entity.insert(Camera {
+                clear_color: ClearColorConfig::Custom(color),
                 ..default()
-            }),
-            Tonemapping::AcesFitted,
-            // An exposure multiplier of 1 / 0.6: three.js scales by that before its ACES fit.
-            Exposure { ev100: -1.0 },
-            Transform::from_translation(camera.position.into())
-                .looking_at(camera.look_at.into(), Vec3::Y),
-        ))
-        .with_child(sky::sky_bundle(&mut meshes, &mut skies, sky));
+            });
+        }
+        None => {
+            let sky = SkyMaterial::new(&scene.background, &scene.lighting);
+            entity.with_child(sky::sky_bundle(&mut meshes, &mut skies, sky));
+        }
+    }
 }

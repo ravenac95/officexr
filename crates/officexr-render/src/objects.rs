@@ -15,7 +15,13 @@ use crate::{AssetBase, SceneEntity};
 
 /// Kinds whose glTF is still loading, with their instances.
 #[derive(Resource, Default)]
-pub(crate) struct PendingKinds(Vec<(WorldObjectKind, Handle<Gltf>, Vec<ObjectInstance>)>);
+pub struct PendingKinds(Vec<(WorldObjectKind, Handle<Gltf>, Vec<ObjectInstance>)>);
+
+impl PendingKinds {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
 
 pub(crate) fn request_kinds(
     scene: Res<WorldSceneData>,
@@ -64,19 +70,13 @@ pub(crate) fn spawn_loaded_kinds(
         }
         let Some((node_transform, primitive)) = gltfs
             .get(handle)
-            .and_then(|g| first_mesh(g, &nodes, &gltf_meshes))
+            .and_then(|g| mesh_primitives(g, &nodes, &gltf_meshes).into_iter().next())
         else {
             warn!("no mesh in {}", kind.gltf_path);
             return false;
         };
-        let base = primitive
-            .material
-            .as_ref()
-            .and_then(|m| gltf_materials.get(m))
-            .map(standard_material_from_gltf_material)
-            .unwrap_or_default();
         let material = materials.add(ObjectMaterial {
-            base: apply_overrides(base, kind),
+            base: apply_overrides(standard_material(&primitive, &gltf_materials), kind),
             extension: HemisphereFill::new(&scene.lighting),
         });
         for inst in instances {
@@ -91,14 +91,14 @@ pub(crate) fn spawn_loaded_kinds(
     });
 }
 
-/// The first mesh primitive in scene-traversal order, with its node's
+/// Every mesh primitive in scene-traversal order, with its node's
 /// accumulated transform (quantized models keep their dequantization on
 /// the node).
-fn first_mesh(
+pub(crate) fn mesh_primitives(
     gltf: &Gltf,
     nodes: &Assets<GltfNode>,
     meshes: &Assets<GltfMesh>,
-) -> Option<(Transform, bevy::gltf::GltfPrimitive)> {
+) -> Vec<(Transform, bevy::gltf::GltfPrimitive)> {
     let child_ids: std::collections::HashSet<_> = gltf
         .nodes
         .iter()
@@ -113,20 +113,30 @@ fn first_mesh(
         .filter(|h| !child_ids.contains(&h.id()))
         .map(|h| (Transform::IDENTITY, h))
         .collect();
+    let mut out = Vec::new();
     while let Some((parent, handle)) = stack.pop() {
-        let node = nodes.get(handle)?;
+        let Some(node) = nodes.get(handle) else {
+            continue;
+        };
         let world = parent.mul_transform(node.transform);
-        if let Some(primitive) = node
-            .mesh
-            .as_ref()
-            .and_then(|m| meshes.get(m))
-            .and_then(|m| m.primitives.first())
-        {
-            return Some((world, primitive.clone()));
+        if let Some(mesh) = node.mesh.as_ref().and_then(|m| meshes.get(m)) {
+            out.extend(mesh.primitives.iter().map(|p| (world, p.clone())));
         }
         stack.extend(node.children.iter().rev().map(|c| (world, c)));
     }
-    None
+    out
+}
+
+pub(crate) fn standard_material(
+    primitive: &bevy::gltf::GltfPrimitive,
+    gltf_materials: &Assets<GltfMaterial>,
+) -> StandardMaterial {
+    primitive
+        .material
+        .as_ref()
+        .and_then(|m| gltf_materials.get(m))
+        .map(standard_material_from_gltf_material)
+        .unwrap_or_default()
 }
 
 /// `buildMaterialForKind`: the kind's non-null overrides on top of the
