@@ -101,3 +101,21 @@ jobs:
 
       - name: Build client (Linux)
         run: cargo build -p officexr-client
+
+  ios:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: rustup toolchain install && rustup target add aarch64-apple-ios-sim
+
+      - uses: Swatinem/rust-cache@v2
+
+      # ponytail: unsigned simulator build only; device signing and TestFlight are manual.
+      - name: Build for the iOS simulator
+        working-directory: crates/officexr-client/ios
+        run: >
+          xcodebuild -project OfficeXR.xcodeproj -target OfficeXR -configuration Debug
+          -sdk iphonesimulator -arch arm64 CODE_SIGNING_ALLOWED=NO build
