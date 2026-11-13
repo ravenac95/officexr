@@ -1,0 +1,26 @@
+[package]
+name = "officexr-render"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+bevy = { version = "=0.20.1", default-features = false, features = [
+  "std",
+  "async_executor",
+  "multi_threaded",
+  "bevy_log",
+  "bevy_asset",
+  "bevy_render",
+  "bevy_core_pipeline",
+  "bevy_pbr",
+  "bevy_gltf",
+  "png",
+  "http",
+  "https",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+bevy = { version = "=0.20.1", default-features = false, features = ["bevy_winit", "x11", "wayland"] }
