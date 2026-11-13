@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::sync::{Mutex, mpsc};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::*;
@@ -7,18 +8,20 @@ use officexr_protocol::{
     Incoming, NetEvent, NetEventVariant0Kind, NetEventVariant3Kind, NetEventVariant10Kind,
     NetEventVariant11Kind, NetEventVariant14Kind, WsClient,
 };
-use officexr_render::{BakedLayoutPlacement, WorldObjectKind};
+use officexr_render::BakedLayoutPlacement;
 use officexr_sim::Vec3 as SimVec3;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
+use tokio::sync::mpsc as tokio_mpsc;
 
+use crate::broadcaster::Pose;
 use crate::config::Config;
 use crate::peers::{PeerUpdate, Position};
-use crate::world::WorldUpdate;
+use crate::world::{Layout, WorldUpdate};
 
 enum Inbound {
-    Kinds(Vec<WorldObjectKind>),
-    Layouts(Vec<BakedLayoutPlacement>),
+    Kinds(Vec<Value>),
+    Map(Vec<Layout>, Vec<SimVec3>),
     Net(Incoming),
     /// The realtime client gave up; its message says why.
     Closed(String),
@@ -30,9 +33,38 @@ pub struct InboundRx {
     self_id: String,
 }
 
+/// (Re)joined the room.
+#[derive(Message)]
+pub struct Joined;
+
+/// Sends the local player's events, numbered from the same `seq` as the client's own.
+#[derive(Resource)]
+pub struct Outbound {
+    tx: tokio_mpsc::UnboundedSender<NetEvent>,
+    seq: Arc<AtomicU64>,
+    pub self_id: String,
+}
+
+impl Outbound {
+    pub fn send_position(&self, pose: Pose) {
+        let v = |v: SimVec3| json!({ "x": v.x, "y": v.y, "z": v.z });
+        let event = serde_json::from_value(json!({
+            "kind": "presence:position", "v": 1, "actorId": self.self_id,
+            "seq": take_seq(&self.seq), "t": now_ms(),
+            "pos": v(pose.pos), "vel": v(pose.vel), "yaw": pose.yaw, "isAirborne": pose.is_airborne,
+        }))
+        .expect("presence:position matches the schema");
+        let _ = self.tx.send(event);
+    }
+}
+
+fn take_seq(seq: &AtomicU64) -> f64 {
+    (seq.fetch_add(1, Ordering::Relaxed) + 1) as f64
+}
+
 /// Resolves the signed-in login, then runs the realtime client and the kinds fetch on their
 /// own thread, feeding [`InboundRx`].
-pub fn spawn(config: Config) -> Result<InboundRx, String> {
+pub fn spawn(config: Config) -> Result<(InboundRx, Outbound), String> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -45,12 +77,21 @@ pub fn spawn(config: Config) -> Result<InboundRx, String> {
     // the browser's, so an office that allows several sessions per login keeps both joined.
     let self_id = format!("{login}#native");
     let (tx, rx) = mpsc::channel();
-    let user_id = self_id.clone();
-    std::thread::spawn(move || runtime.block_on(run(config, user_id, tx)));
-    Ok(InboundRx {
-        rx: Mutex::new(rx),
-        self_id,
-    })
+    let (out_tx, out_rx) = tokio_mpsc::unbounded_channel();
+    let seq = Arc::new(AtomicU64::new(0));
+    let (user_id, run_seq) = (self_id.clone(), seq.clone());
+    std::thread::spawn(move || runtime.block_on(run(config, user_id, run_seq, tx, out_rx)));
+    Ok((
+        InboundRx {
+            rx: Mutex::new(rx),
+            self_id: self_id.clone(),
+        },
+        Outbound {
+            tx: out_tx,
+            seq,
+            self_id,
+        },
+    ))
 }
 
 async fn fetch_login(url: &str, cookie: &str) -> Result<String, reqwest::Error> {
@@ -76,7 +117,13 @@ async fn get_json<T: serde::de::DeserializeOwned>(
         .await
 }
 
-async fn run(config: Config, user_id: String, tx: mpsc::Sender<Inbound>) {
+async fn run(
+    config: Config,
+    user_id: String,
+    seq: Arc<AtomicU64>,
+    tx: mpsc::Sender<Inbound>,
+    mut outbound: tokio_mpsc::UnboundedReceiver<NetEvent>,
+) {
     let kinds_tx = tx.clone();
     let kinds_url = format!("{}/api/world-object-kinds", config.web_url);
     let cookie = config.session_cookie.clone();
@@ -96,8 +143,8 @@ async fn run(config: Config, user_id: String, tx: mpsc::Sender<Inbound>) {
     );
     tokio::spawn(async move {
         match fetch_layouts(&web_url, &office_id, &cookie).await {
-            Ok(layouts) => {
-                let _ = layouts_tx.send(Inbound::Layouts(layouts));
+            Ok((layouts, spawn_points)) => {
+                let _ = layouts_tx.send(Inbound::Map(layouts, spawn_points));
             }
             Err(err) => error!("baked layouts: {err}"),
         }
@@ -111,10 +158,16 @@ async fn run(config: Config, user_id: String, tx: mpsc::Sender<Inbound>) {
         office_id: Some(config.office_id),
         login: None,
     });
-    let mut seq = 0.0;
     // The client reconnects by itself; an error or end here is final.
     loop {
-        let incoming = match client.recv().await {
+        let received = tokio::select! {
+            received = client.recv() => received,
+            Some(event) = outbound.recv() => {
+                client.broadcast(event);
+                continue;
+            }
+        };
+        let incoming = match received {
             Some(Ok(incoming)) => incoming,
             Some(Err(err)) => {
                 let _ = tx.send(Inbound::Closed(err.to_string()));
@@ -127,8 +180,7 @@ async fn run(config: Config, user_id: String, tx: mpsc::Sender<Inbound>) {
         };
         // The server's snapshot has no `world:objects`; a peer's snapshot offer does.
         if matches!(incoming, Incoming::Joined { .. }) {
-            seq += 1.0;
-            client.broadcast(snapshot_request(&user_id, seq));
+            client.broadcast(snapshot_request(&user_id, take_seq(&seq)));
         }
         if tx.send(Inbound::Net(incoming)).is_err() {
             return;
@@ -136,10 +188,10 @@ async fn run(config: Config, user_id: String, tx: mpsc::Sender<Inbound>) {
     }
 }
 
-async fn fetch_kinds(url: &str, cookie: &str) -> Result<Vec<WorldObjectKind>, reqwest::Error> {
+async fn fetch_kinds(url: &str, cookie: &str) -> Result<Vec<Value>, reqwest::Error> {
     #[derive(Deserialize)]
     struct Catalog {
-        kinds: Vec<WorldObjectKind>,
+        kinds: Vec<Value>,
     }
     let catalog: Catalog = get_json(url, cookie).await?;
     Ok(catalog.kinds)
@@ -161,14 +213,21 @@ async fn fetch_layouts(
     web_url: &str,
     office_id: &str,
     cookie: &str,
-) -> Result<Vec<BakedLayoutPlacement>, String> {
+) -> Result<(Vec<Layout>, Vec<SimVec3>), String> {
     #[derive(Deserialize)]
     struct Office {
         map_name: Option<String>,
     }
     #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
     struct Map {
         rooms: Vec<RoomInstance>,
+        #[serde(default)]
+        spawn_points: Vec<SpawnPoint>,
+    }
+    #[derive(Deserialize)]
+    struct SpawnPoint {
+        position: [f64; 3],
     }
     #[derive(Deserialize)]
     struct Room {
@@ -206,12 +265,22 @@ async fn fetch_layouts(
         };
         layout_of.insert(instance.room_name.clone(), layout);
     }
-    Ok(placements(&map.rooms, &layout_of))
+    let spawn_points = map
+        .spawn_points
+        .iter()
+        .map(|s| SimVec3 {
+            x: s.position[0],
+            y: s.position[1],
+            z: s.position[2],
+        })
+        .collect();
+    Ok((placements(&map.rooms, &layout_of), spawn_points))
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RoomInstance {
+    id: String,
     room_name: String,
     position: [f32; 3],
     #[serde(default)]
@@ -219,18 +288,18 @@ struct RoomInstance {
 }
 
 /// `mapLayoutPlacements` for a v2 map, which is what `/api/maps` serves.
-fn placements(
-    rooms: &[RoomInstance],
-    layout_of: &HashMap<String, Option<String>>,
-) -> Vec<BakedLayoutPlacement> {
+fn placements(rooms: &[RoomInstance], layout_of: &HashMap<String, Option<String>>) -> Vec<Layout> {
     rooms
         .iter()
         .filter_map(|instance| {
             let layout = layout_of.get(&instance.room_name)?.as_ref()?;
-            Some(BakedLayoutPlacement {
-                gltf_path: format!("/api/baked-layouts/{layout}.decoded.glb"),
-                position: instance.position,
-                rotation_y: instance.rotation_y,
+            Some(Layout {
+                room_instance_id: instance.id.clone(),
+                placement: BakedLayoutPlacement {
+                    gltf_path: format!("/api/baked-layouts/{layout}.decoded.glb"),
+                    position: instance.position,
+                    rotation_y: instance.rotation_y,
+                },
             })
         })
         .collect()
@@ -254,6 +323,7 @@ pub fn receive_inbound(
     inbound: Res<InboundRx>,
     mut world: MessageWriter<WorldUpdate>,
     mut peers: MessageWriter<PeerUpdate>,
+    mut joined: MessageWriter<Joined>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let rx = inbound.rx.lock().unwrap();
@@ -262,11 +332,15 @@ pub fn receive_inbound(
             Inbound::Kinds(kinds) => {
                 world.write(WorldUpdate::Kinds(kinds));
             }
-            Inbound::Layouts(layouts) => {
-                world.write(WorldUpdate::Layouts(layouts));
+            Inbound::Map(layouts, spawn_points) => {
+                world.write(WorldUpdate::Map {
+                    layouts,
+                    spawn_points,
+                });
             }
             Inbound::Net(Incoming::Joined { present }) => {
                 peers.write(PeerUpdate::Present(present));
+                joined.write(Joined);
             }
             Inbound::Net(Incoming::Presence { left, .. }) => {
                 peers.write(PeerUpdate::Left(left));
@@ -404,9 +478,9 @@ mod tests {
     #[test]
     fn places_only_rooms_that_link_a_layout() {
         let rooms: Vec<RoomInstance> = serde_json::from_value(json!([
-            { "roomName": "hall", "position": [1, 0, 2], "rotationY": 1 },
-            { "roomName": "plain", "position": [0, 0, 0] },
-            { "roomName": "missing", "position": [0, 0, 0] },
+            { "id": "r1", "roomName": "hall", "position": [1, 0, 2], "rotationY": 1 },
+            { "id": "r2", "roomName": "plain", "position": [0, 0, 0] },
+            { "id": "r3", "roomName": "missing", "position": [0, 0, 0] },
         ]))
         .unwrap();
         let layout_of = HashMap::from([
@@ -415,9 +489,11 @@ mod tests {
         ]);
         let placed = placements(&rooms, &layout_of);
         assert_eq!(placed.len(), 1);
-        assert_eq!(placed[0].gltf_path, "/api/baked-layouts/lobby.decoded.glb");
+        assert_eq!(placed[0].room_instance_id, "r1");
+        let placement = &placed[0].placement;
+        assert_eq!(placement.gltf_path, "/api/baked-layouts/lobby.decoded.glb");
         assert_eq!(
-            (placed[0].position, placed[0].rotation_y),
+            (placement.position, placement.rotation_y),
             ([1.0, 0.0, 2.0], 1)
         );
     }
