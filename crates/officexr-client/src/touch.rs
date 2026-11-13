@@ -28,7 +28,7 @@ pub enum StickPart {
 
 /// As `joystick.ts`: an offset from the stick centre (screen px, y down) scaled by `radius`,
 /// clamped to the unit circle and zero inside `dead_zone`, with y flipped to forward +.
-pub fn joystick_vector(offset: Vec2, radius: f32, dead_zone: f32) -> Vec2 {
+fn joystick_vector(offset: Vec2, radius: f32, dead_zone: f32) -> Vec2 {
     let v = offset / radius;
     if v.length() < dead_zone {
         return Vec2::ZERO;
@@ -38,11 +38,11 @@ pub fn joystick_vector(offset: Vec2, radius: f32, dead_zone: f32) -> Vec2 {
 }
 
 /// The stick's centre in window px (y down), for a window of `size`.
-pub fn stick_centre(size: Vec2) -> Vec2 {
+fn stick_centre(size: Vec2) -> Vec2 {
     Vec2::new(MARGIN + BASE_SIZE / 2.0, size.y - MARGIN - BASE_SIZE / 2.0)
 }
 
-pub fn on_stick(at: Vec2, window: Vec2) -> bool {
+fn on_stick(at: Vec2, window: Vec2) -> bool {
     at.distance(stick_centre(window)) <= BASE_SIZE / 2.0
 }
 

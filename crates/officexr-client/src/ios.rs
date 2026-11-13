@@ -107,7 +107,7 @@ fn setup(mut commands: Commands, form: Res<Form>) {
 fn save(_: On<Activate>, fields: Query<(&Field, &EditableText)>, mut exit: MessageWriter<AppExit>) {
     let mut values: [String; 4] = Default::default();
     for (field, text) in &fields {
-        values[field.0] = text.value().to_string().trim().to_string();
+        values[field.0] = text.value().to_string().trim().into();
     }
     let [web_url, realtime_url, office_id, session_cookie] = values;
     let config = Config {
