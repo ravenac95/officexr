@@ -257,7 +257,8 @@ export function Scene(props: SceneProps) {
   // Updated each frame by `ProximityGlow` from the proximity output: the local player's
   // current MeetingArea centroid (at the local player's feet height), or `null`
   // when not in a conversation. `CameraRig` reads it to drive the
-  // damped conversation-view blend.
+  // damped conversation-view blend. CameraRig mounts before SceneFrame (movement reads its yaw),
+  // so it sees the previous frame's focus; one frame is invisible against the 0.35 s blend.
   const conversationFocusRef = useRef<
     { x: number; y: number; z: number } | null
   >(null);
@@ -438,7 +439,6 @@ export function Scene(props: SceneProps) {
           isAirborneRef={isAirborneRef}
           xrPresenting={xrPresenting}
         />
-        {/* After SceneFrame, which writes the proximity output this reads. */}
         <ProximityGlow
           proximityOutputRef={proximityOutputRef}
           store={store}
