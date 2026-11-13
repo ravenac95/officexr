@@ -7,3 +7,5 @@ packages/studio/public/models/prototype
 packages/studio/public/models/restaurant
 test-results
 playwright-report
+target
+packages/sim-wasm/pkg

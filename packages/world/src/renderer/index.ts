@@ -2,7 +2,7 @@
 // future shells) goes here; renderer-internal helpers are only exported
 // when a sibling sub-package needs them.
 
-export { Scene } from './Scene.tsx';
+export { Scene, type SimImplementation } from './Scene.tsx';
 export {
   Adventurer,
   STATE_CLIPS,

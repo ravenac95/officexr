@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { PersistentLocalState } from '@officexr/core-refactor';
-import { PlayView } from '@officexr/world/react';
+import { PlayView, simFromSearch } from '@officexr/world/react';
 import { createWorldXRStore, useXRSessionModeSupported, type CameraMode, type XRStore } from '@officexr/world/renderer';
 import type { TopDownPlayViewProps } from '@officexr/world/top-down';
 import { Switch } from '../hud/ui/Switch';
@@ -77,6 +77,7 @@ export default function PlayView3d({
       motionLook={motionLook}
       invertLook={invertLook}
       hud="player"
+      sim={simFromSearch(window.location.search)}
       xrStore={xrStore}
     >
       <SettingsModal

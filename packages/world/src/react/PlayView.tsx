@@ -6,7 +6,7 @@ import type { BotPool } from '../bot/BotPool.ts';
 import type { FrameStatsSample } from '../renderer/FrameStatsProbe.tsx';
 import type { CameraMode } from '../renderer/config.ts';
 import type { MotionLookState } from '../renderer/motionLook.ts';
-import { Scene } from '../renderer/Scene.tsx';
+import { Scene, type SimImplementation } from '../renderer/Scene.tsx';
 import {
   ErrorBanner,
   FocusIndicator,
@@ -65,9 +65,15 @@ export interface PlayViewProps {
   xrStore?: XRStore;
   /** Shows a ping bell when hovering another player's avatar in the fixed camera. */
   onPingPlayer?: (id: PlayerId) => void;
+  /** The local player's simulation; default `'ts'`. */
+  sim?: SimImplementation;
   /** Overlays rendered above the scene and HUD. */
   children?: React.ReactNode;
 }
+
+/** `?sim=rust` picks the wasm simulation. */
+export const simFromSearch = (search: string): SimImplementation =>
+  new URLSearchParams(search).get('sim') === 'rust' ? 'rust' : 'ts';
 
 /**
  * Plays a map: loads it into the store, renders `<Scene>` once it has
@@ -141,6 +147,7 @@ export function PlayView(props: PlayViewProps) {
           xrStore={props.xrStore}
           selfReady={ready}
           onPingPlayer={props.onPingPlayer}
+          sim={props.sim}
           onModelsReady={() => dispatch({ type: 'modelsReady' })}
           onCollidersReady={(roomInstanceId) => dispatch({ type: 'collidersReady', roomInstanceId })}
           onCollidersError={(err) =>
