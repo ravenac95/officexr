@@ -167,6 +167,31 @@ mod tests {
     }
 
     #[test]
+    fn the_rate_cap_opens_at_one_thirtieth_of_a_second() {
+        let mut b = PositionBroadcaster::default();
+        b.announce(at(0.0));
+        b.flush(at(0.1), 1000.0).unwrap();
+        assert_eq!(b.flush(at(0.2), 1033.0), None);
+        assert!(b.flush(at(0.2), 1033.4).is_some());
+    }
+
+    #[test]
+    fn a_yaw_change_at_the_threshold_alone_does_not_send() {
+        let mut b = PositionBroadcaster::default();
+        b.announce(at(0.0));
+        let turned = Pose {
+            yaw: 0.049,
+            ..at(0.0)
+        };
+        assert_eq!(b.flush(turned, 100.0), None);
+        let turned = Pose {
+            yaw: 0.05,
+            ..at(0.0)
+        };
+        assert_eq!(b.flush(turned, 100.0), None);
+    }
+
+    #[test]
     fn an_airborne_flip_sends_without_moving() {
         let mut b = PositionBroadcaster::default();
         b.announce(at(0.0));

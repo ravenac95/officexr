@@ -31,10 +31,17 @@ struct Trimesh {
 /// payload or an unknown version.
 pub fn parse_embedded_colliders(extras: &Value) -> Option<Vec<ColliderDescriptor>> {
     let colliders = extras.get("officexr")?.get("colliders")?;
-    let version = colliders.get("version")?.as_u64()?;
-    if version != 1 && version != BAKED_COLLIDERS_VERSION {
+    let version = colliders.get("version")?.as_f64()?;
+    let version = if version == 1.0 {
+        1
+    } else if version == BAKED_COLLIDERS_VERSION as f64 {
+        BAKED_COLLIDERS_VERSION
+    } else {
+        warn!(
+            "baked colliders version {version} is unknown (expected 1 or {BAKED_COLLIDERS_VERSION})"
+        );
         return None;
-    }
+    };
     let cuboids: Vec<Cuboid> = serde_json::from_value(colliders.get("cuboids")?.clone()).ok()?;
     let mut out: Vec<_> = cuboids
         .into_iter()
@@ -177,6 +184,9 @@ mod tests {
             None
         );
         assert_eq!(parse_embedded_colliders(&json!({})), None);
+        let mut float = extras(2);
+        float["officexr"]["colliders"]["version"] = json!(2.0);
+        assert_eq!(parse_embedded_colliders(&float).map(|c| c.len()), Some(2));
         let mut bad = extras(2);
         bad["officexr"]["colliders"]["trimeshes"][0]["indices"] = json!([0, 1, 3]);
         assert_eq!(parse_embedded_colliders(&bad), None);

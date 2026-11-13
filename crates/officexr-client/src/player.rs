@@ -75,6 +75,8 @@ pub fn apply_colliders(
     }
 }
 
+// SRP bend, as in SceneFrame: one system reads intent, steps the sim, broadcasts and moves the
+// camera target, because each needs this frame's pose in that order.
 #[allow(clippy::too_many_arguments)]
 pub fn step_player(
     time: Res<Time>,
@@ -132,6 +134,7 @@ pub fn step_player(
         dt_sec: time.delta_secs_f64(),
         now_ms,
         dir,
+        // ponytail: per-character speed configs and speedScale are ignored; world constants only.
         speed: if intent.run {
             world.player_speed * world.run_multiplier
         } else {
