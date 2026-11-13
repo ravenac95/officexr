@@ -90,7 +90,7 @@ pub fn update_peers(
 }
 
 // ponytail: catalog characters fall back to the hashed built-in, as `resolveCharacter` does for unknown models.
-fn character_for(id: &str, model: Option<&str>) -> &'static str {
+pub fn character_for(id: &str, model: Option<&str>) -> &'static str {
     if let Some(name) = CHARACTERS.iter().find(|c| Some(**c) == model) {
         return name;
     }

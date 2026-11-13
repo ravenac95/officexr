@@ -6,11 +6,13 @@ const ROTATE_PER_PX: f32 = 0.005;
 const PAN_PER_PX: f32 = 0.002;
 const ZOOM_PER_LINE: f32 = 0.1;
 
-/// Left-drag orbits, right-drag pans, the wheel zooms.
+/// Left-drag orbits, right-drag pans, the wheel zooms. Once the local player spawns it
+/// follows them: [`crate::player`] moves `target` every frame.
 #[derive(Resource)]
 pub struct Orbit {
-    target: Vec3,
-    yaw: f32,
+    pub target: Vec3,
+    /// Also the heading WASD moves relative to.
+    pub yaw: f32,
     pitch: f32,
     distance: f32,
 }
@@ -20,8 +22,8 @@ impl Default for Orbit {
         Self {
             target: Vec3::ZERO,
             yaw: 0.0,
-            pitch: -0.8,
-            distance: 40.0,
+            pitch: -0.5,
+            distance: 8.0,
         }
     }
 }
