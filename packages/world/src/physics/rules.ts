@@ -6,7 +6,7 @@ import type { WorldAABB } from '../app/types.ts';
 /**
  * Game-physics constants + helpers that EVERY character in the world
  * obeys — the local player and every bot alike. The SOLID idea here
- * is "Open/Closed via shared rules": gameplay code (SceneFrame for
+ * is "Open/Closed via shared rules": gameplay code (TsSimCore for
  * the player, BotPhysicsWorld/BotDriver for bots) imports these
  * pure helpers rather than each rolling its own constants. Add a
  * rule once → it applies everywhere.
@@ -37,7 +37,7 @@ export const SPAWN_DROP_HEIGHT = 4;
  * character genuinely settles ON the ground rather than floating ~1 cm
  * above it. Tunneling risk is low here: world geometry is solid 2 m
  * cubes, far thicker than any per-frame movement step. Used by BOTH
- * the local player (`SceneFrame`) and bots (`BotPhysicsWorld`) so every
+ * the local player (`TsSimCore`) and bots (`BotPhysicsWorld`) so every
  * character obeys the same contact rule. */
 export const CHARACTER_CONTROLLER_SKIN = 0.0001;
 
@@ -77,7 +77,7 @@ export const MAX_FALL_VELOCITY = 80;
 /** Metres below character feet to probe for a floor surface.
  * If no floor is found within this range, condition (a) of the dual-gate
  * fall-respawn rule is met. Used by both {@link BotPhysicsWorld.probeFloor}
- * and the SceneFrame player controller. */
+ * and the TsSimCore player controller. */
 export const FLOOR_PROBE_RANGE = 2.0;
 
 /**
@@ -107,7 +107,7 @@ export function shouldRespawnFalling(
  * Y-coordinate below which a character has "fallen off the map"
  * and should be respawned. Acts as the last-resort backstop for the
  * primary dual-gate rule {@link shouldRespawnFalling} — see the
- * caller-side comments in `SceneFrame` and `BotDriver`.
+ * caller-side comments in `TsSimCore` and `BotDriver`.
  *
  * Two floor sources, combined by min:
  *  - Cube bottom face = `inst.position[1] * cubeSize` (matches the

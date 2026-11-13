@@ -1,6 +1,6 @@
 /**
  * Step-up assist — deterministic ledge climbing for kinematic
- * characters, shared by the local player (SceneFrame) and bots
+ * characters, shared by the local player (TsSimCore) and bots
  * (BotPhysicsWorld).
  *
  * WHY THIS EXISTS

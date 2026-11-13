@@ -3,7 +3,7 @@
  *
  * DIP: this module lives in the physics layer. It has no Three, no React,
  * no r3f imports. Both the headless bot path (BotPhysicsWorld) and the
- * r3f-hosted human path (SceneFrame) depend on this module — not the
+ * headless human path (TsSimCore) depend on this module — not the
  * reverse.
  *
  * SRP: this module owns ONE thing — "how much of the intended horizontal
