@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use officexr_sim::trace::{
-    ProximityFrameOutput, ProximityTrace, SimTrace, replay, replay_proximity,
+    ProximityFrameOutput, ProximityTrace, ProximityTraceFrame, SimTrace, replay, replay_proximity,
 };
 use officexr_sim::{SimCore, SimStepResult, Vec3};
 
@@ -101,6 +101,23 @@ fn compare_proximity(
     worst
 }
 
+/// Peeked first: a `serde_json::Value` would sort the players by id.
+#[derive(serde::Deserialize)]
+struct TraceKind {
+    kind: String,
+}
+
+#[test]
+fn proximity_frames_keep_the_players_in_document_order() {
+    let frame: ProximityTraceFrame = serde_json::from_str(
+        r#"{"players":{"bob":{"id":"bob","pos":{"x":0,"y":0,"z":0}},"alice":{"id":"alice","pos":{"x":1,"y":0,"z":0}}},
+            "input":{"voiceZones":[],"selfId":"alice","settings":{"charRadius":0.3,"proximityRadius":1.5,"proximityOuterRadius":3,"proximityEnterDebounceMs":300},"nowMs":0,"dtSec":0.016}}"#,
+    )
+    .unwrap();
+    let ids: Vec<_> = frame.players.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(ids, ["bob", "alice"]);
+}
+
 #[test]
 fn replays_every_trace() {
     let mut paths: Vec<_> = std::fs::read_dir(Path::new(TRACE_DIR))
@@ -112,11 +129,11 @@ fn replays_every_trace() {
     assert!(!paths.is_empty(), "no traces in {TRACE_DIR}");
     for path in paths {
         let name = path.file_stem().unwrap().to_string_lossy().into_owned();
-        let json: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        if json["kind"] == "proximity" {
+        let json = std::fs::read_to_string(&path).unwrap();
+        let TraceKind { kind } = serde_json::from_str(&json).unwrap();
+        if kind == "proximity" {
             let trace: ProximityTrace =
-                serde_json::from_value(json).unwrap_or_else(|e| panic!("{name}: {e}"));
+                serde_json::from_str(&json).unwrap_or_else(|e| panic!("{name}: {e}"));
             let mut sim = SimCore::new(trace.inputs[0].input.settings.char_radius);
             let outputs = replay_proximity(&mut sim, &trace.inputs);
             let err = compare_proximity(&name, &outputs, &trace.outputs);
@@ -126,8 +143,7 @@ fn replays_every_trace() {
             );
             continue;
         }
-        let trace: SimTrace =
-            serde_json::from_value(json).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let trace: SimTrace = serde_json::from_str(&json).unwrap_or_else(|e| panic!("{name}: {e}"));
         let char_radius = trace.inputs[0].step.settings.char_radius;
         let mut sim = SimCore::new(char_radius);
         let outputs = replay(&mut sim, &trace.map, &trace.inputs).expect("valid colliders");

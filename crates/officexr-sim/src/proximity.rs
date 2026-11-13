@@ -131,6 +131,7 @@ struct Area {
     radius: f64,
 }
 
+// ponytail: pair/area/member lookups are linear scans, O(P²) per tick; fine for room-sized P.
 type Players<'a> = BTreeMap<&'a str, Vec3>;
 
 /// Pair states and MeetingAreas carried from frame to frame.
@@ -523,5 +524,61 @@ mod tests {
         assert!((fresh.x - 1.1).abs() < 1e-12 && (fresh.z + 0.05).abs() < 1e-12);
         let stale = extrapolate_pos(pos, vel, Some(0.0), 500.0);
         assert!((stale.x - 1.2).abs() < 1e-12 && (stale.z + 0.1).abs() < 1e-12);
+    }
+
+    fn peer(id: &str, x: f64) -> SimPeer {
+        SimPeer {
+            id: id.into(),
+            pos: Vec3 { x, y: 0.0, z: 0.0 },
+        }
+    }
+
+    #[test]
+    fn stepping_into_a_voice_zone_ends_the_conversation() {
+        let mut input = ProximityInput {
+            voice_zones: vec![],
+            self_id: "alice".into(),
+            settings: ProximitySettings {
+                char_radius: 0.3,
+                proximity_radius: 1.5,
+                proximity_outer_radius: 3.0,
+                proximity_enter_debounce_ms: 0.0,
+            },
+            now_ms: 0.0,
+            dt_sec: 0.016,
+        };
+        let players = [peer("alice", 0.0), peer("bob", 1.0)];
+        let event = |kind| ProximityEvent {
+            kind,
+            other_id: "bob".into(),
+        };
+        let mut tracker = PairTracker::default();
+        let out = tracker.tick(&players, &input);
+        assert_eq!(
+            out.events,
+            [
+                event(ProximityEventKind::Entering),
+                event(ProximityEventKind::Entered)
+            ]
+        );
+        assert_eq!(out.areas.len(), 1);
+
+        // A zone shrunk to bob's position: its bounds are inclusive.
+        let at_bob = XZ { x: 1.0, z: 0.0 };
+        input.voice_zones = vec![VoiceZone {
+            min: at_bob,
+            max: at_bob,
+        }];
+        input.now_ms = 16.0;
+        let out = tracker.tick(&players, &input);
+        assert_eq!(
+            out.events,
+            [
+                event(ProximityEventKind::Exiting),
+                event(ProximityEventKind::Exited)
+            ]
+        );
+        assert!(out.areas.is_empty() && out.pair_states.is_empty());
+        assert_eq!(out.conversation_focus, None);
     }
 }

@@ -193,7 +193,7 @@ impl SimCore {
     }
 
     /// Advances proximity pairing and MeetingAreas one frame over `players`,
-    /// in the caller's player order.
+    /// whose order decides event order: pass them in the TS `Object.keys` order.
     pub fn tick_proximity(&mut self, players: &[SimPeer], input: &ProximityInput) -> TrackerOutput {
         self.pair_tracker.tick(players, input)
     }
