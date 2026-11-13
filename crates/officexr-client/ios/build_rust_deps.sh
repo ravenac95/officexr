@@ -13,17 +13,15 @@ if [[ "$CONFIGURATION" != "Debug" ]]; then
     RELFLAG=--release
 fi
 
-set -euvx
-
 # add homebrew bin path, as it's the most commonly used package manager on macOS
 # this is needed for cmake on apple arm processors as it's not available by default
 export PATH="$PATH:/opt/homebrew/bin"
 
 # Make Cargo output cache files in Xcode's directories
-export CARGO_TARGET_DIR="$DERIVED_FILE_DIR/cargo"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$DERIVED_FILE_DIR/cargo}"
 
 # Xcode places `/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin`
-# at the front of the path, with makes the build fail with `ld: library 'System' not found`, upstream issue:
+# at the front of the path, which makes the build fail with `ld: library 'System' not found`, upstream issue:
 # <https://github.com/rust-lang/rust/issues/80817>.
 #
 # Work around it by resetting the path, so that we use the system `cc`.
@@ -56,13 +54,19 @@ for arch in $ARCHS; do
         # M1 iOS simulator
         TARGET=aarch64-apple-ios-sim
       fi
+      ;;
+
+    *)
+      echo "Unsupported arch: $arch" >&2
+      exit 2
+      ;;
   esac
 
   cargo build $RELFLAG --target $TARGET -p officexr-client --bin officexr-client
 
   # Collect the executables
-  EXECUTABLES="$EXECUTABLES $DERIVED_FILE_DIR/cargo/$TARGET/$PROFILE/officexr-client"
+  EXECUTABLES="$EXECUTABLES $CARGO_TARGET_DIR/$TARGET/$PROFILE/officexr-client"
 done
 
-# Combine executables, and place them at the output path excepted by Xcode
+# Combine executables, and place them at the output path expected by Xcode
 lipo -create -output "$TARGET_BUILD_DIR/$EXECUTABLE_PATH" $EXECUTABLES

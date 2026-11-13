@@ -28,11 +28,6 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>OfficeXR joins rooms on a development server on your local network.</string>
 </dict>

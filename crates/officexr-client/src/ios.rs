@@ -1,5 +1,5 @@
-//! iOS has no flags or env vars to start from, so the config comes from an in-app screen and is
-//! saved in the app's Documents directory.
+//! iOS has no flags to start from, so the config comes from Xcode scheme env vars or an in-app
+//! screen, and is saved in the app's `Library/Application Support` directory.
 
 use std::path::PathBuf;
 
@@ -11,8 +11,11 @@ use crate::config::Config;
 
 const FIELDS: [&str; 4] = ["Web URL", "Realtime URL", "Office id", "Session cookie"];
 
+// ponytail: the session cookie is stored in plaintext; move it to the Keychain before any
+// non-dev build.
 fn saved_path() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Documents/officexr-config.json")
+    PathBuf::from(std::env::var("HOME").unwrap_or_default())
+        .join("Library/Application Support/officexr-config.json")
 }
 
 /// Flags or env vars (e.g. from an Xcode scheme), else the saved config, else the config screen.
@@ -37,8 +40,9 @@ struct Form {
 #[derive(Component)]
 struct Field(usize);
 
-// ponytail: saving quits the app and the next launch joins; there is no way back to this screen
-// from a room that joined.
+// ponytail: saving kills the process with `std::process::exit` (winit ignores `AppExit` on iOS,
+// and iOS apps are not meant to quit themselves) and the next launch joins; there is no way back
+// to this screen from a room that joined.
 fn config_screen(config: Option<&Config>, error: Option<String>) -> ! {
     let values = config.map_or_else(Default::default, |c| {
         [
@@ -53,7 +57,7 @@ fn config_screen(config: Option<&Config>, error: Option<String>) -> ! {
         .insert_resource(Form { values, error })
         .add_systems(Startup, setup)
         .run();
-    std::process::exit(0);
+    unreachable!("winit's run never returns on iOS")
 }
 
 fn setup(mut commands: Commands, form: Res<Form>) {
@@ -98,13 +102,13 @@ fn setup(mut commands: Commands, form: Res<Form>) {
                     },
                     Button,
                     BackgroundColor(Color::srgb(0.2, 0.4, 0.8)),
-                    children![Text::new("Save and quit; reopen to join")],
+                    children![Text::new("Save and close; reopen to join")],
                 ))
                 .observe(save);
         });
 }
 
-fn save(_: On<Activate>, fields: Query<(&Field, &EditableText)>, mut exit: MessageWriter<AppExit>) {
+fn save(_: On<Activate>, fields: Query<(&Field, &EditableText)>) {
     let mut values: [String; 4] = Default::default();
     for (field, text) in &fields {
         values[field.0] = text.value().to_string().trim().into();
@@ -117,9 +121,14 @@ fn save(_: On<Activate>, fields: Query<(&Field, &EditableText)>, mut exit: Messa
         session_cookie,
     };
     let json = serde_json::to_vec(&config).expect("config serializes");
-    if let Err(err) = std::fs::write(saved_path(), json) {
+    let path = saved_path();
+    let written = path
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::write(&path, json));
+    if let Err(err) = written {
         error!("saving the config: {err}");
         return;
     }
-    exit.write(AppExit::Success);
+    std::process::exit(0);
 }

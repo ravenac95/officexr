@@ -113,9 +113,15 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Clippy for the iOS simulator
+        run: cargo clippy --target aarch64-apple-ios-sim -p officexr-client -- -D warnings
+
       # ponytail: unsigned simulator build only; device signing and TestFlight are manual.
       - name: Build for the iOS simulator
         working-directory: crates/officexr-client/ios
+        # The shared target dir lets rust-cache and clippy's build reuse the Xcode build's work.
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
         run: >
           xcodebuild -project OfficeXR.xcodeproj -target OfficeXR -configuration Debug
           -sdk iphonesimulator -arch arm64 CODE_SIGNING_ALLOWED=NO build
