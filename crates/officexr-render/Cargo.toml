@@ -15,12 +15,20 @@ bevy = { version = "=0.20.1", default-features = false, features = [
   "bevy_core_pipeline",
   "bevy_pbr",
   "bevy_gltf",
+  "gltf_animation",
+  "bevy_animation",
+  "bevy_ui",
+  "bevy_ui_render",
+  "bevy_text",
+  "default_font",
+  "reflect_auto_register",
   "png",
   "http",
   "https",
 ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+officexr-sim = { path = "../officexr-sim" }
 
 [dev-dependencies]
 bevy = { version = "=0.20.1", default-features = false, features = ["bevy_winit", "x11"] }

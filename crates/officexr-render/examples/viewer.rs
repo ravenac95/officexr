@@ -9,10 +9,25 @@
 //! `/models/...`; it defaults to `packages/studio/public` (populated by
 //! `pnpm asset-packs:install`). With `OFFICEXR_SCREENSHOT=out.png` it saves
 //! one frame once the models have had time to load, then exits.
+//!
+//! The six KayKit characters stand in a row in front of the camera, each
+//! cycling idle, walk, run and jump on the spot.
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
-use officexr_render::{AssetBase, OfficeXrRenderPlugin, SceneCamera, WorldSceneData};
+use officexr_render::{
+    AssetBase, OfficeXrRenderPlugin, PlayerRender, Players, SceneCamera, WorldSceneData,
+};
+
+const CHARACTERS: [&str; 6] = [
+    "Barbarian",
+    "Knight",
+    "Mage",
+    "Ranger",
+    "Rogue",
+    "Rogue_Hooded",
+];
+const SECONDS_PER_MOTION: f32 = 3.0;
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -38,8 +53,32 @@ fn main() {
             near: 0.1,
             far: 2000.0,
         })
-        .add_systems(Update, screenshot_and_exit)
+        .init_resource::<Players>()
+        .add_systems(Update, (cycle_motions, screenshot_and_exit))
         .run();
+}
+
+fn cycle_motions(time: Res<Time>, mut players: ResMut<Players>) {
+    let step = (time.elapsed_secs() / SECONDS_PER_MOTION) as usize;
+    let speeds = [0.0, players.player_speed, players.run_speed, 0.0];
+    players.players = CHARACTERS
+        .iter()
+        .enumerate()
+        .map(|(i, character)| {
+            let tier = (step + i) % 4;
+            PlayerRender {
+                id: character.to_string(),
+                character: character.to_string(),
+                // Standing on the booper floor's cube tops at y=2.
+                pos: Vec3::new(i as f32 * 1.5 - 1.0, 1.5, 6.0),
+                // Facing the camera.
+                yaw: std::f32::consts::PI,
+                vel: Vec3::new(speeds[tier], 0.0, 0.0),
+                name: character.to_string(),
+                airborne: tier == 3,
+            }
+        })
+        .collect();
 }
 
 fn screenshot_and_exit(

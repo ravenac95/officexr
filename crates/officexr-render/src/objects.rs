@@ -10,8 +10,11 @@ use bevy::prelude::*;
 
 use crate::lighting::{HemisphereFill, ObjectMaterial};
 use crate::placement::mesh_transform;
-use crate::scene::{ObjectInstance, WorldObjectKind, WorldSceneData};
+use crate::scene::{LocalAabb, ObjectInstance, WorldObjectKind, WorldSceneData, Xyz};
 use crate::{AssetBase, SceneEntity};
+
+const PRIMITIVE_KIND_PREFIX: &str = "__primitive_";
+const PRIMITIVE_BLOCK_SIZE: f32 = 2.0;
 
 /// Kinds whose glTF is still loading, with their instances.
 #[derive(Resource, Default)]
@@ -33,7 +36,6 @@ pub(crate) fn request_kinds(
         scene.kinds.iter().map(|k| (k.id.as_str(), k)).collect();
     let mut by_kind: HashMap<&str, Vec<ObjectInstance>> = HashMap::new();
     for inst in &scene.objects.instances {
-        // ponytail: `__primitive_` mugshot blocks aren't rendered yet.
         if kinds.contains_key(inst.kind_id.as_str()) {
             by_kind.entry(&inst.kind_id).or_default().push(inst.clone());
         }
@@ -46,6 +48,68 @@ pub(crate) fn request_kinds(
             (kind, gltf, instances)
         })
         .collect();
+}
+
+/// `PrimitiveInstanceGroup`: the mugshot's `__primitive_<colour>` kinds are
+/// plain 2 m boxes the size of their colliders, with no catalog entry.
+pub(crate) fn spawn_primitives(
+    mut commands: Commands,
+    scene: Res<WorldSceneData>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ObjectMaterial>>,
+) {
+    let half = PRIMITIVE_BLOCK_SIZE / 2.0;
+    let kind = WorldObjectKind {
+        id: String::new(),
+        gltf_path: String::new(),
+        scale: 1.0,
+        tint: None,
+        opacity: 1.0,
+        roughness: None,
+        metalness: None,
+        emissive: None,
+        emissive_intensity: 0.0,
+        dimensions: None,
+        local_aabb: Some(LocalAabb {
+            min: Xyz {
+                x: -half,
+                y: -half,
+                z: -half,
+            },
+            max: Xyz {
+                x: half,
+                y: half,
+                z: half,
+            },
+        }),
+    };
+    let mesh = meshes.add(Cuboid::from_length(PRIMITIVE_BLOCK_SIZE));
+    for inst in &scene.objects.instances {
+        let Some(colour) = inst.kind_id.strip_prefix(PRIMITIVE_KIND_PREFIX) else {
+            continue;
+        };
+        let base_color = match colour {
+            "blue" => Srgba::hex("3b6bf2"),
+            "stone" => Srgba::hex("a8a8a8"),
+            _ => Srgba::hex("ff00ff"),
+        }
+        .unwrap();
+        let material = materials.add(ObjectMaterial {
+            // three.js's `MeshStandardMaterial` defaults.
+            base: StandardMaterial {
+                base_color: base_color.into(),
+                perceptual_roughness: 1.0,
+                ..default()
+            },
+            extension: HemisphereFill::new(&scene.lighting),
+        });
+        commands.spawn((
+            SceneEntity,
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(material),
+            mesh_transform(inst, &kind),
+        ));
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

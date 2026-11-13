@@ -1,10 +1,13 @@
 //! Renders a scene offscreen and writes a PNG, then prints the mean frame
 //! time.
 //!
-//! render <scene.json> <out.png> <width>x<height> <px,py,pz> <tx,ty,tz> <fov°> <near> <far> [asset base]
+//! render [--mugshot <character>] <scene.json> <out.png> <width>x<height> <px,py,pz> <tx,ty,tz> <fov°> <near> <far> [asset base]
 //!
 //! The camera is the one `renderFraming.ts`'s `frameCamera` returns; the
-//! asset base is as for the `viewer` example.
+//! asset base is as for the `viewer` example. `--mugshot` drops the
+//! character from `SPAWN_DROP_HEIGHT` above the origin, lets it settle
+//! on the scene's colliders under gravity, and draws it paused, as the
+//! studio's Mugshot mode does.
 
 use std::time::Duration;
 
@@ -15,8 +18,12 @@ use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::ExitCondition;
 use officexr_render::{
-    AssetBase, OfficeXrRenderPlugin, PendingKinds, PendingLayouts, SceneCamera, WorldSceneData,
+    AssetBase, OfficeXrRenderPlugin, PendingKinds, PendingLayouts, PlayerRender, Players,
+    SceneCamera, WorldSceneData,
 };
+use officexr_sim::physics::character_movement::XZ;
+use officexr_sim::physics::rules::SPAWN_DROP_HEIGHT;
+use officexr_sim::{SimCore, SimInput, SimKind, SimKinds, SimSettings, WorldObjects};
 
 // ponytail: fixed frame budgets, not a load signal; too short if models take longer to arrive.
 const MEASURE_FROM: u32 = 200;
@@ -39,17 +46,22 @@ fn parse_vec3(s: &str) -> [f32; 3] {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let mugshot = (args.first().map(String::as_str) == Some("--mugshot")).then(|| {
+        let character = args.get(1).cloned().expect("--mugshot <character>");
+        args.drain(..2);
+        character
+    });
     if args.len() < 8 {
         eprintln!(
             "usage: render <scene.json> <out.png> <w>x<h> <px,py,pz> <tx,ty,tz> <fov> <near> <far> [asset base]"
         );
         std::process::exit(2);
     }
-    let scene: WorldSceneData = serde_json::from_str(
-        &std::fs::read_to_string(&args[0]).unwrap_or_else(|e| panic!("{}: {e}", args[0])),
-    )
-    .unwrap_or_else(|e| panic!("{}: {e}", args[0]));
+    let scene_json =
+        std::fs::read_to_string(&args[0]).unwrap_or_else(|e| panic!("{}: {e}", args[0]));
+    let scene: WorldSceneData =
+        serde_json::from_str(&scene_json).unwrap_or_else(|e| panic!("{}: {e}", args[0]));
     let (w, h) = args[2]
         .split_once('x')
         .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)))
@@ -90,8 +102,75 @@ fn main() {
             image,
             path: args[1].clone(),
         })
-        .add_systems(Update, (target_image, capture_and_exit))
-        .run();
+        .add_systems(Update, (target_image, capture_and_exit));
+    if let Some(character) = mugshot {
+        app.insert_resource(settled_player(&scene_json, character));
+    }
+    app.run();
+}
+
+/// The scene's kinds and objects, read as the sim's collider inputs.
+#[derive(serde::Deserialize)]
+struct SimScene {
+    kinds: Vec<SimKind>,
+    objects: WorldObjects,
+}
+
+fn settled_player(scene_json: &str, character: String) -> Players {
+    let scene: SimScene = serde_json::from_str(scene_json).expect("scene colliders");
+    let players = Players {
+        paused: true,
+        ..default()
+    };
+    let settings = SimSettings {
+        char_radius: players.char_radius.into(),
+        movement_block_threshold: 0.9,
+        jump_velocity: 8.0,
+        air_control: 0.2,
+        max_jumps: 2,
+        landing_ease_ms: 120.0,
+    };
+    let mut sim = SimCore::new(settings.char_radius);
+    let kinds = SimKinds {
+        voxel_size: scene.objects.cube_size,
+        kinds: scene.kinds,
+    };
+    sim.set_static_colliders(&scene.objects, &kinds, &[])
+        .expect("valid colliders");
+    sim.teleport(officexr_sim::Vec3 {
+        x: 0.0,
+        y: SPAWN_DROP_HEIGHT,
+        z: 0.0,
+    });
+    let input = SimInput {
+        dt_sec: 1.0 / 60.0,
+        now_ms: 0.0,
+        dir: XZ { x: 0.0, z: 0.0 },
+        speed: 0.0,
+        running: false,
+        yaw: 0.0,
+        jump: false,
+        settings,
+        spawn_points: vec![],
+    };
+    let pos = (0..600)
+        .map(|_| sim.step(&input))
+        .find(|r| r.is_grounded)
+        .expect("the character never landed")
+        .new_pos;
+    println!("settled_y={}", pos.y);
+    Players {
+        players: vec![PlayerRender {
+            id: "mugshot-player".into(),
+            character,
+            pos: Vec3::new(pos.x as f32, pos.y as f32, pos.z as f32),
+            yaw: 0.0,
+            vel: Vec3::ZERO,
+            name: String::new(),
+            airborne: false,
+        }],
+        ..players
+    }
 }
 
 fn target_image(
