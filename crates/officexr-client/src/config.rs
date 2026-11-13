@@ -1,7 +1,10 @@
+// iOS has no command line to print usage on.
+#[cfg(not(target_os = "ios"))]
 pub const USAGE: &str = "usage: OFFICEXR_SESSION_COOKIE=<Cookie header> officexr-client \
 --web-url <url> --realtime-url <ws url> --office-id <id>
 (--cookie <Cookie header> also works, but shows the cookie in process listings)";
 
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {
     /// Serves `/api/*` and `/models/*`.
     pub web_url: String,
