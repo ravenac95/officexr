@@ -1,9 +1,9 @@
-//! Port of `geometry-service.ts`'s `meshTransform`.
+//! Ports of `geometry-service.ts`'s `meshTransform` and `placement-transform.ts`.
 
 use bevy::math::{Quat, Vec3};
 use bevy::transform::components::Transform;
 
-use crate::scene::{ObjectInstance, WorldObjectKind};
+use crate::scene::{BakedLayoutPlacement, ObjectInstance, WorldObjectKind};
 
 pub const VOXEL_SIZE: f32 = 0.5;
 
@@ -55,6 +55,14 @@ pub fn mesh_transform(inst: &ObjectInstance, kind: &WorldObjectKind) -> Transfor
         translation,
         rotation: Quat::from_rotation_y(yaw_rad as f32),
         scale: Vec3::splat(kind.scale),
+    }
+}
+
+pub fn baked_layout_transform(p: &BakedLayoutPlacement) -> Transform {
+    Transform {
+        translation: Vec3::from(p.position) * VOXEL_SIZE,
+        rotation: Quat::from_rotation_y(p.rotation_y as f32 * std::f32::consts::FRAC_PI_2),
+        scale: Vec3::ONE,
     }
 }
 
@@ -123,5 +131,20 @@ mod tests {
         let a = mesh_transform(&inst([0.0; 3], -90.0), &kind([0.0; 3], [4.0, 1.0, 1.0]));
         let b = mesh_transform(&inst([0.0; 3], 270.0), &kind([0.0; 3], [4.0, 1.0, 1.0]));
         assert_eq!(a.translation, b.translation);
+    }
+
+    #[test]
+    fn baked_layout_places_in_voxels_and_quarter_turns() {
+        let t = baked_layout_transform(&BakedLayoutPlacement {
+            gltf_path: "/l.glb".into(),
+            position: [2.0, 0.0, 4.0],
+            rotation_y: 1,
+        });
+        assert_eq!(t.translation, Vec3::new(1.0, 0.0, 2.0));
+        assert!(
+            t.rotation
+                .angle_between(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2))
+                < 1e-3
+        );
     }
 }

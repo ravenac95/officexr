@@ -1,6 +1,6 @@
 //! Plain-data scene input, deserialized from the same JSON shapes the TS
 //! side uses (`WorldObjectKind`, `WorldObjects`, `LightingViewConfig`,
-//! `BackgroundConstants`).
+//! `BackgroundConstants`, `BakedLayoutPlacement`).
 
 use bevy::color::{Color, Srgba};
 use bevy::math::Vec3;
@@ -8,11 +8,28 @@ use bevy::prelude::Resource;
 use serde::{Deserialize, Deserializer};
 
 #[derive(Resource, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct WorldSceneData {
     pub kinds: Vec<WorldObjectKind>,
     pub objects: WorldObjects,
     pub lighting: LightingConfig,
     pub background: BackgroundConfig,
+    #[serde(default)]
+    pub baked_layouts: Vec<BakedLayoutPlacement>,
+    /// A flat background instead of the sky, as the studio's editor canvases draw.
+    #[serde(default, deserialize_with = "opt_hex")]
+    pub clear_color: Option<Color>,
+}
+
+/// One room placement of a baked layout GLB.
+#[derive(Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct BakedLayoutPlacement {
+    pub gltf_path: String,
+    /// Voxels.
+    pub position: [f32; 3],
+    /// Quarter turns.
+    pub rotation_y: i32,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -136,4 +153,24 @@ fn opt_hex<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Color>, D::Error> {
     Option::<String>::deserialize(d)?
         .map(|s| parse_hex(&s))
         .transpose()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_baked_layout_placements() {
+        let scene: WorldSceneData =
+            serde_json::from_str(include_str!("../examples/booper.scene.json"))
+                .and_then(|mut v: serde_json::Value| {
+                    v["bakedLayouts"] = serde_json::json!([
+                        {"gltfPath": "/baked-layouts/a.glb", "position": [2, 0, 4], "rotationY": 1}
+                    ]);
+                    serde_json::from_value(v)
+                })
+                .unwrap();
+        assert_eq!(scene.baked_layouts[0].gltf_path, "/baked-layouts/a.glb");
+        assert_eq!(scene.baked_layouts[0].rotation_y, 1);
+    }
 }

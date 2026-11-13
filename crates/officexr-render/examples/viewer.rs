@@ -1,7 +1,9 @@
 //! Opens a window on a scene exported by `pnpm --filter @officexr/world
-//! export:render-scene`.
+//! export:render-scene`. To view a map's baked layouts:
 //!
-//! cargo run -p officexr-render --example viewer [scene.json] [asset base]
+//! pnpm --filter @officexr/world bake:layout --map default
+//! pnpm --filter @officexr/world export:render-scene default /tmp/default.scene.json
+//! cargo run -p officexr-render --example viewer /tmp/default.scene.json
 //!
 //! The asset base is a directory or an `http(s)://` origin serving
 //! `/models/...`; it defaults to `packages/studio/public` (populated by
@@ -20,11 +22,7 @@ fn main() {
     let base = args.next().unwrap_or_else(|| {
         concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/studio/public").into()
     });
-    let base = if base.starts_with("http://") || base.starts_with("https://") {
-        AssetBase::Http(base)
-    } else {
-        AssetBase::Path(base)
-    };
+    let base = AssetBase::parse(base);
     let scene: WorldSceneData = serde_json::from_str(
         &std::fs::read_to_string(&scene_path).unwrap_or_else(|e| panic!("{scene_path}: {e}")),
     )
@@ -37,6 +35,8 @@ fn main() {
             position: [1.0, 16.0, 26.0],
             look_at: [1.0, 0.0, 2.0],
             fov_deg: 60.0,
+            near: 0.1,
+            far: 2000.0,
         })
         .add_systems(Update, screenshot_and_exit)
         .run();
