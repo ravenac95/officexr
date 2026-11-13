@@ -1,0 +1,7 @@
+{
+  "t": "custom",
+  "kind": "bots:set-count",
+  "payload": {
+    "count": 3
+  }
+}

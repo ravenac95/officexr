@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "actorId": "alice",
+  "seq": 7,
+  "t": 1700000000000,
+  "kind": "ping:send",
+  "targetId": "bob"
+}
