@@ -1,0 +1,905 @@
+{
+  "kinds": [
+    {
+      "id": "colored_block_blue",
+      "label": "Blue block",
+      "gltfPath": "/models/blocks/colored_block_blue.gltf",
+      "swatch": "#3b82f6",
+      "walkable": false,
+      "scale": 1,
+      "tint": null,
+      "opacity": 1,
+      "roughness": null,
+      "metalness": null,
+      "emissive": null,
+      "emissiveIntensity": 0,
+      "category": "block",
+      "tilingAxes": {
+        "x": true,
+        "y": true,
+        "z": true
+      },
+      "gravity": false,
+      "isLayoutObject": true,
+      "optimization": "none",
+      "dimensions": {
+        "width": 2,
+        "height": 2,
+        "depth": 2
+      },
+      "localAABB": {
+        "min": {
+          "x": -1,
+          "y": -1,
+          "z": -1
+        },
+        "max": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      }
+    },
+    {
+      "id": "colored_block_red",
+      "label": "Red block",
+      "gltfPath": "/models/blocks/colored_block_red.gltf",
+      "swatch": "#ef4444",
+      "walkable": false,
+      "scale": 1,
+      "tint": null,
+      "opacity": 1,
+      "roughness": null,
+      "metalness": null,
+      "emissive": null,
+      "emissiveIntensity": 0,
+      "category": "block",
+      "tilingAxes": {
+        "x": true,
+        "y": true,
+        "z": true
+      },
+      "gravity": false,
+      "isLayoutObject": true,
+      "optimization": "none",
+      "dimensions": {
+        "width": 2,
+        "height": 2,
+        "depth": 2
+      },
+      "localAABB": {
+        "min": {
+          "x": -1,
+          "y": -1,
+          "z": -1
+        },
+        "max": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      }
+    },
+    {
+      "id": "prototype_cube_prototype_large_b",
+      "label": "Cube Prototype Large B",
+      "gltfPath": "/models/prototype/KayKit_Prototype_Bits_1.1_FREE/Assets/gltf/Cube_Prototype_Large_B.gltf",
+      "swatch": "#7c3aed",
+      "walkable": false,
+      "scale": 1,
+      "tint": null,
+      "opacity": 1,
+      "roughness": null,
+      "metalness": null,
+      "emissive": null,
+      "emissiveIntensity": 0,
+      "category": "prototype",
+      "tilingAxes": {
+        "x": true,
+        "y": true,
+        "z": true
+      },
+      "gravity": false,
+      "isLayoutObject": true,
+      "optimization": "none",
+      "dimensions": {
+        "width": 4,
+        "height": 4.000000327825546,
+        "depth": 4
+      },
+      "localAABB": {
+        "min": {
+          "x": -2,
+          "y": 1.4901161193847656e-7,
+          "z": -2
+        },
+        "max": {
+          "x": 2,
+          "y": 4.000000476837158,
+          "z": 2
+        }
+      }
+    },
+    {
+      "id": "prototype_primitive_stairs_half",
+      "label": "Primitive Stairs Half",
+      "gltfPath": "/models/prototype/KayKit_Prototype_Bits_1.1_FREE/Assets/gltf/Primitive_Stairs_Half.gltf",
+      "swatch": "#7c3aed",
+      "walkable": false,
+      "scale": 1,
+      "tint": null,
+      "opacity": 1,
+      "roughness": null,
+      "metalness": null,
+      "emissive": null,
+      "emissiveIntensity": 0,
+      "category": "prototype",
+      "tilingAxes": {
+        "x": true,
+        "y": false,
+        "z": false
+      },
+      "gravity": false,
+      "isLayoutObject": true,
+      "optimization": "none",
+      "dimensions": {
+        "width": 2,
+        "height": 2.000000089406967,
+        "depth": 4
+      },
+      "localAABB": {
+        "min": {
+          "x": 0,
+          "y": 1.4901161193847656e-7,
+          "z": -2
+        },
+        "max": {
+          "x": 2,
+          "y": 2.000000238418579,
+          "z": 2
+        }
+      },
+      "colliderShape": {
+        "kind": "scanned-cuboids",
+        "cuboids": [
+          {
+            "min": [
+              0,
+              0,
+              0
+            ],
+            "max": [
+              0.25,
+              1,
+              1
+            ]
+          },
+          {
+            "min": [
+              0.25,
+              0,
+              0
+            ],
+            "max": [
+              0.5,
+              0.75,
+              1
+            ]
+          },
+          {
+            "min": [
+              0.5,
+              0,
+              0
+            ],
+            "max": [
+              0.75,
+              0.5,
+              1
+            ]
+          },
+          {
+            "min": [
+              0.75,
+              0,
+              0
+            ],
+            "max": [
+              1,
+              0.25,
+              1
+            ]
+          }
+        ]
+      },
+      "colliderComplexity": {
+        "type": "heightfield",
+        "cellSize": 0.125,
+        "heightEpsilon": 0.01
+      }
+    },
+    {
+      "id": "restaurant_floor_kitchen",
+      "label": "Floor Kitchen",
+      "gltfPath": "/models/restaurant/KayKit_Restaurant_Bits_1.0_FREE/Assets/gltf/floor_kitchen.gltf",
+      "swatch": "#dc2626",
+      "walkable": false,
+      "scale": 1,
+      "tint": null,
+      "opacity": 1,
+      "roughness": null,
+      "metalness": null,
+      "emissive": null,
+      "emissiveIntensity": 0,
+      "category": "restaurant",
+      "tilingAxes": {
+        "x": true,
+        "y": false,
+        "z": true
+      },
+      "gravity": false,
+      "isLayoutObject": true,
+      "optimization": "none",
+      "dimensions": {
+        "width": 4,
+        "height": 0.5,
+        "depth": 4
+      },
+      "localAABB": {
+        "min": {
+          "x": -2,
+          "y": 0,
+          "z": -2
+        },
+        "max": {
+          "x": 2,
+          "y": 0.5,
+          "z": 2
+        }
+      }
+    }
+  ],
+  "objects": {
+    "cubeSize": 0.5,
+    "instances": [
+      {
+        "id": "room-1-se5k/layout/place-1-lk9x@8,0,-4",
+        "sourceCommandId": "room-1-se5k/layout/place-1-lk9x",
+        "kindId": "colored_block_red",
+        "position": [
+          8,
+          0,
+          -4
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-73-uz1f@-8,0,16",
+        "sourceCommandId": "room-1-se5k/layout/place-73-uz1f",
+        "kindId": "colored_block_blue",
+        "position": [
+          -8,
+          0,
+          16
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-74-v0kz@-4,0,16",
+        "sourceCommandId": "room-1-se5k/layout/place-74-v0kz",
+        "kindId": "colored_block_blue",
+        "position": [
+          -4,
+          0,
+          16
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-75-v0kz@0,0,16",
+        "sourceCommandId": "room-1-se5k/layout/place-75-v0kz",
+        "kindId": "colored_block_blue",
+        "position": [
+          0,
+          0,
+          16
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-76-v0kz@4,0,16",
+        "sourceCommandId": "room-1-se5k/layout/place-76-v0kz",
+        "kindId": "colored_block_blue",
+        "position": [
+          4,
+          0,
+          16
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-77-v0kz@8,0,16",
+        "sourceCommandId": "room-1-se5k/layout/place-77-v0kz",
+        "kindId": "colored_block_blue",
+        "position": [
+          8,
+          0,
+          16
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-78-v20u@-8,0,12",
+        "sourceCommandId": "room-1-se5k/layout/place-78-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          -8,
+          0,
+          12
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-79-v20u@-4,0,12",
+        "sourceCommandId": "room-1-se5k/layout/place-79-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          -4,
+          0,
+          12
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7a-v20u@0,0,12",
+        "sourceCommandId": "room-1-se5k/layout/place-7a-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          0,
+          0,
+          12
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7b-v20u@4,0,12",
+        "sourceCommandId": "room-1-se5k/layout/place-7b-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          4,
+          0,
+          12
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7c-v20u@8,0,12",
+        "sourceCommandId": "room-1-se5k/layout/place-7c-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          8,
+          0,
+          12
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7d-v20u@-8,0,8",
+        "sourceCommandId": "room-1-se5k/layout/place-7d-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          -8,
+          0,
+          8
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7e-v20u@-4,0,8",
+        "sourceCommandId": "room-1-se5k/layout/place-7e-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          -4,
+          0,
+          8
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7f-v20u@0,0,8",
+        "sourceCommandId": "room-1-se5k/layout/place-7f-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          0,
+          0,
+          8
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7g-v20u@4,0,8",
+        "sourceCommandId": "room-1-se5k/layout/place-7g-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          4,
+          0,
+          8
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7h-v20u@8,0,8",
+        "sourceCommandId": "room-1-se5k/layout/place-7h-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          8,
+          0,
+          8
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7i-v20u@-8,0,4",
+        "sourceCommandId": "room-1-se5k/layout/place-7i-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          -8,
+          0,
+          4
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7j-v20u@-4,0,4",
+        "sourceCommandId": "room-1-se5k/layout/place-7j-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          -4,
+          0,
+          4
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7k-v20u@0,0,4",
+        "sourceCommandId": "room-1-se5k/layout/place-7k-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          0,
+          0,
+          4
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7l-v20u@4,0,4",
+        "sourceCommandId": "room-1-se5k/layout/place-7l-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          4,
+          0,
+          4
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7m-v20u@8,0,4",
+        "sourceCommandId": "room-1-se5k/layout/place-7m-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          8,
+          0,
+          4
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7n-v20u@-8,0,0",
+        "sourceCommandId": "room-1-se5k/layout/place-7n-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          -8,
+          0,
+          0
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7o-v20u@-4,0,0",
+        "sourceCommandId": "room-1-se5k/layout/place-7o-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          -4,
+          0,
+          0
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7p-v20u@0,0,0",
+        "sourceCommandId": "room-1-se5k/layout/place-7p-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7q-v20u@4,0,0",
+        "sourceCommandId": "room-1-se5k/layout/place-7q-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          4,
+          0,
+          0
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7r-v20u@8,0,0",
+        "sourceCommandId": "room-1-se5k/layout/place-7r-v20u",
+        "kindId": "colored_block_blue",
+        "position": [
+          8,
+          0,
+          0
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7t-vpw3@-32,0,8",
+        "sourceCommandId": "room-1-se5k/layout/place-7t-vpw3",
+        "kindId": "prototype_cube_prototype_large_b",
+        "position": [
+          -32,
+          0,
+          8
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7u-vrcv@-24,0,8",
+        "sourceCommandId": "room-1-se5k/layout/place-7u-vrcv",
+        "kindId": "prototype_cube_prototype_large_b",
+        "position": [
+          -24,
+          0,
+          8
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7v-vrcv@-16,0,8",
+        "sourceCommandId": "room-1-se5k/layout/place-7v-vrcv",
+        "kindId": "prototype_cube_prototype_large_b",
+        "position": [
+          -16,
+          0,
+          8
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7w-vtgc@-32,0,0",
+        "sourceCommandId": "room-1-se5k/layout/place-7w-vtgc",
+        "kindId": "prototype_cube_prototype_large_b",
+        "position": [
+          -32,
+          0,
+          0
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7x-vtgc@-24,0,0",
+        "sourceCommandId": "room-1-se5k/layout/place-7x-vtgc",
+        "kindId": "prototype_cube_prototype_large_b",
+        "position": [
+          -24,
+          0,
+          0
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7y-vtgc@-16,0,0",
+        "sourceCommandId": "room-1-se5k/layout/place-7y-vtgc",
+        "kindId": "prototype_cube_prototype_large_b",
+        "position": [
+          -16,
+          0,
+          0
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-7z-126b@-8,4,0",
+        "sourceCommandId": "room-1-se5k/layout/place-7z-126b",
+        "kindId": "prototype_primitive_stairs_half",
+        "position": [
+          -8,
+          4,
+          0
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-80-1q6m@-12,0,16",
+        "sourceCommandId": "room-1-se5k/layout/place-80-1q6m",
+        "kindId": "colored_block_red",
+        "position": [
+          -12,
+          0,
+          16
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-81-4w4y@-8,4,8",
+        "sourceCommandId": "room-1-se5k/layout/place-81-4w4y",
+        "kindId": "prototype_primitive_stairs_half",
+        "position": [
+          -8,
+          4,
+          8
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-82-5g4u@-12,4,16",
+        "sourceCommandId": "room-1-se5k/layout/place-82-5g4u",
+        "kindId": "colored_block_red",
+        "position": [
+          -12,
+          4,
+          16
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-83-5h9l@-12,8,16",
+        "sourceCommandId": "room-1-se5k/layout/place-83-5h9l",
+        "kindId": "colored_block_red",
+        "position": [
+          -12,
+          8,
+          16
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-84-5jv3@-12,12,16",
+        "sourceCommandId": "room-1-se5k/layout/place-84-5jv3",
+        "kindId": "colored_block_red",
+        "position": [
+          -12,
+          12,
+          16
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-85-5mrq@-16,0,16",
+        "sourceCommandId": "room-1-se5k/layout/place-85-5mrq",
+        "kindId": "colored_block_red",
+        "position": [
+          -16,
+          0,
+          16
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-86-5nv2@-16,4,16",
+        "sourceCommandId": "room-1-se5k/layout/place-86-5nv2",
+        "kindId": "colored_block_red",
+        "position": [
+          -16,
+          4,
+          16
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-87-5p7o@-16,8,16",
+        "sourceCommandId": "room-1-se5k/layout/place-87-5p7o",
+        "kindId": "colored_block_red",
+        "position": [
+          -16,
+          8,
+          16
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-88-5q89@-16,12,16",
+        "sourceCommandId": "room-1-se5k/layout/place-88-5q89",
+        "kindId": "colored_block_red",
+        "position": [
+          -16,
+          12,
+          16
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-89-5tax@-20,0,16",
+        "sourceCommandId": "room-1-se5k/layout/place-89-5tax",
+        "kindId": "colored_block_red",
+        "position": [
+          -20,
+          0,
+          16
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8a-5un2@-20,4,16",
+        "sourceCommandId": "room-1-se5k/layout/place-8a-5un2",
+        "kindId": "colored_block_red",
+        "position": [
+          -20,
+          4,
+          16
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8b-5wpl@-20,8,16",
+        "sourceCommandId": "room-1-se5k/layout/place-8b-5wpl",
+        "kindId": "colored_block_red",
+        "position": [
+          -20,
+          8,
+          16
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8e-8uk8@12,0,12",
+        "sourceCommandId": "room-1-se5k/layout/place-8e-8uk8",
+        "kindId": "restaurant_floor_kitchen",
+        "position": [
+          12,
+          0,
+          12
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8f-8yt0@12,0,4",
+        "sourceCommandId": "room-1-se5k/layout/place-8f-8yt0",
+        "kindId": "restaurant_floor_kitchen",
+        "position": [
+          12,
+          0,
+          4
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8g-8yt0@12,0,-4",
+        "sourceCommandId": "room-1-se5k/layout/place-8g-8yt0",
+        "kindId": "restaurant_floor_kitchen",
+        "position": [
+          12,
+          0,
+          -4
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8h-8yt0@12,0,-12",
+        "sourceCommandId": "room-1-se5k/layout/place-8h-8yt0",
+        "kindId": "restaurant_floor_kitchen",
+        "position": [
+          12,
+          0,
+          -12
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8i-90cj@20,0,12",
+        "sourceCommandId": "room-1-se5k/layout/place-8i-90cj",
+        "kindId": "restaurant_floor_kitchen",
+        "position": [
+          20,
+          0,
+          12
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8j-90cj@20,0,4",
+        "sourceCommandId": "room-1-se5k/layout/place-8j-90cj",
+        "kindId": "restaurant_floor_kitchen",
+        "position": [
+          20,
+          0,
+          4
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8k-90cj@20,0,-4",
+        "sourceCommandId": "room-1-se5k/layout/place-8k-90cj",
+        "kindId": "restaurant_floor_kitchen",
+        "position": [
+          20,
+          0,
+          -4
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8l-90cj@20,0,-12",
+        "sourceCommandId": "room-1-se5k/layout/place-8l-90cj",
+        "kindId": "restaurant_floor_kitchen",
+        "position": [
+          20,
+          0,
+          -12
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8m-90cj@28,0,12",
+        "sourceCommandId": "room-1-se5k/layout/place-8m-90cj",
+        "kindId": "restaurant_floor_kitchen",
+        "position": [
+          28,
+          0,
+          12
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8n-90cj@28,0,4",
+        "sourceCommandId": "room-1-se5k/layout/place-8n-90cj",
+        "kindId": "restaurant_floor_kitchen",
+        "position": [
+          28,
+          0,
+          4
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8o-90cj@28,0,-4",
+        "sourceCommandId": "room-1-se5k/layout/place-8o-90cj",
+        "kindId": "restaurant_floor_kitchen",
+        "position": [
+          28,
+          0,
+          -4
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8p-90cj@28,0,-12",
+        "sourceCommandId": "room-1-se5k/layout/place-8p-90cj",
+        "kindId": "restaurant_floor_kitchen",
+        "position": [
+          28,
+          0,
+          -12
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8q-90cj@36,0,12",
+        "sourceCommandId": "room-1-se5k/layout/place-8q-90cj",
+        "kindId": "restaurant_floor_kitchen",
+        "position": [
+          36,
+          0,
+          12
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8r-90cj@36,0,4",
+        "sourceCommandId": "room-1-se5k/layout/place-8r-90cj",
+        "kindId": "restaurant_floor_kitchen",
+        "position": [
+          36,
+          0,
+          4
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8s-90cj@36,0,-4",
+        "sourceCommandId": "room-1-se5k/layout/place-8s-90cj",
+        "kindId": "restaurant_floor_kitchen",
+        "position": [
+          36,
+          0,
+          -4
+        ]
+      },
+      {
+        "id": "room-1-se5k/layout/place-8t-90cj@36,0,-12",
+        "sourceCommandId": "room-1-se5k/layout/place-8t-90cj",
+        "kindId": "restaurant_floor_kitchen",
+        "position": [
+          36,
+          0,
+          -12
+        ]
+      }
+    ]
+  },
+  "lighting": {
+    "sunPosition": [
+      20,
+      40,
+      20
+    ],
+    "sunColor": "#ffffff",
+    "sunIntensity": 1.4,
+    "ambientIntensity": 0.15,
+    "castShadow": true,
+    "shadowRange": 40,
+    "shadowMapSize": 2048,
+    "shadowBias": -0.0005,
+    "shadowNormalBias": 0.02,
+    "auxLightType": "none",
+    "auxIntensity": 1,
+    "auxDistance": 0,
+    "auxAngle": 0.5235987755982988,
+    "auxPenumbra": 0.2,
+    "auxDecay": 2,
+    "showSunDisc": true,
+    "sunDiscRadius": 3,
+    "sunDiscIntensity": 2
+  },
+  "background": {
+    "topColor": "#02030a",
+    "bottomColor": "#1a1238"
+  }
+}

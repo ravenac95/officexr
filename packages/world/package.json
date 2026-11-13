@@ -34,6 +34,7 @@
     "gen:thumbnails": "tsx scripts/gen-thumbnails.ts",
     "bake:dimensions": "tsx scripts/bake-kind-dimensions.ts",
     "bake:layout": "tsx scripts/bake-layout.ts",
+    "export:render-scene": "tsx scripts/export-render-scene.ts",
     "test:bounds-visual": "tsx scripts/test-bounds-visual.ts",
     "scan:colliders": "tsx scripts/scan-kind-colliders.ts"
   },
