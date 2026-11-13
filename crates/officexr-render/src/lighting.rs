@@ -205,7 +205,9 @@ pub(crate) fn plugin(app: &mut App) {
         fit_sun_shadow
             .run_if(resource_exists::<WorldSceneData>)
             .after(SimulationLightSystems::UpdateDirectionalLightCascades)
-            .before(SimulationLightSystems::UpdateLightFrusta),
+            .before(SimulationLightSystems::UpdateLightFrusta)
+            .run_if(resource_exists::<WorldSceneData>)
+            .run_if(resource_exists::<SceneCamera>),
     );
 }
 

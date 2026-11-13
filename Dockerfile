@@ -11,13 +11,13 @@
 #   store   — pnpm's package store, keyed on the lockfile alone
 #   packs   — the asset packs, keyed on their pinned URLs and checksums
 #   browser — Chromium's headless shell, keyed on the playwright-core version
-#   sim     — the @officexr/sim-wasm package, keyed on crates/ and the toolchain
+#   sim     — the @officexr/sim-wasm and @officexr/render-wasm packages, keyed on crates/ and the toolchain
 #   build   — source, install (offline, from the store), bake and build
 
 ARG NODE_IMAGE=node:22.22.3-bookworm-slim
 # Must equal packages/studio-mcp's playwright-core; the runtime stage checks it.
 ARG PLAYWRIGHT_CORE_VERSION=1.60.0
-# Keep in step with .github/actions/build-sim-wasm.
+# Keep in step with .github/actions/build-wasm.
 ARG WASM_PACK_VERSION=0.15.1
 ARG WASM_PACK_SHA256=410101009739b9d01c7d5affaaad6e9c9a24b4cba6791a4805db8e89b9bf7af2
 
@@ -65,11 +65,13 @@ RUN rustup toolchain install
 COPY crates crates
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
-    wasm-pack build crates/officexr-sim-wasm --release --target web --no-pack --out-dir /app/packages/sim-wasm/pkg
+    wasm-pack build crates/officexr-sim-wasm --release --target web --no-pack --out-dir /app/packages/sim-wasm/pkg && \
+    wasm-pack build crates/officexr-render-web --profile wasm-release --target web --no-pack --out-dir /app/packages/render-wasm/pkg
 
 FROM store AS build
 COPY . .
 COPY --from=sim /app/packages/sim-wasm/pkg packages/sim-wasm/pkg
+COPY --from=sim /app/packages/render-wasm/pkg packages/render-wasm/pkg
 RUN pnpm install --offline --frozen-lockfile \
       --filter @officexr/web... --filter @officexr/studio... --filter @officexr/studio-server... \
       --filter @officexr/world...
