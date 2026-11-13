@@ -1,8 +1,13 @@
 //! Golden records of a `SimCore` run (`packages/world/src/sim/trace.ts`).
 
-use serde::{Deserialize, Serialize};
+use std::fmt;
 
+use serde::de::{MapAccess, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
+
+use crate::physics::character_movement::XZ;
 use crate::physics::collider_sync::InvalidTrimesh;
+use crate::proximity::{MeetingArea, PairState, ProximityEvent, ProximityInput, TrackerOutput};
 use crate::sim_core::{SimBakedColliders, SimCore, SimInput, SimKinds, SimPeer, SimStepResult};
 use crate::world_objects::{Vec3, WorldObjects};
 
@@ -58,4 +63,72 @@ pub fn replay(
             sim.step(&frame.step)
         })
         .collect())
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct ProximityTraceFrame {
+    #[serde(deserialize_with = "players_in_key_order")]
+    pub players: Vec<SimPeer>,
+    pub input: ProximityInput,
+}
+
+/// `TrackerOutput` as recorded: maps as key-sorted entry lists.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProximityFrameOutput {
+    pub events: Vec<ProximityEvent>,
+    pub pair_states: Vec<(String, PairState)>,
+    pub player_states: Vec<(String, PairState)>,
+    pub areas: Vec<MeetingArea>,
+    pub conversation_focus: Option<XZ>,
+}
+
+impl From<TrackerOutput> for ProximityFrameOutput {
+    fn from(out: TrackerOutput) -> Self {
+        Self {
+            events: out.events,
+            pair_states: out.pair_states.into_iter().collect(),
+            player_states: out.player_states.into_iter().collect(),
+            areas: out.areas,
+            conversation_focus: out.conversation_focus,
+        }
+    }
+}
+
+/// `outputs[i]` is the proximity tick result of `inputs[i]`.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct ProximityTrace {
+    pub inputs: Vec<ProximityTraceFrame>,
+    pub outputs: Vec<ProximityFrameOutput>,
+}
+
+/// Plays `inputs` on `sim`, returning what each proximity tick returns.
+pub fn replay_proximity(
+    sim: &mut SimCore,
+    inputs: &[ProximityTraceFrame],
+) -> Vec<ProximityFrameOutput> {
+    inputs
+        .iter()
+        .map(|f| sim.tick_proximity(&f.players, &f.input).into())
+        .collect()
+}
+
+/// A JSON players record as a list in its key order, which the tracker's
+/// event order depends on.
+fn players_in_key_order<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<SimPeer>, D::Error> {
+    struct InOrder;
+    impl<'de> Visitor<'de> for InOrder {
+        type Value = Vec<SimPeer>;
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("a map of players by id")
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut players = Vec::new();
+            while let Some((_, p)) = map.next_entry::<String, SimPeer>()? {
+                players.push(p);
+            }
+            Ok(players)
+        }
+    }
+    d.deserialize_map(InOrder)
 }
