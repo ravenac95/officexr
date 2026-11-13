@@ -1,0 +1,28 @@
+{
+  "v": 1,
+  "actorId": "alice",
+  "seq": 7,
+  "t": 1700000000000,
+  "kind": "zombie:state",
+  "state": {
+    "phase": "wave",
+    "wave": 2,
+    "totalKills": 3,
+    "hostId": "alice",
+    "entities": {
+      "z1": {
+        "id": "z1",
+        "pos": {
+          "x": 1,
+          "y": 2,
+          "z": 3
+        },
+        "hp": 5,
+        "target": null
+      }
+    },
+    "playerHealths": {
+      "alice": 100
+    }
+  }
+}

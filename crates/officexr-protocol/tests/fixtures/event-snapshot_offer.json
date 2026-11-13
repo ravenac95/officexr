@@ -1,0 +1,62 @@
+{
+  "v": 1,
+  "actorId": "alice",
+  "seq": 7,
+  "t": 1700000000000,
+  "kind": "snapshot:offer",
+  "target": "bob",
+  "state": {
+    "selfId": "alice",
+    "officeId": "main",
+    "players": {},
+    "proximity": {},
+    "chat": [],
+    "whiteboard": {
+      "strokes": [],
+      "cleared": 0
+    },
+    "zombies": {
+      "phase": "idle",
+      "wave": 0,
+      "totalKills": 0,
+      "hostId": null,
+      "entities": {},
+      "playerHealths": {}
+    },
+    "inventory": [],
+    "screenShares": {},
+    "realtime": {
+      "status": "connecting",
+      "snapshotTarget": null,
+      "versionWarnings": {}
+    },
+    "runtime": {
+      "tickRate": 60,
+      "lastTick": 0,
+      "protocolVersion": 1
+    },
+    "worldMap": {
+      "gridSize": 50,
+      "cubeSize": 2,
+      "origin": {
+        "x": 0,
+        "z": 0
+      },
+      "layers": [],
+      "kinds": {
+        "floor": {
+          "id": "floor",
+          "walkable": true
+        }
+      }
+    },
+    "characterConfigs": {},
+    "worldObjects": {
+      "cubeSize": 2,
+      "instances": []
+    }
+  },
+  "seqTable": {
+    "alice": 7
+  }
+}
