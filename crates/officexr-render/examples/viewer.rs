@@ -20,11 +20,7 @@ fn main() {
     let base = args.next().unwrap_or_else(|| {
         concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/studio/public").into()
     });
-    let base = if base.starts_with("http://") || base.starts_with("https://") {
-        AssetBase::Http(base)
-    } else {
-        AssetBase::Path(base)
-    };
+    let base = AssetBase::parse(base);
     let scene: WorldSceneData = serde_json::from_str(
         &std::fs::read_to_string(&scene_path).unwrap_or_else(|e| panic!("{scene_path}: {e}")),
     )

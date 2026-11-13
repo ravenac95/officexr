@@ -1,11 +1,12 @@
-//! Bevy renderer for OfficeXR world objects, lighting, shadows and sky,
-//! matching `packages/world/src/renderer/`.
+//! Bevy renderer for OfficeXR world objects, baked layouts, lighting,
+//! shadows and sky, matching `packages/world/src/renderer/`.
 //!
 //! Add [`AssetBase`] before `DefaultPlugins` (asset sources must exist
 //! before `AssetPlugin`), then [`OfficeXrRenderPlugin`], and insert a
 //! [`WorldSceneData`] and a [`SceneCamera`]. Changing either respawns the
 //! scene.
 
+mod layouts;
 mod lighting;
 mod objects;
 pub mod placement;
@@ -37,6 +38,15 @@ pub enum AssetBase {
 }
 
 impl AssetBase {
+    /// An `http(s)://` origin, else a directory.
+    pub fn parse(base: String) -> Self {
+        if base.starts_with("http://") || base.starts_with("https://") {
+            AssetBase::Http(base)
+        } else {
+            AssetBase::Path(base)
+        }
+    }
+
     pub fn asset_path(&self, gltf_path: &str) -> String {
         let rel = gltf_path.trim_start_matches('/');
         match self {
@@ -83,6 +93,7 @@ impl Plugin for OfficeXrRenderPlugin {
         ))
         .insert_resource(GlobalAmbientLight::NONE)
         .init_resource::<objects::PendingKinds>()
+        .init_resource::<layouts::PendingLayouts>()
         .add_systems(
             Update,
             (
@@ -91,10 +102,12 @@ impl Plugin for OfficeXrRenderPlugin {
                     spawn_camera,
                     lighting::spawn_lights,
                     objects::request_kinds,
+                    layouts::request_layouts,
                 )
                     .chain()
                     .run_if(scene_changed),
-                objects::spawn_loaded_kinds.run_if(resource_exists::<WorldSceneData>),
+                (objects::spawn_loaded_kinds, layouts::spawn_loaded_layouts)
+                    .run_if(resource_exists::<WorldSceneData>),
             )
                 .chain(),
         );

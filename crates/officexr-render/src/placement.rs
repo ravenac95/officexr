@@ -1,9 +1,9 @@
-//! Port of `geometry-service.ts`'s `meshTransform`.
+//! Ports of `geometry-service.ts`'s `meshTransform` and `placement-transform.ts`.
 
 use bevy::math::{Quat, Vec3};
 use bevy::transform::components::Transform;
 
-use crate::scene::{ObjectInstance, WorldObjectKind};
+use crate::scene::{BakedLayoutPlacement, ObjectInstance, WorldObjectKind};
 
 pub const VOXEL_SIZE: f32 = 0.5;
 
@@ -55,6 +55,14 @@ pub fn mesh_transform(inst: &ObjectInstance, kind: &WorldObjectKind) -> Transfor
         translation,
         rotation: Quat::from_rotation_y(yaw_rad as f32),
         scale: Vec3::splat(kind.scale),
+    }
+}
+
+pub fn baked_layout_transform(p: &BakedLayoutPlacement) -> Transform {
+    Transform {
+        translation: Vec3::from(p.position) * VOXEL_SIZE,
+        rotation: Quat::from_rotation_y(p.rotation_y as f32 * std::f32::consts::FRAC_PI_2),
+        scale: Vec3::ONE,
     }
 }
 
