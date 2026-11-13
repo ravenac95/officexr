@@ -28,11 +28,38 @@ pub struct ColliderSync {
 
 impl ColliderSync {
     /// Replaces every static collider with `sets`.
-    pub fn set_static(&mut self, world: &mut PhysicsWorld, sets: &[StaticColliderSet]) {
+    /// Replaces every static collider with `sets`, or changes nothing when
+    /// one of them is an invalid trimesh (rapier.js throws there).
+    pub fn set_static(
+        &mut self,
+        world: &mut PhysicsWorld,
+        sets: &[StaticColliderSet],
+    ) -> Result<(), InvalidTrimesh> {
+        let built = sets
+            .iter()
+            .map(|s| {
+                let colliders = s
+                    .colliders
+                    .iter()
+                    .map(collider_builder)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((body_builder(s), colliders))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         for b in self.static_bodies.drain(..) {
             world.remove_rigid_body(b);
         }
-        self.static_bodies = sets.iter().map(|s| add_static(world, s)).collect();
+        self.static_bodies = built
+            .into_iter()
+            .map(|(body, colliders)| {
+                let body = world.bodies.insert(body);
+                for c in colliders {
+                    world.insert_collider(c.collision_groups(WALL_GROUPS), body);
+                }
+                body
+            })
+            .collect();
+        Ok(())
     }
 
     /// Creates, moves (as of the next world step) and removes one ball
@@ -122,7 +149,12 @@ pub fn set_ball_radius(world: &mut PhysicsWorld, collider: ColliderHandle, radiu
     }
 }
 
-fn add_static(world: &mut PhysicsWorld, set: &StaticColliderSet) -> RigidBodyHandle {
+/// A trimesh descriptor Rapier can't build: flat arrays not in triples,
+/// out-of-range indices, or degenerate geometry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InvalidTrimesh(pub String);
+
+fn body_builder(set: &StaticColliderSet) -> RigidBodyBuilder {
     let mut desc = RigidBodyBuilder::fixed();
     if let Some(p) = set.position {
         desc = desc.translation(p.to_rapier());
@@ -141,30 +173,83 @@ fn add_static(world: &mut PhysicsWorld, set: &StaticColliderSet) -> RigidBodyHan
             rotation,
         ));
     }
-    let body = world.bodies.insert(desc);
-    for c in set.colliders {
-        let desc = match c {
-            ColliderDescriptor::Cuboid {
-                center,
-                half_extents,
-            } => ColliderBuilder::cuboid(
-                half_extents.x as Real,
-                half_extents.y as Real,
-                half_extents.z as Real,
-            )
-            .translation(center.to_rapier()),
-            ColliderDescriptor::Trimesh { vertices, indices } => ColliderBuilder::trimesh(
+    desc
+}
+
+fn collider_builder(c: &ColliderDescriptor) -> Result<ColliderBuilder, InvalidTrimesh> {
+    match c {
+        ColliderDescriptor::Cuboid {
+            center,
+            half_extents,
+        } => Ok(ColliderBuilder::cuboid(
+            half_extents.x as Real,
+            half_extents.y as Real,
+            half_extents.z as Real,
+        )
+        .translation(center.to_rapier())),
+        ColliderDescriptor::Trimesh { vertices, indices } => {
+            let (vertices, []) = vertices.as_chunks::<3>() else {
+                return Err(InvalidTrimesh(format!("{} vertex floats", vertices.len())));
+            };
+            let (triangles, []) = indices.as_chunks::<3>() else {
+                return Err(InvalidTrimesh(format!("{} indices", indices.len())));
+            };
+            // parry panics on an out-of-range index instead of erroring.
+            if let Some(i) = indices.iter().find(|&&i| i as usize >= vertices.len()) {
+                return Err(InvalidTrimesh(format!(
+                    "index {i} of {} vertices",
+                    vertices.len()
+                )));
+            }
+            ColliderBuilder::trimesh(
                 vertices
-                    .as_chunks::<3>()
-                    .0
                     .iter()
                     .map(|v| point![v[0] as Real, v[1] as Real, v[2] as Real])
                     .collect(),
-                indices.as_chunks::<3>().0.to_vec(),
+                triangles.to_vec(),
             )
-            .expect("baked and kind trimeshes are validated upstream"),
-        };
-        world.insert_collider(desc.collision_groups(WALL_GROUPS), body);
+            .map_err(|e| InvalidTrimesh(e.to_string()))
+        }
     }
-    body
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn set(colliders: &[ColliderDescriptor]) -> StaticColliderSet<'_> {
+        StaticColliderSet {
+            colliders,
+            position: None,
+            yaw_rad: 0.0,
+        }
+    }
+
+    fn trimesh(vertices: Vec<f64>, indices: Vec<u32>) -> ColliderDescriptor {
+        ColliderDescriptor::Trimesh { vertices, indices }
+    }
+
+    #[test]
+    fn rejects_an_invalid_trimesh_and_keeps_the_old_colliders() {
+        let mut world = PhysicsWorld::new(0.0);
+        let mut sync = ColliderSync::default();
+        let ok = [trimesh(
+            vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+            vec![0, 1, 2],
+        )];
+        sync.set_static(&mut world, &[set(&ok)]).unwrap();
+
+        let tri = vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+        for bad in [
+            trimesh(tri.clone(), vec![0, 1, 2, 0]),
+            trimesh(tri[..8].to_vec(), vec![0, 1, 2]),
+            trimesh(tri.clone(), vec![0, 1, 7]),
+        ] {
+            assert!(
+                sync.set_static(&mut world, &[set(std::slice::from_ref(&bad))])
+                    .is_err()
+            );
+            assert_eq!(world.colliders.len(), 1);
+        }
+    }
 }

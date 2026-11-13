@@ -240,3 +240,15 @@ fn rotate_about_centre(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn respawns_only_when_both_fall_gates_hold() {
+        assert!(should_respawn_falling(-MAX_FALL_VELOCITY, false));
+        assert!(!should_respawn_falling(-MAX_FALL_VELOCITY, true));
+        assert!(!should_respawn_falling(-MAX_FALL_VELOCITY + 1.0, false));
+    }
+}

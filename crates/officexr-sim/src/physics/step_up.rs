@@ -89,3 +89,53 @@ pub fn try_step_up(probe: &mut impl StepUpProbe, dx: f64, dz: f64) -> Option<Vec
         z: up.z + fwd.z + down.movement.z,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Free space with a 0.5 m ledge ahead; `character` marks every contact as a peer.
+    struct LedgeProbe {
+        pos: Vec3,
+        character: bool,
+    }
+
+    impl StepUpProbe for LedgeProbe {
+        fn compute(&mut self, desired: Vec3) -> StepUpComputeResult {
+            let landing = if desired.y < 0.0 { -0.1 } else { desired.y };
+            StepUpComputeResult {
+                movement: Vec3 {
+                    y: landing,
+                    ..desired
+                },
+                grounded: desired.y < 0.0,
+            }
+        }
+        fn translation(&self) -> Vec3 {
+            self.pos
+        }
+        fn set_translation(&mut self, p: Vec3) {
+            self.pos = p;
+        }
+        fn last_contact_is_character(&self) -> bool {
+            self.character
+        }
+    }
+
+    #[test]
+    fn climbs_a_ledge_but_never_a_character() {
+        let mut ledge = LedgeProbe {
+            pos: Vec3::default(),
+            character: false,
+        };
+        assert!(try_step_up(&mut ledge, 0.05, 0.0).is_some_and(|d| d.y > 0.0));
+        assert_eq!(ledge.pos, Vec3::default());
+
+        let mut peer = LedgeProbe {
+            pos: Vec3::default(),
+            character: true,
+        };
+        assert_eq!(try_step_up(&mut peer, 0.05, 0.0), None);
+        assert_eq!(peer.pos, Vec3::default());
+    }
+}

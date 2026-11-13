@@ -45,18 +45,18 @@ fn compare(name: &str, actual: &[SimStepResult], golden: &[SimStepResult]) -> (f
                 .max((ab.normal.z - gb.normal.z).abs());
             assert!(n <= TOLERANCE, "{at}.bumps normal off by {n}");
         }
-        pos = pos.max(max_diff(a.new_pos, g.new_pos));
-        vel = vel
-            .max(max_diff(a.broadcast_vel, g.broadcast_vel))
-            .max((a.vel_y - g.vel_y).abs());
+        let frame_pos = max_diff(a.new_pos, g.new_pos);
+        let frame_vel = max_diff(a.broadcast_vel, g.broadcast_vel).max((a.vel_y - g.vel_y).abs());
+        pos = pos.max(frame_pos);
+        vel = vel.max(frame_vel);
         assert!(
-            pos <= TOLERANCE,
+            frame_pos <= TOLERANCE,
             "{at}.newPos {:?} vs {:?}",
             a.new_pos,
             g.new_pos
         );
         assert!(
-            vel <= TOLERANCE,
+            frame_vel <= TOLERANCE,
             "{at} velocity {:?}/{} vs {:?}/{}",
             a.broadcast_vel,
             a.vel_y,
@@ -82,7 +82,7 @@ fn replays_every_movement_trace() {
             .unwrap_or_else(|e| panic!("{name}: {e}"));
         let char_radius = trace.inputs[0].step.settings.char_radius;
         let mut sim = SimCore::new(char_radius);
-        let outputs = replay(&mut sim, &trace.map, &trace.inputs);
+        let outputs = replay(&mut sim, &trace.map, &trace.inputs).expect("valid colliders");
         let (pos, vel) = compare(&name, &outputs, &trace.outputs);
         println!("{name}: max position error {pos:e} m, max velocity error {vel:e} m/s");
     }

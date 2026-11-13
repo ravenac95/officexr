@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::physics::air_control::step_air_velocity;
 use crate::physics::blocking::horizontal_progress;
 use crate::physics::character_movement::{AnimState, PeerBump, XZ};
-use crate::physics::collider_sync::{ColliderSync, StaticColliderSet, set_ball_radius};
+use crate::physics::collider_sync::{
+    ColliderSync, InvalidTrimesh, StaticColliderSet, set_ball_radius,
+};
 use crate::physics::groups::BODY_GROUPS;
 use crate::physics::kcc_step_up_probe::KccStepUpProbe;
 use crate::physics::rapier_world::{CharacterController, PhysicsWorld};
@@ -192,7 +194,7 @@ impl SimCore {
         world_objects: &WorldObjects,
         kinds: &SimKinds,
         baked_colliders: &[SimBakedColliders],
-    ) {
+    ) -> Result<(), InvalidTrimesh> {
         let layout_prefixes: Vec<String> = baked_colliders
             .iter()
             .map(|b| format!("{}/layout/", b.room_instance_id))
@@ -218,9 +220,10 @@ impl SimCore {
             yaw_rad: b.yaw_rad,
         }))
         .collect();
-        self.colliders.set_static(&mut self.world, &sets);
+        self.colliders.set_static(&mut self.world, &sets)?;
         self.world_objects = world_objects.clone();
         self.world.step();
+        Ok(())
     }
 
     /// Peers absent from `peers` lose their mirrors.
@@ -445,5 +448,48 @@ impl SimCore {
             },
         );
         self.controller.computed_movement()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input(char_radius: f64) -> SimInput {
+        SimInput {
+            dt_sec: 1.0 / 60.0,
+            now_ms: 0.0,
+            dir: XZ::default(),
+            speed: 0.0,
+            running: false,
+            yaw: 0.0,
+            jump: false,
+            settings: SimSettings {
+                char_radius,
+                movement_block_threshold: 0.9,
+                jump_velocity: 8.0,
+                air_control: 0.2,
+                max_jumps: 2,
+                landing_ease_ms: 120.0,
+            },
+            spawn_points: vec![],
+        }
+    }
+
+    fn radius(sim: &SimCore) -> Real {
+        sim.world.colliders[sim.body_collider]
+            .shape()
+            .as_ball()
+            .unwrap()
+            .radius
+    }
+
+    #[test]
+    fn steps_resize_the_body_only_when_the_f32_radius_changes() {
+        let mut sim = SimCore::new(0.4);
+        sim.step(&input(0.4 + 1e-12));
+        assert_eq!(radius(&sim), 0.4_f32);
+        sim.step(&input(0.5));
+        assert_eq!(radius(&sim), 0.5_f32);
     }
 }

@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::physics::collider_sync::InvalidTrimesh;
 use crate::sim_core::{SimBakedColliders, SimCore, SimInput, SimKinds, SimPeer, SimStepResult};
 use crate::world_objects::{Vec3, WorldObjects};
 
@@ -39,9 +40,13 @@ pub struct SimTrace {
 }
 
 /// Plays `inputs` on `sim` over `map`, returning what each step returns.
-pub fn replay(sim: &mut SimCore, map: &SimMap, inputs: &[SimTraceFrame]) -> Vec<SimStepResult> {
-    sim.set_static_colliders(&map.world_objects, &map.kinds, &map.baked_colliders);
-    inputs
+pub fn replay(
+    sim: &mut SimCore,
+    map: &SimMap,
+    inputs: &[SimTraceFrame],
+) -> Result<Vec<SimStepResult>, InvalidTrimesh> {
+    sim.set_static_colliders(&map.world_objects, &map.kinds, &map.baked_colliders)?;
+    Ok(inputs
         .iter()
         .map(|frame| {
             if let Some(pos) = frame.teleport {
@@ -52,5 +57,5 @@ pub fn replay(sim: &mut SimCore, map: &SimMap, inputs: &[SimTraceFrame]) -> Vec<
             }
             sim.step(&frame.step)
         })
-        .collect()
+        .collect())
 }

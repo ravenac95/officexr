@@ -8,6 +8,7 @@ pub mod trace;
 mod world_objects;
 
 pub use physics::character_movement::{AnimState, PeerBump};
+pub use physics::collider_sync::InvalidTrimesh;
 pub use physics::rules::{ColliderDescriptor, ColliderShapeSpec};
 pub use sim_core::{
     SimBakedColliders, SimCore, SimInput, SimKind, SimKinds, SimPeer, SimSettings, SimStepResult,
