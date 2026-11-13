@@ -4009,6 +4009,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "officexr-client"
+version = "0.0.0"
+dependencies = [
+ "bevy",
+ "officexr-protocol",
+ "officexr-render",
+ "officexr-sim",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "officexr-protocol"
 version = "0.0.0"
 dependencies = [

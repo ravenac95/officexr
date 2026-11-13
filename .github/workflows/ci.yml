@@ -98,3 +98,6 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --all-features
+
+      - name: Build client (Linux)
+        run: cargo build -p officexr-client
