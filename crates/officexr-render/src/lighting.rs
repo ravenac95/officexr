@@ -203,6 +203,7 @@ pub(crate) fn plugin(app: &mut App) {
     app.add_systems(
         PostUpdate,
         fit_sun_shadow
+            .run_if(resource_exists::<WorldSceneData>)
             .after(SimulationLightSystems::UpdateDirectionalLightCascades)
             .before(SimulationLightSystems::UpdateLightFrusta),
     );
