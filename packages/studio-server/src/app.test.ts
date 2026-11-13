@@ -683,8 +683,11 @@ describe('public /mcp', () => {
   it('shares the heavy-work lock between the ports', async () => {
     let release!: () => void;
     const held = new Promise<void>((resolve) => (release = resolve));
+    let started!: () => void;
+    const rendering = new Promise<void>((resolve) => (started = resolve));
     const { pub, internal, token } = await bootWithOAuth({
       render: async () => {
+        started();
         await held;
         return { png: new Uint8Array([1]), bounds: { min: [0, 0, 0], max: [1, 1, 1] } };
       },
@@ -697,6 +700,8 @@ describe('public /mcp', () => {
       await publicClient.callTool({ name: 'put_room', arguments: { name: 'hall', room: emptyRoomDocument('hall') } });
       const args = { target: { type: 'room', name: 'hall' }, camera: 'top' };
       const first = publicClient.callTool({ name: 'render_view', arguments: args });
+      // Probe only once the first call holds the lock, or the probe can take it and block on `held`.
+      await rendering;
       await vi.waitFor(async () => expect(await internalClient.callTool({ name: 'render_view', arguments: args })).toHaveProperty('isError', true));
       release();
       expect(await first).not.toHaveProperty('isError', true);
