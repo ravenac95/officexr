@@ -1,5 +1,5 @@
-name: Build sim wasm
-description: Builds @officexr/sim-wasm (packages/sim-wasm/pkg) from crates/officexr-sim-wasm. Run after pnpm install.
+name: Build wasm packages
+description: Builds @officexr/sim-wasm and @officexr/render-wasm (packages/*/pkg) from crates/officexr-sim-wasm and crates/officexr-render-web. Run after pnpm install.
 
 runs:
   using: composite
@@ -14,7 +14,7 @@ runs:
 
     - uses: Swatinem/rust-cache@v2
       with:
-        key: sim-wasm
+        key: wasm
 
     - name: Install wasm-pack
       shell: bash
@@ -30,4 +30,4 @@ runs:
 
     - name: Build
       shell: bash
-      run: pnpm --filter @officexr/sim-wasm build
+      run: pnpm --filter @officexr/sim-wasm --filter @officexr/render-wasm build

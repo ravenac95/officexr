@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { useApplication } from '@officexr/world/react';
 import { BakeRunner } from './BakeRunner.tsx';
+import { BevyPage } from './BevyPage.tsx';
 import { BoundsScene } from './BoundsScene.tsx';
 import { RenderPage } from './RenderPage.tsx';
 
@@ -36,6 +37,9 @@ export function HeadlessApp({ op, sceneId }: { op: string; sceneId?: string }) {
   if (op === 'render') {
     return <RenderPage />;
   }
+  if (op === 'bevy') {
+    return <BevyPage mugshot={new URLSearchParams(window.location.search).get('mugshot')} />;
+  }
   return (
     <div
       style={{
@@ -48,7 +52,7 @@ export function HeadlessApp({ op, sceneId }: { op: string; sceneId?: string }) {
       }}
     >
       <h1>Unknown headless op</h1>
-      <p>Got `?op={op}`. Known: bake, bounds-scene, render.</p>
+      <p>Got `?op={op}`. Known: bake, bounds-scene, render, bevy.</p>
     </div>
   );
 }

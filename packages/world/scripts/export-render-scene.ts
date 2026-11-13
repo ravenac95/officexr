@@ -15,10 +15,8 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NodeIO } from '@gltf-transform/core';
-import { EXTMeshoptCompression, KHRMeshQuantization } from '@gltf-transform/extensions';
-import { dequantize } from '@gltf-transform/functions';
 import { DEFAULT_WORLD_CONSTANTS } from '@officexr/sdk';
-import { registerCompressionCodecs } from '../src/app/glb-compression.ts';
+import { decodeCompressedGlb, registerCompressionCodecs } from '../src/app/glb-compression.ts';
 import { createCatalogService } from '../src/app/catalog-service.ts';
 import { createInstanceGeometry } from '../src/app/geometry-service.ts';
 import { loadMap } from '../src/app/map-loader.ts';
@@ -33,23 +31,16 @@ import { validateWorldObjectKindCatalog } from '../src/scenes/world-object-kinds
 const WORLD_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STUDIO_PUBLIC = path.resolve(WORLD_ROOT, '../studio/public');
 const EDITOR_BACKGROUND = '#1b1d22';
-const COMPRESSION_EXTENSIONS = new Set<string>([EXTMeshoptCompression.EXTENSION_NAME, KHRMeshQuantization.EXTENSION_NAME]);
 
-// ponytail: decoded offline; serving `/api/baked-layouts` to Bevy directly needs a Rust meshopt decoder.
 async function decodeBakedLayout(io: NodeIO, name: string): Promise<string> {
   const baked = path.resolve(WORLD_ROOT, 'baked-layouts', `${name}.glb`);
-  const doc = await io.read(baked).catch((err: unknown) => {
+  const glb = await fs.readFile(baked).catch((err: unknown) => {
     throw new Error(`cannot read ${baked}; run \`pnpm --filter @officexr/world bake:layout ${name}\``, { cause: err });
   });
-  await doc.transform(dequantize());
-  for (const ext of doc.getRoot().listExtensionsUsed()) {
-    if (COMPRESSION_EXTENSIONS.has(ext.extensionName)) {
-      ext.dispose();
-    }
-  }
+  const decoded = await decodeCompressedGlb(io, glb);
   const gltfPath = `/baked-layouts/${name}.glb`;
   await fs.mkdir(path.resolve(STUDIO_PUBLIC, 'baked-layouts'), { recursive: true });
-  await io.write(path.resolve(STUDIO_PUBLIC, gltfPath.slice(1)), doc);
+  await fs.writeFile(path.resolve(STUDIO_PUBLIC, gltfPath.slice(1)), decoded);
   return gltfPath;
 }
 

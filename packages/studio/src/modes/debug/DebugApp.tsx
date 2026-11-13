@@ -29,7 +29,7 @@ import { paths, studioApiOptions } from '../../apiOrigin.ts';
 const SELF_ID = 'local-player';
 const OFFICE_ID = 'studio-office';
 
-function createStorages() {
+export function createStorages() {
   try {
     return {
       maps: new FilesystemMapStorage(studioApiOptions(paths.maps)),

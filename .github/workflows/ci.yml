@@ -25,7 +25,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - uses: ./.github/actions/build-sim-wasm
+      - uses: ./.github/actions/build-wasm
 
       - name: Typecheck
         run: pnpm typecheck
