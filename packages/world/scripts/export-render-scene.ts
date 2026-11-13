@@ -33,7 +33,7 @@ import { validateWorldObjectKindCatalog } from '../src/scenes/world-object-kinds
 const WORLD_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STUDIO_PUBLIC = path.resolve(WORLD_ROOT, '../studio/public');
 const EDITOR_BACKGROUND = '#1b1d22';
-const COMPRESSION_EXTENSIONS = new Set([EXTMeshoptCompression.EXTENSION_NAME, KHRMeshQuantization.EXTENSION_NAME]);
+const COMPRESSION_EXTENSIONS = new Set<string>([EXTMeshoptCompression.EXTENSION_NAME, KHRMeshQuantization.EXTENSION_NAME]);
 
 // ponytail: decoded offline; serving `/api/baked-layouts` to Bevy directly needs a Rust meshopt decoder.
 async function decodeBakedLayout(io: NodeIO, name: string): Promise<string> {
