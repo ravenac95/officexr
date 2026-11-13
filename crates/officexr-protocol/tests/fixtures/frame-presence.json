@@ -1,0 +1,9 @@
+{
+  "t": "presence",
+  "joined": [
+    "bob"
+  ],
+  "left": [
+    "carol"
+  ]
+}

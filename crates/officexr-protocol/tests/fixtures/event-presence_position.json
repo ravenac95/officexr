@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "actorId": "alice",
+  "seq": 7,
+  "t": 1700000000000,
+  "kind": "presence:position",
+  "pos": {
+    "x": 1,
+    "y": 2,
+    "z": 3
+  },
+  "vel": {
+    "x": 1,
+    "y": 2,
+    "z": 3
+  },
+  "yaw": 0.5,
+  "isAirborne": false
+}
