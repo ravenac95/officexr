@@ -7,3 +7,10 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# Size over speed for the browser bundles, which Pages caps at 25 MiB per file.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1

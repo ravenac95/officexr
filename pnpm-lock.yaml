@@ -71,6 +71,8 @@ importers:
         specifier: 3.25.2
         version: 3.25.2(zod@3.25.76)
 
+  packages/render-wasm: {}
+
   packages/sdk:
     dependencies:
       zod:
@@ -185,6 +187,9 @@ importers:
       '@officexr/realtime-server':
         specifier: workspace:*
         version: link:../realtime-server
+      '@officexr/render-wasm':
+        specifier: workspace:*
+        version: link:../render-wasm
       '@officexr/sdk':
         specifier: workspace:*
         version: link:../sdk

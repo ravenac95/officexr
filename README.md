@@ -177,7 +177,8 @@ The studio backend is a separate process, `pnpm --filter @officexr/studio-server
 ## Building
 
 ```bash
-pnpm --filter @officexr/sim-wasm build   # the wasm simulation, needed first; see crates/README.md
+pnpm --filter @officexr/sim-wasm build      # the wasm simulation, needed first; see crates/README.md
+pnpm --filter @officexr/render-wasm build   # the Bevy renderer for the studio's ?op=bevy (slow LTO build)
 pnpm build                  # outputs the SPA to packages/web/dist/
 ```
 
@@ -185,7 +186,7 @@ pnpm build                  # outputs the SPA to packages/web/dist/
 
 Host the SPA on Pages with the backend on another origin. The `pages-deploy` workflow
 (`.github/workflows/pages-deploy.yml`) builds and deploys it from GitHub Actions, since Cloudflare's Git build has no
-Rust toolchain for the wasm simulation: it builds `@officexr/sim-wasm`, runs `pnpm build:pages` (web app at `/`, studio
+Rust toolchain for the wasm packages: it builds `@officexr/sim-wasm` and `@officexr/render-wasm` (failing if a wasm file tops Pages' 25 MiB cap), runs `pnpm build:pages` (web app at `/`, studio
 at `/studio/`) and runs `wrangler pages deploy packages/web/dist`. Pushes to `main` deploy production (set the Pages
 project's production branch to `main`); other branches deploy previews, and a PR gets a comment with its preview URL.
 Without the secrets below, as on fork PRs, the workflow skips the deploy.

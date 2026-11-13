@@ -9,6 +9,8 @@
 mod avatars;
 mod layouts;
 mod lighting;
+#[cfg(feature = "mugshot")]
+mod mugshot;
 mod objects;
 pub mod placement;
 pub mod scene;
@@ -22,9 +24,11 @@ use bevy::light::GlobalAmbientLight;
 use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 
-pub use avatars::{Motion, PlayerRender, Players, next_motion};
+pub use avatars::{Bound as AvatarBound, Motion, PlayerRender, Players, next_motion};
 pub use layouts::PendingLayouts;
 pub use lighting::{HemisphereFill, ObjectMaterial, snap_to_shadow_texel};
+#[cfg(feature = "mugshot")]
+pub use mugshot::mugshot_player;
 pub use objects::{PendingKinds, apply_overrides};
 pub use scene::*;
 pub use sky::{SkyMaterial, sun_sky_params};
@@ -51,6 +55,10 @@ impl AssetBase {
     }
 
     pub fn asset_path(&self, gltf_path: &str) -> String {
+        // Already absolute, e.g. a decoded layout from the page's own origin.
+        if gltf_path.starts_with("http://") || gltf_path.starts_with("https://") {
+            return gltf_path.to_string();
+        }
         let rel = gltf_path.trim_start_matches('/');
         match self {
             AssetBase::Path(_) => format!("{LOCAL_SOURCE}://{rel}"),
