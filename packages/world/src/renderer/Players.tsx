@@ -459,12 +459,8 @@ export function Players({
             type="kinematicPosition"
             colliders={false}
             position={[spawn.x, spawn.y, spawn.z]}
-            // playerId on userData lets `SceneFrame` recognise which
-            // peer's body the character controller bumped into (the
-            // controller resolves movement via the query pipeline so
-            // the contact pipeline never fires collision events for
-            // these slides — we have to look at the controller's own
-            // collision list and map back to a peer ID).
+            // playerId on userData lets the bridge map this body's
+            // proximity and bump events back to a peer ID.
             userData={{ playerId: p.id }}
             ref={(b: RapierRigidBody | null) => {
               if (b) {

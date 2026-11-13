@@ -4,7 +4,8 @@ import type { Store } from '@officexr/sdk';
 import { useApplication } from '../react/application-context.tsx';
 import { WALL_GROUPS } from '../physics/groups.ts';
 import { worldObjectsToColliders } from '../physics/rules.ts';
-import { useStoreWorldObjects, type ExcludeInstance } from './useStoreWorldObjects.ts';
+import type { ExcludeInstance } from '../scenes/compile-map.ts';
+import { useStoreWorldObjects } from './useStoreWorldObjects.ts';
 
 interface MapCollidersProps {
   store: Store;
