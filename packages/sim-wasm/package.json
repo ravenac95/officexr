@@ -1,0 +1,13 @@
+{
+  "name": "@officexr/sim-wasm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./pkg/officexr_sim_wasm.js",
+    "./officexr_sim_wasm_bg.wasm": "./pkg/officexr_sim_wasm_bg.wasm"
+  },
+  "scripts": {
+    "build": "wasm-pack build ../../crates/officexr-sim-wasm --release --target web --no-pack --out-dir ../../packages/sim-wasm/pkg"
+  }
+}

@@ -13,7 +13,7 @@ export { useStoreSelector } from './useStoreSelector.ts';
 export { useWorldConstants } from './useWorldConstants.ts';
 export { GAMEPLAY_CAMERA_MODES, useCameraMode, type GameplayCameraMode } from './useCameraMode.ts';
 export { ErrorBanner, type HudRealtime } from './hud.tsx';
-export { PlayView, type PlayViewProps } from './PlayView.tsx';
+export { PlayView, simFromSearch, type PlayViewProps } from './PlayView.tsx';
 export { WorldLoadingScreen, type WorldLoadingScreenProps } from './LoadingScreen.tsx';
 export {
   usePlaySession,

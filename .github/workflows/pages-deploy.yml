@@ -1,0 +1,95 @@
+name: Pages deploy
+
+# Builds the SPA (web at /, studio at /studio/) and deploys it to Cloudflare
+# Pages: pushes to main go to production, every other branch to a preview.
+# Skips the deploy when the Cloudflare secrets or project name are missing,
+# as on fork PRs.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Check Cloudflare config
+        id: config
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ] && [ -n "$PROJECT" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Skipping the Pages deploy: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID or CLOUDFLARE_PAGES_PROJECT is not set."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.config.outputs.deploy == 'true'
+
+      - uses: pnpm/action-setup@v4
+        if: steps.config.outputs.deploy == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.config.outputs.deploy == 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        if: steps.config.outputs.deploy == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - uses: ./.github/actions/build-sim-wasm
+        if: steps.config.outputs.deploy == 'true'
+
+      - name: Build
+        if: steps.config.outputs.deploy == 'true'
+        env:
+          VITE_API_ORIGIN: ${{ vars.VITE_API_ORIGIN }}
+          VITE_ASSET_BASE_URL: ${{ vars.VITE_ASSET_BASE_URL }}
+          VITE_STUDIO_API_ORIGIN: ${{ vars.VITE_STUDIO_API_ORIGIN }}
+        run: pnpm build:pages
+
+      - name: Deploy
+        id: deploy
+        if: steps.config.outputs.deploy == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          WRANGLER_OUTPUT_FILE_DIRECTORY: ${{ runner.temp }}/wrangler
+        run: |
+          npx --yes wrangler@4.20.0 pages deploy packages/web/dist --project-name="$PROJECT" --branch="$BRANCH"
+          url=$(jq -rs 'map(select(.type == "pages-deploy-detailed")) | last | .url' "$WRANGLER_OUTPUT_FILE_DIRECTORY"/*.json)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Comment the preview URL
+        if: steps.config.outputs.deploy == 'true' && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        with:
+          script: |
+            const marker = '<!-- pages-deploy -->';
+            const body = `${marker}\nPages preview: ${process.env.URL} (Rust sim: ${process.env.URL}/?sim=rust, studio: ${process.env.URL}/studio/?sim=rust#debug)`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find((c) => c.body?.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }

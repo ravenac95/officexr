@@ -11,11 +11,14 @@
 #   store   — pnpm's package store, keyed on the lockfile alone
 #   packs   — the asset packs, keyed on their pinned URLs and checksums
 #   browser — Chromium's headless shell, keyed on the playwright-core version
+#   sim     — the @officexr/sim-wasm package, keyed on crates/ and the toolchain
 #   build   — source, install (offline, from the store), bake and build
 
 ARG NODE_IMAGE=node:22.22.3-bookworm-slim
 # Must equal packages/studio-mcp's playwright-core; the runtime stage checks it.
 ARG PLAYWRIGHT_CORE_VERSION=1.60.0
+# Keep in step with .github/actions/build-sim-wasm.
+ARG WASM_PACK_VERSION=0.15.1
 
 FROM ${NODE_IMAGE} AS store
 ENV PNPM_HOME=/pnpm
@@ -44,8 +47,23 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN npx -y "playwright-core@${PLAYWRIGHT_CORE_VERSION}" install --only-shell chromium && \
     ln -s "$(find /ms-playwright -type f -name chrome-headless-shell)" /ms-playwright/chrome-headless-shell
 
+FROM rust:1.100.0-bookworm AS sim
+ARG WASM_PACK_VERSION
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends clang lld && \
+    rm -rf /var/lib/apt/lists/* && \
+    curl -sSfL "https://github.com/rustwasm/wasm-pack/releases/download/v${WASM_PACK_VERSION}/wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+      | tar -xz --strip-components=1 -C /usr/local/cargo/bin "wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl/wasm-pack"
+WORKDIR /app
+COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
+COPY .cargo .cargo
+RUN rustup toolchain install
+COPY crates crates
+RUN wasm-pack build crates/officexr-sim-wasm --release --target web --no-pack --out-dir /app/packages/sim-wasm/pkg
+
 FROM store AS build
 COPY . .
+COPY --from=sim /app/packages/sim-wasm/pkg packages/sim-wasm/pkg
 RUN pnpm install --offline --frozen-lockfile \
       --filter @officexr/web... --filter @officexr/studio... --filter @officexr/studio-server... \
       --filter @officexr/world...

@@ -1,0 +1,30 @@
+name: Build sim wasm
+description: Builds @officexr/sim-wasm (packages/sim-wasm/pkg) from crates/officexr-sim-wasm. Run after pnpm install.
+
+runs:
+  using: composite
+  steps:
+    - name: Install linker
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang lld
+
+    - name: Install toolchain
+      shell: bash
+      run: rustup toolchain install
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        key: sim-wasm
+
+    - name: Install wasm-pack
+      shell: bash
+      # Keep in step with WASM_PACK_VERSION in the Dockerfile.
+      env:
+        WASM_PACK_VERSION: 0.15.1
+      run: |
+        curl -sSfL "https://github.com/rustwasm/wasm-pack/releases/download/v${WASM_PACK_VERSION}/wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+          | tar -xz --strip-components=1 -C "$HOME/.cargo/bin" "wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl/wasm-pack"
+
+    - name: Build
+      shell: bash
+      run: pnpm --filter @officexr/sim-wasm build
