@@ -1,4 +1,7 @@
-use std::time::Duration;
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
@@ -22,22 +25,37 @@ pub struct Config {
     pub login: Option<String>,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
     /// Close code 4001: a newer session of the same login took over. The client does not reconnect.
-    #[error("replaced by a newer session")]
     Replaced,
     /// Close code 4003: the server refused the `hello`. The client does not reconnect.
-    #[error("rejected by the server: {0}")]
     Rejected(String),
-    #[error("token fetch failed: {0}")]
-    Token(#[from] reqwest::Error),
-    #[error("websocket error: {0}")]
+    Token(reqwest::Error),
     Ws(Box<tokio_tungstenite::tungstenite::Error>),
-    #[error("connection closed")]
     Closed,
-    #[error("handshake timed out")]
     HandshakeTimeout,
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Replaced => write!(f, "replaced by a newer session"),
+            Self::Rejected(reason) => write!(f, "rejected by the server: {reason}"),
+            Self::Token(err) => write!(f, "token fetch failed: {err}"),
+            Self::Ws(err) => write!(f, "websocket error: {err}"),
+            Self::Closed => write!(f, "connection closed"),
+            Self::HandshakeTimeout => write!(f, "handshake timed out"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl From<reqwest::Error> for Error {
+    fn from(err: reqwest::Error) -> Self {
+        Self::Token(err)
+    }
 }
 
 impl From<tokio_tungstenite::tungstenite::Error> for Error {
@@ -59,9 +77,12 @@ pub enum Incoming {
     },
 }
 
+/// Last presence set by the caller; survives disconnects so it can be re-sent after the next hello-ack.
+type Presence = Arc<Mutex<Option<PresenceData>>>;
+
 enum Outgoing {
     Broadcast(Box<NetEvent>),
-    TrackPresence(PresenceData),
+    TrackPresence,
 }
 
 /// Joins a room and keeps the connection alive, fetching a fresh token before every `hello`.
@@ -69,6 +90,7 @@ enum Outgoing {
 /// else is retried with backoff.
 pub struct WsClient {
     outgoing: mpsc::UnboundedSender<Outgoing>,
+    presence: Presence,
     incoming: mpsc::UnboundedReceiver<Result<Incoming, Error>>,
 }
 
@@ -76,8 +98,13 @@ impl WsClient {
     pub fn connect(config: Config) -> Self {
         let (outgoing, out_rx) = mpsc::unbounded_channel();
         let (in_tx, incoming) = mpsc::unbounded_channel();
-        tokio::spawn(run(config, out_rx, in_tx));
-        Self { outgoing, incoming }
+        let presence = Presence::default();
+        tokio::spawn(run(config, presence.clone(), out_rx, in_tx));
+        Self {
+            outgoing,
+            presence,
+            incoming,
+        }
     }
 
     /// Dropped when not connected, like the browser channel.
@@ -85,9 +112,10 @@ impl WsClient {
         let _ = self.outgoing.send(Outgoing::Broadcast(Box::new(event)));
     }
 
-    /// Remembered and re-sent after every reconnect.
+    /// Remembered, even while disconnected, and sent after every hello-ack.
     pub fn track_presence(&self, data: PresenceData) {
-        let _ = self.outgoing.send(Outgoing::TrackPresence(data));
+        *self.presence.lock().unwrap() = Some(data);
+        let _ = self.outgoing.send(Outgoing::TrackPresence);
     }
 
     /// `None` once the client has stopped after a fatal error.
@@ -101,22 +129,14 @@ type Socket =
 
 async fn run(
     config: Config,
+    presence: Presence,
     mut out_rx: mpsc::UnboundedReceiver<Outgoing>,
     in_tx: mpsc::UnboundedSender<Result<Incoming, Error>>,
 ) {
     let http = reqwest::Client::new();
-    let mut presence = None;
     let mut attempt = 0u32;
     loop {
-        let err = session(
-            &config,
-            &http,
-            &mut out_rx,
-            &in_tx,
-            &mut presence,
-            &mut attempt,
-        )
-        .await;
+        let err = session(&config, &http, &mut out_rx, &in_tx, &presence, &mut attempt).await;
         if matches!(err, Error::Replaced | Error::Rejected(_)) {
             let _ = in_tx.send(Err(err));
             return;
@@ -128,7 +148,10 @@ async fn run(
         let delay = Duration::from_secs(1 << attempt.min(5)).min(Duration::from_secs(30));
         attempt += 1;
         log::warn!("realtime session ended ({err}); reconnecting in {delay:?}");
-        tokio::time::sleep(delay).await;
+        tokio::select! {
+            () = tokio::time::sleep(delay) => {}
+            () = in_tx.closed() => return,
+        }
     }
 }
 
@@ -138,7 +161,7 @@ async fn session(
     http: &reqwest::Client,
     out_rx: &mut mpsc::UnboundedReceiver<Outgoing>,
     in_tx: &mpsc::UnboundedSender<Result<Incoming, Error>>,
-    presence: &mut Option<PresenceData>,
+    presence: &Presence,
     attempt: &mut u32,
 ) -> Error {
     let mut ws = match tokio::time::timeout(HANDSHAKE_TIMEOUT, handshake(config, http, in_tx)).await
@@ -149,16 +172,7 @@ async fn session(
     };
     *attempt = 0;
     while out_rx.try_recv().is_ok() {}
-    if let Some(data) = presence.clone()
-        && let Err(err) = send(
-            &mut ws,
-            Frame::Variant4 {
-                data,
-                t: FrameVariant4T::TrackPresence,
-            },
-        )
-        .await
-    {
+    if let Err(err) = send_presence(&mut ws, presence).await {
         return err;
     }
     loop {
@@ -184,9 +198,11 @@ async fn session(
                         from: config.user_id.clone(),
                         t: FrameVariant3T::Broadcast,
                     },
-                    Outgoing::TrackPresence(data) => {
-                        *presence = Some(data.clone());
-                        Frame::Variant4 { data, t: FrameVariant4T::TrackPresence }
+                    Outgoing::TrackPresence => {
+                        if let Err(err) = send_presence(&mut ws, presence).await {
+                            return err;
+                        }
+                        continue;
                     }
                 };
                 if let Err(err) = send(&mut ws, frame).await {
@@ -246,12 +262,29 @@ async fn handshake(
     }
 }
 
+async fn send_presence(ws: &mut Socket, presence: &Presence) -> Result<(), Error> {
+    let data = presence.lock().unwrap().clone();
+    match data {
+        Some(data) => {
+            send(
+                ws,
+                Frame::Variant4 {
+                    data,
+                    t: FrameVariant4T::TrackPresence,
+                },
+            )
+            .await
+        }
+        None => Ok(()),
+    }
+}
+
 async fn send(ws: &mut Socket, frame: Frame) -> Result<(), Error> {
     let text = serde_json::to_string(&frame).expect("frames serialize");
     Ok(ws.send(Message::text(text)).await?)
 }
 
-fn close_error(frame: Option<CloseFrame>) -> Error {
+pub(crate) fn close_error(frame: Option<CloseFrame>) -> Error {
     match frame {
         Some(frame) if u16::from(frame.code) == REPLACED_CLOSE_CODE => Error::Replaced,
         Some(frame) if u16::from(frame.code) == REJECTED_CLOSE_CODE => {
@@ -337,6 +370,23 @@ mod tests {
         .join(",");
         let frame = format!(r#"{{"t":"snapshot","events":[{events}]}}"#);
         assert!(matches!(decode(&frame)[..], [Incoming::Event(_)]));
+    }
+
+    fn close(code: u16, reason: &str) -> Option<CloseFrame> {
+        Some(CloseFrame {
+            code: code.into(),
+            reason: reason.into(),
+        })
+    }
+
+    #[test]
+    fn close_codes_map_to_distinct_errors() {
+        assert!(matches!(close_error(close(4001, "")), Error::Replaced));
+        assert!(
+            matches!(close_error(close(4003, "bad token")), Error::Rejected(r) if r == "bad token")
+        );
+        assert!(matches!(close_error(close(1000, "")), Error::Closed));
+        assert!(matches!(close_error(None), Error::Closed));
     }
 
     #[test]

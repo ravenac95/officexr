@@ -1,5 +1,6 @@
 use std::{env, fs, path::Path};
 
+/// ponytail: rewrites any `const` key, including a property literally named `const`; the schema has none.
 /// typify only recognises tagged unions and literal fields when they are single-value enums, not `const`.
 fn const_to_enum(value: &mut serde_json::Value) {
     match value {
@@ -25,7 +26,6 @@ fn main() {
     space
         .add_root_schema(serde_json::from_value(schema).unwrap())
         .unwrap();
-    let file = syn::parse2(space.to_stream()).unwrap();
     let out = Path::new(&env::var("OUT_DIR").unwrap()).join("protocol.rs");
-    fs::write(out, prettyplease::unparse(&file)).unwrap();
+    fs::write(out, space.to_stream().to_string()).unwrap();
 }
