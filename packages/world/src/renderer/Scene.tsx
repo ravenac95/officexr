@@ -1,4 +1,4 @@
-import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { Suspense, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Physics, type RapierRigidBody } from '@react-three/rapier';
@@ -43,6 +43,7 @@ import { StandingCheck, type SeatingSource } from './seated.ts';
 import type { ColliderDescriptor } from '../physics/rules.ts';
 import type { SimBakedColliders, SimCore } from '../sim/SimCore.ts';
 import { TsSimCore } from '../sim/TsSimCore.ts';
+import { loadWasmSimCore } from '../sim/WasmSimCore.ts';
 
 /**
  * Each frame, anchor the sun (directional light + its target) to the
@@ -92,7 +93,36 @@ function OptionalXR({ store, children }: { store?: XRStore; children: React.Reac
 
 const noopSubscribe = () => () => {};
 
-const createTsSimCore = (charRadius: number): SimCore => new TsSimCore(charRadius);
+type CreateSim = (charRadius: number) => SimCore;
+
+const createTsSimCore: CreateSim = (charRadius) => new TsSimCore(charRadius);
+
+/** Which `SimCore` runs the local player; `'rust'` is the wasm build of `crates/officexr-sim`. */
+export type SimImplementation = 'ts' | 'rust';
+
+/** The factory for `sim`, or null while the wasm module loads. */
+function useCreateSim(sim: SimImplementation, onError?: (error: Error) => void): CreateSim | null {
+  const [wasm, setWasm] = useState<CreateSim | null>(null);
+  const reportError = useEffectEvent((error: Error) => onError?.(error));
+  useEffect(() => {
+    if (sim !== 'rust') {
+      return;
+    }
+    let live = true;
+    loadWasmSimCore().then(
+      (create) => {
+        if (live) {
+          setWasm(() => create);
+        }
+      },
+      (error: Error) => reportError(error),
+    );
+    return () => {
+      live = false;
+    };
+  }, [sim]);
+  return sim === 'rust' ? wasm : createTsSimCore;
+}
 
 /** A layout placement with the URL of its baked GLB, e.g. `/api/baked-layouts/lobby`. */
 export interface SceneBakedLayout extends BakedLayoutPlacement {
@@ -165,6 +195,8 @@ interface SceneProps {
   /** Called once each baked layout's colliders have mounted, with its room instance id. */
   onCollidersReady?: (roomInstanceId: string) => void;
   onCollidersError?: (error: Error) => void;
+  /** Default `'ts'`. */
+  sim?: SimImplementation;
   /** Enables immersive XR sessions from the self avatar's eyes. Without it the scene has no `<XR>` wrapper. */
   xrStore?: XRStore;
 }
@@ -176,6 +208,7 @@ export function Scene(props: SceneProps) {
     ReadonlyMap<string, readonly ColliderDescriptor[]>
   >(new Map());
   const notifiedColliders = useRef(new Set<string>());
+  const createSim = useCreateSim(props.sim ?? 'ts', props.onCollidersError);
   const notifyCollidersReady = (ids: readonly string[]) => {
     for (const id of ids) {
       if (loadedBakedColliders.has(id) && !notifiedColliders.current.has(id)) {
@@ -431,7 +464,7 @@ export function Scene(props: SceneProps) {
           autoWalk={props.autoWalk}
           seating={props.seating}
           selfBodyRef={selfBodyRef}
-          createSim={createTsSimCore}
+          createSim={createSim}
           bakedColliders={bakedColliders}
           onBakedCollidersApplied={notifyCollidersReady}
           worldFocused={worldFocused}

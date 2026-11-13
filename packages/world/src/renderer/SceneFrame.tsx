@@ -50,8 +50,8 @@ interface SceneFrameProps {
   selfBodyRef: React.MutableRefObject<RapierRigidBody | null>;
   /** Each frame's proximity result, for `ProximityGlow` to render. */
   proximityOutputRef: React.MutableRefObject<TrackerOutput | null>;
-  /** Builds the local player's movement simulation; called once per mount, after Rapier has loaded. */
-  createSim: (charRadius: number) => SimCore;
+  /** Builds the local player's movement simulation; called once per mount, after Rapier has loaded. Null until it can be. */
+  createSim: ((charRadius: number) => SimCore) | null;
   /** Loaded baked layouts' colliders; their rooms' instances collide through these instead. */
   bakedColliders: readonly SimBakedColliders[];
   /** Called each time `bakedColliders` is applied to the sim, with all their room instance ids. */
@@ -152,6 +152,9 @@ export function SceneFrame({
   // Mugshot's gravity-off mode, which also drops the warp threshold below to zero.
   const gravityEnabledRef = useRef(true);
   useEffect(() => {
+    if (!createSim) {
+      return;
+    }
     const sim = createSim(store.getState().worldSettings.charRadius);
     sim.setGravityEnabled(gravityEnabledRef.current);
     const selfPos = store.getState().players[selfId]?.pos;
