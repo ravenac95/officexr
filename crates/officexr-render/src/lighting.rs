@@ -149,6 +149,7 @@ pub fn snap_to_shadow_texel(point: Vec3, basis: Mat3, texel_size: f32) -> Vec3 {
 /// Replaces Bevy's view-fitted cascades with three.js's single fixed
 /// orthographic shadow camera: `shadowRange` around the texel-snapped focus,
 /// from the sun out to `|sunPosition| + shadowRange + 20`.
+// ponytail: the box centres on the camera look_at; TS uses the light target (origin, or the player in gameplay).
 fn fit_sun_shadow(
     scene: Res<WorldSceneData>,
     camera: Res<SceneCamera>,

@@ -92,7 +92,6 @@ pub struct LightingConfig {
     #[serde(deserialize_with = "hex")]
     pub sun_color: Color,
     pub sun_intensity: f32,
-    /// Hemisphere fill intensity.
     pub ambient_intensity: f32,
     pub cast_shadow: bool,
     pub shadow_range: f32,
@@ -108,7 +107,6 @@ pub struct LightingConfig {
     pub show_sun_disc: bool,
     pub sun_disc_radius: f32,
     pub sun_disc_intensity: f32,
-    /// Flat ambient on top of the hemisphere.
     #[serde(default)]
     pub ambient_fill_intensity: f32,
 }

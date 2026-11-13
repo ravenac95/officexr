@@ -27,7 +27,7 @@ pub(crate) fn request_kinds(
         scene.kinds.iter().map(|k| (k.id.as_str(), k)).collect();
     let mut by_kind: HashMap<&str, Vec<ObjectInstance>> = HashMap::new();
     for inst in &scene.objects.instances {
-        // Unknown kinds (incl. the mugshot `__primitive_` boxes) are skipped, as in three.js.
+        // ponytail: `__primitive_` mugshot blocks aren't rendered yet.
         if kinds.contains_key(inst.kind_id.as_str()) {
             by_kind.entry(&inst.kind_id).or_default().push(inst.clone());
         }
@@ -136,6 +136,7 @@ pub fn apply_overrides(mut m: StandardMaterial, kind: &WorldObjectKind) -> Stand
         m.base_color = tint.with_alpha(m.base_color.alpha());
     }
     if kind.opacity < 1.0 {
+        // ponytail: a glTF `Mask` cutoff is lost; three.js keeps alphaTest on its transparent clone.
         m.alpha_mode = AlphaMode::Blend;
         m.base_color.set_alpha(kind.opacity);
     }
