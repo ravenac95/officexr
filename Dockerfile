@@ -19,6 +19,7 @@ ARG NODE_IMAGE=node:22.22.3-bookworm-slim
 ARG PLAYWRIGHT_CORE_VERSION=1.60.0
 # Keep in step with .github/actions/build-sim-wasm.
 ARG WASM_PACK_VERSION=0.15.1
+ARG WASM_PACK_SHA256=410101009739b9d01c7d5affaaad6e9c9a24b4cba6791a4805db8e89b9bf7af2
 
 FROM ${NODE_IMAGE} AS store
 ENV PNPM_HOME=/pnpm
@@ -49,17 +50,22 @@ RUN npx -y "playwright-core@${PLAYWRIGHT_CORE_VERSION}" install --only-shell chr
 
 FROM rust:1.100.0-bookworm AS sim
 ARG WASM_PACK_VERSION
+ARG WASM_PACK_SHA256
 RUN apt-get update && \
     apt-get install -y --no-install-recommends clang lld && \
     rm -rf /var/lib/apt/lists/* && \
-    curl -sSfL "https://github.com/rustwasm/wasm-pack/releases/download/v${WASM_PACK_VERSION}/wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
-      | tar -xz --strip-components=1 -C /usr/local/cargo/bin "wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl/wasm-pack"
+    curl -sSfL -o /tmp/wasm-pack.tgz "https://github.com/rustwasm/wasm-pack/releases/download/v${WASM_PACK_VERSION}/wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl.tar.gz" && \
+    echo "${WASM_PACK_SHA256}  /tmp/wasm-pack.tgz" | sha256sum -c - && \
+    tar -xzf /tmp/wasm-pack.tgz --strip-components=1 -C /usr/local/cargo/bin "wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl/wasm-pack" && \
+    rm /tmp/wasm-pack.tgz
 WORKDIR /app
 COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
 COPY .cargo .cargo
 RUN rustup toolchain install
 COPY crates crates
-RUN wasm-pack build crates/officexr-sim-wasm --release --target web --no-pack --out-dir /app/packages/sim-wasm/pkg
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    wasm-pack build crates/officexr-sim-wasm --release --target web --no-pack --out-dir /app/packages/sim-wasm/pkg
 
 FROM store AS build
 COPY . .

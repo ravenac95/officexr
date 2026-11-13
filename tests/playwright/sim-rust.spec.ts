@@ -25,18 +25,6 @@ test('sim=rust: the local player walks under keyboard input', async ({ page }) =
   await waitForCanvasReady(page, 0, 30_000);
   await setFixedCamera(page, { azimuthDeg: 90, movementYawOffsetDeg: 0 });
 
-  // Settled: grounded on the map, so the wasm sim has its colliders.
-  await page.waitForFunction(
-    (selfId: string) => {
-      const w = window as unknown as {
-        __OFFICE_STORE__?: { getState: () => { players: Record<string, { vel: Pos } | undefined> } };
-      };
-      const p = w.__OFFICE_STORE__?.getState().players[selfId];
-      return Boolean(p && Math.abs(p.vel.y) < 0.001);
-    },
-    SELF_ID,
-    { timeout: 30_000, polling: 100 },
-  );
   const before = await selfPos(page);
   expect(before).not.toBeNull();
 

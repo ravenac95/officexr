@@ -11,7 +11,7 @@ on:
 
 concurrency:
   group: pages-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   deploy:
@@ -73,6 +73,10 @@ jobs:
         run: |
           npx --yes wrangler@4.20.0 pages deploy packages/web/dist --project-name="$PROJECT" --branch="$BRANCH"
           url=$(jq -rs 'map(select(.type == "pages-deploy-detailed")) | last | .url' "$WRANGLER_OUTPUT_FILE_DIRECTORY"/*.json)
+          if [ -z "$url" ] || [ "$url" = "null" ]; then
+            echo "::error::wrangler reported no deployment URL"
+            exit 1
+          fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
       - name: Comment the preview URL

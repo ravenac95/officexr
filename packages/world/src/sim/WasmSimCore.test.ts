@@ -75,8 +75,8 @@ const traces = readdirSync(TRACE_DIR)
   .sort()
   .map((f) => [f.replace(/\.json$/, ''), JSON.parse(readFileSync(new URL(f, TRACE_DIR), 'utf8'))] as const);
 
-describe.each(Object.entries(IMPLEMENTATIONS))('%s SimCore replays the committed traces', (impl, create) => {
-  it.each(traces)('%s', (name, trace: SimTrace | ProximityTrace) => {
+describe.each(Object.entries(IMPLEMENTATIONS))('%s SimCore replays the committed traces', (_impl, create) => {
+  it.each(traces)('%s', (_name, trace: SimTrace | ProximityTrace) => {
     if (trace.kind === 'proximity') {
       const sim = create(trace.inputs[0].input.settings.charRadius);
       expectProximity(recordProximityTrace(sim, trace.inputs).outputs, trace.outputs);
@@ -84,17 +84,7 @@ describe.each(Object.entries(IMPLEMENTATIONS))('%s SimCore replays the committed
       return;
     }
     const sim = create(trace.inputs[0].step.settings.charRadius);
-    const stepMs: number[] = [];
-    const step = sim.step.bind(sim);
-    sim.step = (input) => {
-      const t0 = performance.now();
-      const out = step(input);
-      stepMs.push(performance.now() - t0);
-      return out;
-    };
     expectSteps(recordTrace(sim, trace.map, trace.inputs).outputs, trace.outputs);
     sim.dispose();
-    const mean = stepMs.reduce((a, b) => a + b, 0) / stepMs.length;
-    console.log(`${impl} ${name}: mean step ${(mean * 1000).toFixed(1)} µs over ${stepMs.length} steps`);
   });
 });
