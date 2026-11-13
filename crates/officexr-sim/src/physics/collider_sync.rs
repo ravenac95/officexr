@@ -27,7 +27,6 @@ pub struct ColliderSync {
 }
 
 impl ColliderSync {
-    /// Replaces every static collider with `sets`.
     /// Replaces every static collider with `sets`, or changes nothing when
     /// one of them is an invalid trimesh (rapier.js throws there).
     pub fn set_static(
