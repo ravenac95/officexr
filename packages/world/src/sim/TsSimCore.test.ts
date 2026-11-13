@@ -44,6 +44,9 @@ const mapOf = (...instances: ObjectInstance[]): SimMap => ({
   bakedColliders: [],
 });
 
+/** A baked room's layout instance: collides through the baked colliders, never as an AABB. */
+const layoutWall: ObjectInstance = { ...place('wall', { x: 100, y: 0, z: -20 }), id: 'room/layout/wall' };
+
 const FLOOR = place('floor', { x: -20, y: -1, z: -20 });
 /** Body root of a character standing on the floor's top (y = 0): BODY_Y − charRadius below. */
 const ON_FLOOR = { x: 0, y: -0.5, z: 0 };
@@ -148,6 +151,40 @@ const SCENARIOS: Record<string, Scenario> = {
       expect(respawn).toBeGreaterThan(10);
       expect(outputs[respawn].newPos).toEqual({ x: 0, y: 4, z: 0 });
       expect(outputs[respawn].velY).toBe(0);
+    },
+  },
+  'baked-wall': {
+    // The wall instance sits far away, so a stop at x = 3 can only come from the baked collider.
+    map: {
+      ...mapOf(FLOOR, layoutWall),
+      bakedColliders: [
+        {
+          roomInstanceId: 'room',
+          position: { x: 2, y: 0, z: 0 },
+          yawRad: 0,
+          colliders: [
+            { type: 'cuboid', center: { x: 0.5, y: 1.5, z: 0 }, halfExtents: { x: 0.5, y: 1.5, z: 20 } },
+          ],
+        },
+      ],
+    },
+    inputs: scenario(ON_FLOOR, (s) => frames(s, 90, EAST)),
+    check(outputs) {
+      const end = last(outputs);
+      expect(end.newPos.x).toBeLessThan(2.5 - 0.4 + 0.01);
+      expect(end.newPos.x).toBeGreaterThan(1.5);
+      expect(end.moved).toBe(false);
+    },
+  },
+  'baked-pending': {
+    // The layout's GLB hasn't loaded: its instances are neither colliders nor AABBs.
+    map: {
+      ...mapOf(FLOOR, { ...place('wall', { x: 3, y: 0, z: -20 }), id: 'room/layout/wall' }),
+      bakedColliders: [{ roomInstanceId: 'room', position: { x: 0, y: 0, z: 0 }, yawRad: 0, colliders: [] }],
+    },
+    inputs: scenario(ON_FLOOR, (s) => frames(s, 90, EAST)),
+    check(outputs) {
+      expect(last(outputs).newPos.x).toBeGreaterThan(4);
     },
   },
   'peer-bump': {

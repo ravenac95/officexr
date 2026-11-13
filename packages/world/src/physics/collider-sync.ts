@@ -10,6 +10,12 @@ export interface StaticColliderSet {
   yawRad?: number;
 }
 
+/** A peer the character first touched this step, with the contact normal pointing out of it. */
+export interface PeerBump {
+  otherId: PlayerId;
+  normal: { x: number; z: number };
+}
+
 /**
  * Keeps a headless Rapier world's static map colliders and per-peer
  * kinematic mirror bodies in step with plain-data descriptors. Shared by
@@ -63,7 +69,7 @@ export class ColliderSync {
       const mirror = this.mirrors.get(id);
       if (mirror) {
         mirror.parent()!.setNextKinematicTranslation(pos);
-        if (mirror.radius() !== charRadius) {
+        if (mirror.radius() !== Math.fround(charRadius)) {
           mirror.setRadius(charRadius);
         }
         continue;
@@ -93,6 +99,31 @@ export class ColliderSync {
       removed.push(id);
     }
     return removed;
+  }
+
+  /**
+   * Peers the controller's last sweep touched that `previous` didn't
+   * (the controller slides, so no contact events fire), plus every peer
+   * it touched, to pass as the next call's `previous`.
+   */
+  edgeTriggeredBumps(
+    controller: RAPIER.KinematicCharacterController,
+    previous: ReadonlySet<PlayerId>,
+  ): { touching: Set<PlayerId>; bumps: PeerBump[] } {
+    const touching = new Set<PlayerId>();
+    const bumps: PeerBump[] = [];
+    for (let i = 0; i < controller.numComputedCollisions(); i++) {
+      const coll = controller.computedCollision(i);
+      const otherId = coll?.collider ? this.peerIdOf(coll.collider.handle) : undefined;
+      if (!coll || !otherId) {
+        continue;
+      }
+      touching.add(otherId);
+      if (!previous.has(otherId)) {
+        bumps.push({ otherId, normal: { x: coll.normal1.x, z: coll.normal1.z } });
+      }
+    }
+    return { touching, bumps };
   }
 
   /** The player a mirror collider stands for, if `handle` is one. */

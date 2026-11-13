@@ -7,7 +7,7 @@ import { SkyDome } from './SkyDome.tsx';
 import { LightingRig } from './LightingRig.tsx';
 import { lightBasis, snapToShadowTexel } from './shadow-snap.ts';
 import { MapColliders } from './MapColliders.tsx';
-import { excludeLayoutInstances } from './useStoreWorldObjects.ts';
+import { excludeLayoutInstances } from '../scenes/compile-map.ts';
 import type {
   Actions,
   Bus,
@@ -174,13 +174,19 @@ export function Scene(props: SceneProps) {
   const [loadedBakedColliders, setLoadedBakedColliders] = useState<
     ReadonlyMap<string, readonly ColliderDescriptor[]>
   >(new Map());
+  const notifiedColliders = useRef(new Set<string>());
+  const notifyCollidersReady = (ids: readonly string[]) => {
+    for (const id of ids) {
+      if (loadedBakedColliders.has(id) && !notifiedColliders.current.has(id)) {
+        notifiedColliders.current.add(id);
+        props.onCollidersReady?.(id);
+      }
+    }
+  };
   const bakedColliders = useMemo(
     (): SimBakedColliders[] =>
       (bakedLayouts ?? []).flatMap((p) => {
-        const colliders = loadedBakedColliders.get(p.roomInstanceId);
-        if (!colliders) {
-          return [];
-        }
+        const colliders = loadedBakedColliders.get(p.roomInstanceId) ?? [];
         const { position, rotation } = placementTransform(p);
         return [
           {
@@ -440,7 +446,7 @@ export function Scene(props: SceneProps) {
           selfBodyRef={selfBodyRef}
           createSim={createTsSimCore}
           bakedColliders={bakedColliders}
-          onBakedCollidersApplied={(ids) => ids.forEach((id) => props.onCollidersReady?.(id))}
+          onBakedCollidersApplied={notifyCollidersReady}
           worldFocused={worldFocused}
           spawnPoints={props.spawnPoints}
           isAirborneRef={isAirborneRef}

@@ -2,8 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Store, WorldObjects } from '@officexr/sdk';
 import type { ExcludeInstance } from '../scenes/compile-map.ts';
 
-export { excludeLayoutInstances, type ExcludeInstance } from '../scenes/compile-map.ts';
-
 /**
  * Follows `store`'s `worldObjects`, leaving out the instances `exclude` matches.
  * `exclude` must be referentially stable, or the result is a new object every render.

@@ -127,7 +127,7 @@ export class TsSimCore implements SimCore {
     const { dtSec, dir, speed, settings } = input;
     const { jumpVelocity, airControl, maxJumps, landingEaseMs, movementBlockThreshold } = settings;
     this.maxJumps = maxJumps;
-    if (this.bodyCollider.radius() !== settings.charRadius) {
+    if (this.bodyCollider.radius() !== Math.fround(settings.charRadius)) {
       this.bodyCollider.setRadius(settings.charRadius);
     }
     const isAirborne = this.airborne;
@@ -180,7 +180,8 @@ export class TsSimCore implements SimCore {
       this.verticalVel = 0;
     }
 
-    const bumps = this.edgeTriggeredBumps();
+    const { touching, bumps } = this.colliders.edgeTriggeredBumps(this.controller, this.bumpingPeers);
+    this.bumpingPeers = touching;
 
     const progress = horizontalProgress(corrected, { x: moveX, z: moveZ });
     let horizBlocked = intendsMove && progress < 1 - movementBlockThreshold;
@@ -256,25 +257,6 @@ export class TsSimCore implements SimCore {
     );
     const c = this.controller.computedMovement();
     return { x: c.x, y: c.y, z: c.z };
-  }
-
-  /** Peers the last sweep touched that the previous one didn't; the controller slides, so no contact events fire. */
-  private edgeTriggeredBumps(): SimStepResult['bumps'] {
-    const touching = new Set<PlayerId>();
-    const bumps: SimStepResult['bumps'] = [];
-    for (let i = 0; i < this.controller.numComputedCollisions(); i++) {
-      const coll = this.controller.computedCollision(i);
-      const otherId = coll?.collider ? this.colliders.peerIdOf(coll.collider.handle) : undefined;
-      if (!coll || !otherId) {
-        continue;
-      }
-      touching.add(otherId);
-      if (!this.bumpingPeers.has(otherId)) {
-        bumps.push({ otherId, normal: { x: coll.normal1.x, z: coll.normal1.z } });
-      }
-    }
-    this.bumpingPeers = touching;
-    return bumps;
   }
 
   /** Lands pending kinematic moves so the next sweep and ray cast see them. */

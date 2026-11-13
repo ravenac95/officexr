@@ -101,7 +101,7 @@ export class BotPhysicsWorld {
    * and resets to 0 when the controller reports the bot grounded.
    * Kinematic bodies don't auto-react to the world gravity vector
    * — we integrate it ourselves and pass into the controller's
-   * desired-translation, mirroring `SceneFrame`'s player loop. */
+   * desired-translation, mirroring `TsSimCore`'s player loop. */
   private verticalVel = 0;
   /** Own collider handle → tag, for the bridge routing in
    * `drainSensorEvents`. Peer mirrors are tagged via `tagOf`. */
@@ -190,7 +190,7 @@ export class BotPhysicsWorld {
     this.controller.setApplyImpulsesToDynamicBodies(false);
     this.controller.setSlideEnabled(true);
     this.controller.setUp({ x: 0, y: 1, z: 0 });
-    // Match the player-side controller in SceneFrame.tsx: snap to
+    // Match the player-side controller in TsSimCore.ts: snap to
     // ground when stepping between cubes at nominally the same
     // height so the bot doesn't float for a frame across each seam.
     this.controller.enableSnapToGround(0.3);
@@ -385,7 +385,7 @@ export class BotPhysicsWorld {
    */
   step(intent: { x: number; z: number; dtSec: number }): StepResult {
     // Integrate gravity into vertical velocity, then feed the full
-    // 3D delta into the controller. Matches SceneFrame's pattern
+    // 3D delta into the controller. Matches TsSimCore's pattern
     // for the local player so bots fall at the same rate.
     this.verticalVel += GRAVITY * intent.dtSec;
     // Explicit BODY_GROUPS filter: ensures the KCC interacts with both the
@@ -434,22 +434,10 @@ export class BotPhysicsWorld {
       this.verticalVel = 0;
     }
 
-    const next = new Set<PlayerId>();
-    const bumps: Array<{ otherId: PlayerId; normal: { x: number; z: number } }> = [];
-    const n = this.controller.numComputedCollisions();
-    for (let i = 0; i < n; i++) {
-      const coll = this.controller.computedCollision(i);
-      if (!coll || !coll.collider) continue;
-      const otherId = this.colliders.peerIdOf(coll.collider.handle);
-      if (!otherId) continue; // wall or unknown
-      next.add(otherId);
-      if (this.bumpingPeers.has(otherId)) continue;
-      const nrm = coll.normal1;
-      bumps.push({ otherId, normal: { x: nrm.x, z: nrm.z } });
-    }
-    this.bumpingPeers = next;
+    const { touching, bumps } = this.colliders.edgeTriggeredBumps(this.controller, this.bumpingPeers);
+    this.bumpingPeers = touching;
 
-    // Directional progress: shared with SceneFrame (human player) via
+    // Directional progress: shared with TsSimCore (human player) via
     // horizontalProgress() in physics/blocking.ts. Single source of truth for
     // the blocking decision for both bot and human paths.
     let progress = horizontalProgress(
@@ -464,14 +452,14 @@ export class BotPhysicsWorld {
     // onto it. Rapier's autostep cannot lift a ball over the honest
     // scanned 0.5 m risers, so this is THE climbing mechanism.
     //
-    // `next.size === 0` (no peer contact this frame) is load-bearing:
+    // `touching.size === 0` (no peer contact this frame) is load-bearing:
     // without it a bot blocked by another CHARACTER treats the peer's
     // ball as a ledge and climbs onto their head — breaking head-on
     // blocking (scenario-collision) and spawn-area encounters. Steps
     // are walls; characters are not stairs.
     if (
       progress < 0.1 &&
-      next.size === 0 &&
+      touching.size === 0 &&
       this.controller.computedGrounded() &&
       this.verticalVel <= 0 &&
       (intent.x !== 0 || intent.z !== 0)

@@ -52,7 +52,7 @@ interface SceneFrameProps {
   createSim: (charRadius: number) => SimCore;
   /** Loaded baked layouts' colliders; their rooms' instances collide through these instead. */
   bakedColliders: readonly SimBakedColliders[];
-  /** Called once the sim collides with `bakedColliders`, with their room instance ids. */
+  /** Called each time `bakedColliders` is applied to the sim, with all their room instance ids. */
   onBakedCollidersApplied?: (roomInstanceIds: readonly string[]) => void;
   /** When false, keyboard input is released from the in-world
    * character: keydown is ignored, and any held keys are cleared
@@ -152,18 +152,26 @@ export function SceneFrame({
   useEffect(() => {
     const sim = createSim(store.getState().worldSettings.charRadius);
     sim.setGravityEnabled(gravityEnabledRef.current);
+    const selfPos = store.getState().players[selfId]?.pos;
+    if (selfPos) {
+      sim.teleport(selfPos);
+    }
     simRef.current = sim;
     return () => {
       simRef.current = null;
       sim.dispose();
     };
-  }, [createSim, store]);
+  }, [createSim, store, selfId]);
 
   const { catalog, voxelSize } = useApplication();
   const worldObjects = useStoreWorldObjects(store);
   const notifyBakedApplied = useEffectEvent((ids: readonly string[]) => onBakedCollidersApplied?.(ids));
   useEffect(() => {
-    simRef.current?.setStaticColliders(worldObjects, { voxelSize, kinds: catalog.listKinds() }, bakedColliders);
+    const sim = simRef.current;
+    if (!sim) {
+      return;
+    }
+    sim.setStaticColliders(worldObjects, { voxelSize, kinds: catalog.listKinds() }, bakedColliders);
     notifyBakedApplied(bakedColliders.map((b) => b.roomInstanceId));
   }, [createSim, worldObjects, voxelSize, catalog, bakedColliders]);
 
@@ -214,6 +222,11 @@ export function SceneFrame({
     };
   }, []);
 
+  // SRP violation: this per-frame callback still owns input, warp, peer
+  // sync, bump events, broadcast, bot ticks and the session tick besides
+  // driving the SimCore. They share one frame's snapshot of store state,
+  // and r3f's single useFrame ordering is what keeps them consistent.
+  // Removing it means moving each into its own sim stage or frame hook.
   useFrame(({ gl }, dtSec) => {
     const dt = dtSec * 1000;
     const now = performance.now();
@@ -256,7 +269,7 @@ export function SceneFrame({
     spaceWasDownRef.current = spaceDown;
 
     if (sim) {
-      // Peers collide where Players draws them this frame.
+      // Peer mirrors move at the sim's next commit, so they collide one frame behind where Players draws them.
       const peers: SimPeer[] = [];
       for (const [id, p] of Object.entries(stateSnapshot.players)) {
         if (id !== selfId) {
