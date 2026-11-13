@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "actorId": "alice",
+  "seq": 7,
+  "t": 1700000000000,
+  "kind": "desk:claims",
+  "claims": {
+    "desk-1": "alice"
+  }
+}

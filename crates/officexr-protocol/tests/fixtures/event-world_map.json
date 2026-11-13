@@ -1,0 +1,35 @@
+{
+  "v": 1,
+  "actorId": "alice",
+  "seq": 7,
+  "t": 1700000000000,
+  "kind": "world:map",
+  "map": {
+    "gridSize": 4,
+    "cubeSize": 1,
+    "origin": {
+      "x": 0,
+      "z": 0
+    },
+    "layers": [
+      {
+        "kind": "floor",
+        "cells": [
+          {
+            "i": 0,
+            "j": 1
+          }
+        ]
+      }
+    ],
+    "kinds": {
+      "floor": {
+        "id": "floor",
+        "walkable": true,
+        "appearance": {
+          "color": "#abc"
+        }
+      }
+    }
+  }
+}

@@ -2,7 +2,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { createStore, type ObjectInstance, type Store } from '@officexr/sdk';
-import { excludeLayoutInstances, useStoreWorldObjects } from './useStoreWorldObjects.ts';
+import { excludeLayoutInstances } from '../scenes/compile-map.ts';
+import { useStoreWorldObjects } from './useStoreWorldObjects.ts';
 
 afterEach(() => {
   cleanup();
