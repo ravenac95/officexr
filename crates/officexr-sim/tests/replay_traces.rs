@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use officexr_sim::trace::{SimTrace, replay};
+use officexr_sim::trace::{
+    ProximityFrameOutput, ProximityTrace, SimTrace, replay, replay_proximity,
+};
 use officexr_sim::{SimCore, SimStepResult, Vec3};
 
 const TOLERANCE: f64 = 1e-4;
@@ -67,8 +69,40 @@ fn compare(name: &str, actual: &[SimStepResult], golden: &[SimStepResult]) -> (f
     (pos, vel)
 }
 
+/// Largest centre/radius/focus error, after asserting every exact field.
+fn compare_proximity(
+    name: &str,
+    actual: &[ProximityFrameOutput],
+    golden: &[ProximityFrameOutput],
+) -> f64 {
+    assert_eq!(actual.len(), golden.len(), "{name}: frame count");
+    let mut worst = 0.0_f64;
+    for (i, (a, g)) in actual.iter().zip(golden).enumerate() {
+        let at = format!("{name}[{i}]");
+        assert_eq!(a.events, g.events, "{at}.events");
+        assert_eq!(a.pair_states, g.pair_states, "{at}.pairStates");
+        assert_eq!(a.player_states, g.player_states, "{at}.playerStates");
+        assert_eq!(a.areas.len(), g.areas.len(), "{at}.areas");
+        for (aa, ga) in a.areas.iter().zip(&g.areas) {
+            assert_eq!((&aa.id, &aa.members), (&ga.id, &ga.members), "{at}.areas");
+            worst = worst
+                .max((aa.center.x - ga.center.x).abs())
+                .max((aa.center.z - ga.center.z).abs())
+                .max((aa.radius - ga.radius).abs());
+        }
+        match (a.conversation_focus, g.conversation_focus) {
+            (Some(af), Some(gf)) => {
+                worst = worst.max((af.x - gf.x).abs()).max((af.z - gf.z).abs());
+            }
+            (af, gf) => assert_eq!(af, gf, "{at}.conversationFocus"),
+        }
+        assert!(worst <= TOLERANCE, "{at} geometry off by {worst}");
+    }
+    worst
+}
+
 #[test]
-fn replays_every_movement_trace() {
+fn replays_every_trace() {
     let mut paths: Vec<_> = std::fs::read_dir(Path::new(TRACE_DIR))
         .expect("trace dir")
         .map(|e| e.expect("trace entry").path())
@@ -78,8 +112,22 @@ fn replays_every_movement_trace() {
     assert!(!paths.is_empty(), "no traces in {TRACE_DIR}");
     for path in paths {
         let name = path.file_stem().unwrap().to_string_lossy().into_owned();
-        let trace: SimTrace = serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
-            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        if json["kind"] == "proximity" {
+            let trace: ProximityTrace =
+                serde_json::from_value(json).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let mut sim = SimCore::new(trace.inputs[0].input.settings.char_radius);
+            let outputs = replay_proximity(&mut sim, &trace.inputs);
+            let err = compare_proximity(&name, &outputs, &trace.outputs);
+            println!(
+                "{name}: {} frames exact, max geometry error {err:e} m",
+                outputs.len()
+            );
+            continue;
+        }
+        let trace: SimTrace =
+            serde_json::from_value(json).unwrap_or_else(|e| panic!("{name}: {e}"));
         let char_radius = trace.inputs[0].step.settings.char_radius;
         let mut sim = SimCore::new(char_radius);
         let outputs = replay(&mut sim, &trace.map, &trace.inputs).expect("valid colliders");

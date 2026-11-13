@@ -19,6 +19,7 @@ use crate::physics::rules::{
     world_objects_to_colliders,
 };
 use crate::physics::step_up::try_step_up;
+use crate::proximity::{PairTracker, ProximityInput, TrackerOutput};
 use crate::world_objects::{Vec3, WorldObjects};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -145,6 +146,7 @@ pub struct SimCore {
     landing_blend_ms: f64,
     blend_start_vel: (f64, f64),
     bumping_peers: HashSet<String>,
+    pair_tracker: PairTracker,
 }
 
 impl SimCore {
@@ -186,7 +188,14 @@ impl SimCore {
             landing_blend_ms: 0.0,
             blend_start_vel: (0.0, 0.0),
             bumping_peers: HashSet::new(),
+            pair_tracker: PairTracker::default(),
         }
+    }
+
+    /// Advances proximity pairing and MeetingAreas one frame over `players`,
+    /// in the caller's player order.
+    pub fn tick_proximity(&mut self, players: &[SimPeer], input: &ProximityInput) -> TrackerOutput {
+        self.pair_tracker.tick(players, input)
     }
 
     pub fn set_static_colliders(
