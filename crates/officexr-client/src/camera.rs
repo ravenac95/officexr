@@ -6,7 +6,7 @@ const ROTATE_PER_PX: f32 = 0.005;
 const PAN_PER_PX: f32 = 0.002;
 const ZOOM_PER_LINE: f32 = 0.1;
 
-/// Left-drag orbits, right-drag pans, the wheel zooms. Once the local player spawns it
+/// Left-drag (or a touch drag, see [`crate::touch`]) orbits, right-drag pans, the wheel zooms. Once the local player spawns it
 /// follows them: [`crate::player`] moves `target` every frame.
 #[derive(Resource)]
 pub struct Orbit {
@@ -29,6 +29,12 @@ impl Default for Orbit {
 }
 
 impl Orbit {
+    /// Turns the view by a drag of `delta` px, as mouse and touch look do on the web.
+    pub fn look(&mut self, delta: Vec2) {
+        self.yaw -= delta.x * ROTATE_PER_PX;
+        self.pitch = (self.pitch - delta.y * ROTATE_PER_PX).clamp(-1.55, -0.05);
+    }
+
     fn transform(&self) -> Transform {
         let rotation = Quat::from_euler(EulerRot::YXZ, self.yaw, self.pitch, 0.0);
         Transform::from_translation(self.target + rotation * Vec3::Z * self.distance)
@@ -57,8 +63,7 @@ pub fn orbit_camera(
 ) {
     let delta = motion.delta;
     if buttons.pressed(MouseButton::Left) {
-        orbit.yaw -= delta.x * ROTATE_PER_PX;
-        orbit.pitch = (orbit.pitch - delta.y * ROTATE_PER_PX).clamp(-1.55, -0.05);
+        orbit.look(delta);
     }
     if buttons.pressed(MouseButton::Right) {
         let (yaw, distance) = (Quat::from_rotation_y(orbit.yaw), orbit.distance);

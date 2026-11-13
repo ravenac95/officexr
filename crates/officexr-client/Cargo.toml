@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-bevy = { version = "=0.20.1", default-features = false, features = ["bevy_winit", "x11"] }
+bevy = { version = "=0.20.1", default-features = false, features = ["bevy_winit"] }
 officexr-protocol = { path = "../officexr-protocol" }
 officexr-render = { path = "../officexr-render" }
 officexr-sim = { path = "../officexr-sim" }
@@ -13,3 +13,14 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt", "sync"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+bevy = { version = "=0.20.1", default-features = false, features = ["x11"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+# The config screen's text fields.
+bevy = { version = "=0.20.1", default-features = false, features = [
+  "bevy_ui_widgets",
+  "default_font",
+  "ui_picking",
+] }
