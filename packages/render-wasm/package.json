@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./pkg/officexr_render_web.js",
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./pkg/officexr_render_web.js"
+    },
     "./officexr_render_web_bg.wasm": "./pkg/officexr_render_web_bg.wasm"
   },
   "scripts": {

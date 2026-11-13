@@ -56,7 +56,7 @@ impl AssetBase {
 
     pub fn asset_path(&self, gltf_path: &str) -> String {
         // Already absolute, e.g. a decoded layout from the page's own origin.
-        if gltf_path.contains("://") {
+        if gltf_path.starts_with("http://") || gltf_path.starts_with("https://") {
             return gltf_path.to_string();
         }
         let rel = gltf_path.trim_start_matches('/');
