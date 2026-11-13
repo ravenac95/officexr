@@ -89,11 +89,10 @@ pub(crate) fn spawn_primitives(
             continue;
         };
         let base_color = match colour {
-            "blue" => Srgba::hex("3b6bf2"),
-            "stone" => Srgba::hex("a8a8a8"),
-            _ => Srgba::hex("ff00ff"),
-        }
-        .unwrap();
+            "blue" => Srgba::rgb_u8(0x3b, 0x6b, 0xf2),
+            "stone" => Srgba::rgb_u8(0xa8, 0xa8, 0xa8),
+            _ => Srgba::rgb_u8(0xff, 0x00, 0xff),
+        };
         let material = materials.add(ObjectMaterial {
             // three.js's `MeshStandardMaterial` defaults.
             base: StandardMaterial {

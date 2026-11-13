@@ -9,8 +9,6 @@ use bevy::animation::{AnimatedBy, AnimationTargetId};
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
 
-use officexr_sim::physics::rules::BODY_Y;
-
 use crate::AssetBase;
 use crate::lighting::{HemisphereFill, ObjectMaterial};
 use crate::scene::WorldSceneData;
@@ -49,6 +47,8 @@ pub struct PlayerRender {
 pub struct Players {
     pub players: Vec<PlayerRender>,
     pub char_radius: f32,
+    /// Height of the ball collider's centre above the body root.
+    pub body_y: f32,
     pub player_speed: f32,
     pub run_speed: f32,
     /// Bind pose, no clips and no name tags, as the mugshot renders.
@@ -60,6 +60,7 @@ impl Default for Players {
         Self {
             players: vec![],
             char_radius: 0.4,
+            body_y: 0.9,
             player_speed: 3.0,
             run_speed: 6.0,
             paused: false,
@@ -164,6 +165,30 @@ struct Clips {
 }
 
 pub(crate) fn plugin(app: &mut App) {
+    // Spawning a glTF scene copies its entities by reflection; without
+    // Bevy's `reflect_auto_register` these are the types it needs.
+    app.register_type::<Transform>()
+        .register_type::<Visibility>()
+        .register_type::<Name>()
+        .register_type::<ChildOf>()
+        .register_type::<Children>()
+        .register_type::<Mesh3d>()
+        .register_type::<MeshMaterial3d<StandardMaterial>>()
+        .register_type::<bevy::mesh::skinning::SkinnedMesh>()
+        .register_type::<GlobalTransform>()
+        .register_type::<InheritedVisibility>()
+        .register_type::<ViewVisibility>()
+        .register_type::<bevy::transform::components::TransformTreeChanged>()
+        .register_type::<bevy::camera::primitives::Aabb>()
+        .register_type::<bevy::camera::visibility::VisibilityClass>()
+        .register_type::<bevy::gltf::GltfMaterialName>()
+        .register_type::<bevy::gltf::GltfMeshName>()
+        .register_type::<bevy::gltf::GltfMaterialExtras>()
+        .register_type::<bevy::gltf::GltfMeshExtras>()
+        .register_type::<bevy::gltf::GltfExtras>()
+        .register_type::<bevy::gltf::GltfSceneName>()
+        .register_type::<bevy::gltf::GltfSceneExtras>()
+        .register_type::<bevy::camera::visibility::DynamicSkinnedMeshBounds>();
     app.add_systems(Startup, load_rigs).add_systems(
         Update,
         (build_graph, sync_avatars, bind_avatars, animate, place_tags)
@@ -228,7 +253,7 @@ fn sync_avatars(
     for p in &players.players {
         // ponytail: the yaw snaps; Players.tsx eases it at `turnSpeed`.
         let transform =
-            Transform::from_translation(p.pos + Vec3::Y * (BODY_Y as f32 - players.char_radius))
+            Transform::from_translation(p.pos + Vec3::Y * (players.body_y - players.char_radius))
                 .with_rotation(Quat::from_rotation_y(p.yaw + AVATAR_YAW_OFFSET));
         let existing = avatars
             .iter_mut()

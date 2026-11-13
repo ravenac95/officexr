@@ -93,7 +93,7 @@ test('Bevy render of the Barbarian mugshot vs its ideal PNGs', () => {
       execFileSync(
         'cargo',
         [
-          'run', '-q', '-p', 'officexr-render', '--bin', 'render', '--',
+          'run', '-q', '-p', 'officexr-render', '--features', 'mugshot', '--bin', 'render', '--',
           '--mugshot', manifest.character,
           // The ideals are the canvas inside the manifest's bordered viewport.
           scene, out(file), `${ideal.width}x${ideal.height}`,

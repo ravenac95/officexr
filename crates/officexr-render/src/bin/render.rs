@@ -1,7 +1,7 @@
 //! Renders a scene offscreen and writes a PNG, then prints the mean frame
 //! time.
 //!
-//! render [--mugshot <character>] <scene.json> <out.png> <width>x<height> <px,py,pz> <tx,ty,tz> <fov°> <near> <far> [asset base]
+//! cargo run -p officexr-render --features mugshot --bin render -- [--mugshot <character>] <scene.json> <out.png> <width>x<height> <px,py,pz> <tx,ty,tz> <fov°> <near> <far> [asset base]
 //!
 //! The camera is the one `renderFraming.ts`'s `frameCamera` returns; the
 //! asset base is as for the `viewer` example. `--mugshot` drops the
@@ -22,7 +22,7 @@ use officexr_render::{
     SceneCamera, WorldSceneData,
 };
 use officexr_sim::physics::character_movement::XZ;
-use officexr_sim::physics::rules::SPAWN_DROP_HEIGHT;
+use officexr_sim::physics::rules::{BODY_Y, SPAWN_DROP_HEIGHT};
 use officexr_sim::{SimCore, SimInput, SimKind, SimKinds, SimSettings, WorldObjects};
 
 // ponytail: fixed frame budgets, not a load signal; too short if models take longer to arrive.
@@ -120,6 +120,7 @@ fn settled_player(scene_json: &str, character: String) -> Players {
     let scene: SimScene = serde_json::from_str(scene_json).expect("scene colliders");
     let players = Players {
         paused: true,
+        body_y: BODY_Y as f32,
         ..default()
     };
     let settings = SimSettings {
