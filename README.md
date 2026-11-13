@@ -182,8 +182,10 @@ at `/studio/`) and runs `wrangler pages deploy packages/web/dist`. Pushes to `ma
 project's production branch to `main`); other branches deploy previews, and a PR gets a comment with its preview URL.
 Without the secrets below, as on fork PRs, the workflow skips the deploy.
 
-Create the project as a Direct Upload project (or disconnect its Git integration) so Cloudflare doesn't also build it,
-then set in the repo's Actions settings:
+The workflow creates the project as a Direct Upload project (production branch `main`) on its first run if it doesn't
+exist. Don't point it at a project that uses Cloudflare's Git integration: those can't take uploads from wrangler.
+Set in the repo's Actions settings, then run the workflow by hand (Actions → Pages deploy → Run workflow) for the first
+production deploy:
 
 - Secrets `CLOUDFLARE_API_TOKEN` (a token with *Cloudflare Pages: Edit*) and `CLOUDFLARE_ACCOUNT_ID`.
 - Variables `CLOUDFLARE_PAGES_PROJECT` (the Pages project name), `VITE_API_ORIGIN=https://api.example.com`
