@@ -270,6 +270,7 @@ export function SceneFrame({
     const spacePressedThisFrame = spaceDown && !spaceWasDownRef.current;
     spaceWasDownRef.current = spaceDown;
 
+    // ponytail: proximity starts once the sim is ready, a few frames after mount.
     if (sim) {
       // Peer mirrors move at the sim's next commit, so they collide one frame behind where Players draws them.
       const peers: SimPeer[] = [];

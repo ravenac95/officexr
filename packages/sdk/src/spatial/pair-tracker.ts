@@ -602,5 +602,5 @@ function emitPairEvent(
   if (a === selfId && b !== selfId) otherId = b;
   else if (b === selfId && a !== selfId) otherId = a;
   if (!otherId) return;
-  events.push({ kind, otherId } as ProximityEvent);
+  events.push({ kind, otherId });
 }

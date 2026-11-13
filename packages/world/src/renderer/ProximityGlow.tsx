@@ -397,7 +397,6 @@ function PlayerProximityFx({
   }, [id, register]);
 
   // The bubble group has to track the player too.
-  const tmpVec = useMemo(() => new THREE.Vector3(), []);
   useFrame(() => {
     if (!groupRef.current) return;
     const p = store.getState().players[playerId];
