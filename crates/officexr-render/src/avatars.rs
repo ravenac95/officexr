@@ -153,7 +153,7 @@ struct Avatar {
 /// Set once the character's skeleton is bound to the clips (or, paused,
 /// once its materials are swapped).
 #[derive(Component)]
-struct Bound;
+pub struct Bound;
 
 #[derive(Component)]
 struct NameTag;

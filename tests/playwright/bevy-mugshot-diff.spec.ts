@@ -1,17 +1,19 @@
 /**
  * Evidence, not a gate: renders the Barbarian mugshot manifest with
  * `crates/officexr-render`'s `render --mugshot` in both cube modes from the
- * four angles, and reports `pixelDiffCount` against each ideal PNG with
+ * four angles, natively and in the browser (`?op=bevy&mugshot=`), and reports
+ * `pixelDiffCount` against each ideal PNG with
  * `mugshot-baseline-compare.spec.ts`'s threshold. Writes each Bevy PNG, a
  * side-by-side with its ideal, and `result.json`.
  *
  * OFFICEXR_BEVY_DIFF=<out dir> pnpm exec playwright test tests/playwright/bevy-mugshot-diff.spec.ts
+ * (OFFICEXR_BEVY_DIFF_VARIANT=native|browser runs one of them)
  */
 
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { test } from '@playwright/test';
+import { test, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
 import { pixelDiffCount } from './helpers.ts';
 
@@ -59,10 +61,54 @@ function mugshotCamera(fixed: Manifest['fixedCamera'], azimuthDeg: number) {
   return { position, target };
 }
 
+const VARIANT = process.env.OFFICEXR_BEVY_DIFF_VARIANT;
+
 test.skip(!OUT_DIR, 'set OFFICEXR_BEVY_DIFF=<out dir> to run');
 
-test('Bevy render of the Barbarian mugshot vs its ideal PNGs', () => {
+function renderNative(scene: string, file: string, size: string, position: number[], target: number[], manifest: Manifest) {
+  execFileSync(
+    'cargo',
+    [
+      'run', '-q', '-p', 'officexr-render', '--features', 'mugshot', '--bin', 'render', '--',
+      '--mugshot', manifest.character,
+      // The ideals are the canvas inside the manifest's bordered viewport.
+      scene, file, size,
+      position.join(','), target.join(','),
+      String(manifest.fixedCamera.fov), String(NEAR), String(FAR),
+    ],
+    { cwd: ROOT, stdio: ['ignore', 'inherit', 'inherit'] },
+  );
+}
+
+async function renderBrowser(page: Page, scene: string, file: string, position: number[], target: number[], manifest: Manifest) {
+  await page.waitForFunction(() => (window as { __officexrBevy?: unknown }).__officexrBevy !== undefined, null, {
+    timeout: 120_000,
+  });
+  await page.evaluate(
+    ([json, camera, character]) => {
+      const w = window as unknown as {
+        __officexrBevy: { setScene: (json: string, camera: object, mugshot: string) => void };
+      };
+      w.__officexrBevy.setScene(json, camera, character);
+    },
+    [
+      fs.readFileSync(scene, 'utf-8'),
+      { position, lookAt: target, fovDeg: manifest.fixedCamera.fov, near: NEAR, far: FAR },
+      manifest.character,
+    ] as const,
+  );
+  await page.waitForFunction(() => (window as unknown as { __officexrBevy: { isReady: () => boolean } }).__officexrBevy.isReady(), null, {
+    timeout: 120_000,
+  });
+  // SwiftShader draws a frame every second or so; the screenshot waits on two.
+  await page.locator('#bevy-canvas').screenshot({ path: file, timeout: 120_000 });
+}
+
+test('Bevy render of the Barbarian mugshot vs its ideal PNGs', async ({ page }) => {
   test.setTimeout(30 * 60_000);
+  if (VARIANT !== 'native') {
+    await page.goto(`/?op=bevy&mugshot=${path.basename(BASELINE)}`);
+  }
   const out = (name: string) => path.resolve(OUT_DIR!, name);
   fs.mkdirSync(OUT_DIR!, { recursive: true });
   const manifest = JSON.parse(fs.readFileSync(path.join(BASELINE, 'manifest.json'), 'utf-8')) as Manifest;
@@ -90,25 +136,21 @@ test('Bevy render of the Barbarian mugshot vs its ideal PNGs', () => {
       const file = mode === 'gltf' ? `${angle.name}.png` : `primitive-${angle.name}.png`;
       const { position, target } = mugshotCamera(manifest.fixedCamera, angle.deg);
       const ideal = PNG.sync.read(fs.readFileSync(path.join(BASELINE, 'ideal', file)));
-      execFileSync(
-        'cargo',
-        [
-          'run', '-q', '-p', 'officexr-render', '--features', 'mugshot', '--bin', 'render', '--',
-          '--mugshot', manifest.character,
-          // The ideals are the canvas inside the manifest's bordered viewport.
-          scene, out(file), `${ideal.width}x${ideal.height}`,
-          position.join(','), target.join(','),
-          String(manifest.fixedCamera.fov), String(NEAR), String(FAR),
-        ],
-        { cwd: ROOT, stdio: ['ignore', 'inherit', 'inherit'] },
-      );
-      const bevy = PNG.sync.read(fs.readFileSync(out(file)));
-      const side = new PNG({ width: ideal.width * 2, height: ideal.height });
-      PNG.bitblt(ideal, side, 0, 0, ideal.width, ideal.height, 0, 0);
-      PNG.bitblt(bevy, side, 0, 0, bevy.width, bevy.height, ideal.width, 0);
-      fs.writeFileSync(out(`side-by-side-${file}`), PNG.sync.write(side));
-      const diff = pixelDiffCount(ideal.data, bevy.data, PIXEL_THRESHOLD);
-      results.push({ baseline: file, pixelDiffCount: diff, totalPixels: ideal.width * ideal.height });
+      for (const variant of VARIANT ? [VARIANT] : ['native', 'browser']) {
+        const png = out(variant === 'native' ? file : `browser-${file}`);
+        if (variant === 'native') {
+          renderNative(scene, png, `${ideal.width}x${ideal.height}`, position, target, manifest);
+        } else {
+          await renderBrowser(page, scene, png, position, target, manifest);
+        }
+        const bevy = PNG.sync.read(fs.readFileSync(png));
+        const side = new PNG({ width: ideal.width * 2, height: ideal.height });
+        PNG.bitblt(ideal, side, 0, 0, ideal.width, ideal.height, 0, 0);
+        PNG.bitblt(bevy, side, 0, 0, bevy.width, bevy.height, ideal.width, 0);
+        fs.writeFileSync(out(`side-by-side-${variant === 'native' ? '' : 'browser-'}${file}`), PNG.sync.write(side));
+        const diff = pixelDiffCount(ideal.data, bevy.data, PIXEL_THRESHOLD);
+        results.push({ variant, baseline: file, pixelDiffCount: diff, totalPixels: ideal.width * ideal.height });
+      }
     }
   }
   fs.writeFileSync(out('result.json'), `${JSON.stringify({ pixelThreshold: PIXEL_THRESHOLD, results }, null, 2)}\n`);

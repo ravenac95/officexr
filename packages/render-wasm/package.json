@@ -1,0 +1,16 @@
+{
+  "name": "@officexr/render-wasm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./pkg/officexr_render_web.js"
+    },
+    "./officexr_render_web_bg.wasm": "./pkg/officexr_render_web_bg.wasm"
+  },
+  "scripts": {
+    "build": "wasm-pack build ../../crates/officexr-render-web --profile wasm-release --target web --no-pack --out-dir ../../packages/render-wasm/pkg"
+  }
+}

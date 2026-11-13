@@ -118,7 +118,7 @@ const PRIMITIVE_CUBES: ReadonlyArray<{
   { id: 'm-1-1', sourceCommandId: 'mugshot', kindId: '__primitive_blue', position: [0, -2, 0] },
 ];
 
-function cubesForMode(mode: CubeMode) {
+export function cubesForMode(mode: CubeMode) {
   return mode === 'gltf' ? GLTF_CUBES : PRIMITIVE_CUBES;
 }
 
@@ -151,12 +151,12 @@ export interface MugshotManifest {
 /** Default lighting bag for the mugshot. Same as the studio's
  * default lighting but with the visible sun disc hidden — a bright
  * disc in the sky would dominate any pixel diff. */
-const DEFAULT_MUGSHOT_LIGHTING: LightingViewConfig = {
+export const DEFAULT_MUGSHOT_LIGHTING: LightingViewConfig = {
   ...DEFAULT_WORLD_CONSTANTS.lighting,
   showSunDisc: false,
 };
 
-const DEFAULT_MUGSHOT_BACKGROUND: BackgroundViewConfig =
+export const DEFAULT_MUGSHOT_BACKGROUND: BackgroundViewConfig =
   DEFAULT_WORLD_CONSTANTS.background;
 
 /**

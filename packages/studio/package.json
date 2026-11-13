@@ -16,6 +16,7 @@
     "@dimforge/rapier3d-compat": "0.19.2",
     "@officexr/core-refactor": "workspace:*",
     "@officexr/realtime-server": "workspace:*",
+    "@officexr/render-wasm": "workspace:*",
     "@officexr/sdk": "workspace:*",
     "@officexr/studio-mcp": "workspace:*",
     "@officexr/world": "workspace:*",

@@ -50,7 +50,7 @@ jobs:
         if: steps.config.outputs.deploy == 'true'
         run: pnpm install --frozen-lockfile
 
-      - uses: ./.github/actions/build-sim-wasm
+      - uses: ./.github/actions/build-wasm
         if: steps.config.outputs.deploy == 'true'
 
       - name: Build
