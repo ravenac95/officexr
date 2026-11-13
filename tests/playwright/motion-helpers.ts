@@ -432,8 +432,13 @@ export async function respawnBots(
  *
  * @param page    Playwright Page.
  * @param mapName Map name as it appears in `packages/world/maps/<name>.json`.
+ * @param sim     The `?sim=` simulation; `OFFICEXR_SIM=rust` runs every scenario on the wasm sim.
  */
-export async function goToDebugWithMap(page: Page, mapName: string): Promise<void> {
+export async function goToDebugWithMap(
+  page: Page,
+  mapName: string,
+  sim = process.env.OFFICEXR_SIM,
+): Promise<void> {
   await page.addInitScript((m: string) => {
     try {
       localStorage.setItem('officexr:studio:lastMap', m);
@@ -444,7 +449,7 @@ export async function goToDebugWithMap(page: Page, mapName: string): Promise<voi
   // `perfFooter=0` keeps the studio's perf footer out of the layout so
   // the Debug canvas viewport (and therefore every motion-keyframe
   // screenshot baseline) stays the same size it was captured at.
-  await page.goto('/?perfFooter=0#debug', { waitUntil: 'domcontentloaded' });
+  await page.goto(`/?perfFooter=0${sim ? `&sim=${sim}` : ''}#debug`, { waitUntil: 'domcontentloaded' });
 }
 
 /**

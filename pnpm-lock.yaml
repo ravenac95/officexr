@@ -169,6 +169,8 @@ importers:
         specifier: ^8.18.0
         version: 8.20.0
 
+  packages/sim-wasm: {}
+
   packages/studio:
     dependencies:
       '@dimforge/rapier3d-compat':
@@ -529,6 +531,9 @@ importers:
       '@officexr/sdk':
         specifier: workspace:*
         version: link:../sdk
+      '@officexr/sim-wasm':
+        specifier: workspace:*
+        version: link:../sim-wasm
       '@react-three/drei':
         specifier: ^10.7.7
         version: 10.7.7(@react-three/fiber@9.6.1(4cef1d60f6603e4c9948bae2bbba478a))(@types/react@19.2.14)(@types/three@0.182.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(three@0.182.0)

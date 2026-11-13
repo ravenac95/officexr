@@ -168,15 +168,24 @@ The studio backend is a separate process, `pnpm --filter @officexr/studio-server
 ## Building
 
 ```bash
+pnpm --filter @officexr/sim-wasm build   # the wasm simulation, needed first; see crates/README.md
 pnpm build                  # outputs the SPA to packages/web/dist/
 ```
 
 ### Cloudflare Pages
 
-Host the SPA on Pages with the backend on another origin. Git-integration settings:
+Host the SPA on Pages with the backend on another origin. The `pages-deploy` workflow
+(`.github/workflows/pages-deploy.yml`) builds and deploys it from GitHub Actions, since Cloudflare's Git build has no
+Rust toolchain for the wasm simulation: it builds `@officexr/sim-wasm`, runs `pnpm build:pages` (web app at `/`, studio
+at `/studio/`) and runs `wrangler pages deploy packages/web/dist`. Pushes to `main` deploy production (set the Pages
+project's production branch to `main`); other branches deploy previews, and a PR gets a comment with its preview URL.
+Without the secrets below, as on fork PRs, the workflow skips the deploy.
 
-- Build command `pnpm build:pages` (web app at `/`, studio at `/studio/`), output directory `packages/web/dist`.
-- Environment variables `NODE_VERSION=22`, `PNPM_VERSION=10.33.0`, `VITE_API_ORIGIN=https://api.example.com`
+Create the project as a Direct Upload project (or disconnect its Git integration) so Cloudflare doesn't also build it,
+then set in the repo's Actions settings:
+
+- Secrets `CLOUDFLARE_API_TOKEN` (a token with *Cloudflare Pages: Edit*) and `CLOUDFLARE_ACCOUNT_ID`.
+- Variables `CLOUDFLARE_PAGES_PROJECT` (the Pages project name), `VITE_API_ORIGIN=https://api.example.com`
   (the backend's origin; unset means same-origin; see `packages/web/.env.example`),
   `VITE_ASSET_BASE_URL=https://officexr-assets.oso.xyz` (where the studio loads models and baked layouts from), and
   `VITE_STUDIO_API_ORIGIN=https://studio-api.example.com` (the studio backend's public port, which the studio calls

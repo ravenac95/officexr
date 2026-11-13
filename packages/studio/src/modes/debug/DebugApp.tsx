@@ -4,7 +4,7 @@ import {
   type PersistentLocalState,
 } from '@officexr/core-refactor';
 import type { Vec3 } from '@officexr/sdk';
-import { PlayView, useApplication, useWorldConstants } from '@officexr/world/react';
+import { PlayView, simFromSearch, useApplication, useWorldConstants } from '@officexr/world/react';
 import {
   FilesystemLayoutStorage,
   FilesystemMapStorage,
@@ -164,6 +164,7 @@ export function DebugApp() {
             onDismissError={dismissError}
             onMapApplied={respawnBots}
             onFrameStats={publishFrameStats}
+            sim={simFromSearch(window.location.search)}
           />
         )}
       </main>
