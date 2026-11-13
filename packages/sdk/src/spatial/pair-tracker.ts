@@ -1,5 +1,4 @@
-import type { Bus } from '../game-state/bus.ts';
-import type { PlayerId, PlayerState } from '../game-state/types.ts';
+import type { GameEvent, PlayerId, PlayerState } from '../game-state/types.ts';
 
 /** State of a pair of characters with respect to each other. */
 export type PairState = 'entering' | 'entered' | 'exiting';
@@ -34,7 +33,6 @@ export interface MeetingArea {
 
 export interface TrackerOptions {
   selfId: PlayerId;
-  bus: Bus;
   /** WorldSettings.charRadius — the character body radius. */
   charRadius: number;
   /** WorldSettings.proximityRadius — inner ring radius. */
@@ -58,7 +56,12 @@ export interface TrackerOptions {
  * (self-involved any-state, peer↔peer only when sharing an area). */
 export type PlayerVisibilityState = PairState;
 
+/** A transition of a pair involving the local player. */
+export type ProximityEvent = Extract<GameEvent, { kind: `proximity:${string}` }>;
+
 export interface TrackerOutput {
+  /** Transitions this tick, in emission order, for the caller to put on the bus. */
+  events: ProximityEvent[];
   /** All pairs that currently have a non-null state, keyed by
    * `min(aId,bId):max(aId,bId)`. */
   pairStates: Map<string, PairState>;
@@ -103,8 +106,7 @@ interface InternalArea {
  * Stateful per-frame proximity + MeetingArea tracker. Caller creates one
  * instance (e.g. via `useRef`) and calls `tick()` each frame.
  *
- * The tracker emits the proximity bus events itself — callers should not
- * subscribe to those *and* this tracker for the same purpose.
+ * Transitions come back as `TrackerOutput.events`; the caller emits them.
  */
 export class PairTracker {
   private pairs = new Map<string, PairRecord>();
@@ -121,10 +123,10 @@ export class PairTracker {
     opts: TrackerOptions,
   ): TrackerOutput {
     const ids = Object.keys(players) as PlayerId[];
+    const events: ProximityEvent[] = [];
 
     const {
       selfId,
-      bus,
       charRadius,
       proximityRadius,
       proximityOuterRadius,
@@ -156,7 +158,7 @@ export class PairTracker {
     if (excluded && excluded.size > 0) {
       for (const area of this.areas.values()) {
         for (const m of [...area.members]) {
-          if (excluded.has(m)) this.eject(area, m, bus, selfId);
+          if (excluded.has(m)) this.eject(area, m, events, selfId);
         }
       }
     }
@@ -211,7 +213,7 @@ export class PairTracker {
           inSameArea: false,
         };
         this.pairs.set(key, rec);
-        emitPairEvent(bus, selfId, key, 'proximity:entering');
+        emitPairEvent(events, selfId, key, 'proximity:entering');
       }
       // Debounce bookkeeping for `entering` pairs (will be inspected in
       // Step 3 to decide admission). `entered` / `exiting` pairs ignore
@@ -271,7 +273,7 @@ export class PairTracker {
       // contained within the same area but is still tracked as
       // `entering` — those should also flip to `entered` and fire their
       // own `proximity:entered`.
-      this.flipPairsToEntered(admittedTo, bus, selfId);
+      this.flipPairsToEntered(admittedTo, events, selfId);
     }
 
     // Step 4: per-frame area updates (centre damping, ejection check,
@@ -308,7 +310,7 @@ export class PairTracker {
         }
       }
       for (const m of ejected) {
-        this.eject(area, m, bus, selfId);
+        this.eject(area, m, events, selfId);
       }
       // Dissolve area if only 0 or 1 members remain.
       if (area.members.size <= 1) {
@@ -329,7 +331,7 @@ export class PairTracker {
         // and forget the pair. (If we were `entered`/`exiting` because
         // of an area, the ejection in Step 4 already flipped us to
         // `exiting` — emitting `exited` here is the natural follow-up.)
-        emitPairEvent(bus, selfId, key, 'proximity:exited');
+        emitPairEvent(events, selfId, key, 'proximity:exited');
         this.pairs.delete(key);
       }
     }
@@ -389,6 +391,7 @@ export class PairTracker {
     }
 
     return {
+      events,
       pairStates: this.outPairs,
       playerStates: this.outPlayer,
       areas: this.outAreas,
@@ -397,14 +400,14 @@ export class PairTracker {
   }
 
   /** Removes `m` from `area`; its `entered` pairs with the remaining members go to `exiting`. */
-  private eject(area: InternalArea, m: PlayerId, bus: Bus, selfId: PlayerId): void {
+  private eject(area: InternalArea, m: PlayerId, events: ProximityEvent[], selfId: PlayerId): void {
     area.members.delete(m);
     for (const other of area.members) {
       const key = pairKey(m, other);
       const rec = this.pairs.get(key);
       if (rec?.state === 'entered') {
         rec.state = 'exiting';
-        emitPairEvent(bus, selfId, key, 'proximity:exiting');
+        emitPairEvent(events, selfId, key, 'proximity:exiting');
       }
     }
   }
@@ -511,7 +514,7 @@ export class PairTracker {
    * `entered`, emitting `proximity:entered`. */
   private flipPairsToEntered(
     area: InternalArea,
-    bus: Bus,
+    events: ProximityEvent[],
     selfId: PlayerId,
   ): void {
     const members = [...area.members];
@@ -528,13 +531,13 @@ export class PairTracker {
             inSameArea: true,
           };
           this.pairs.set(key, rec);
-          emitPairEvent(bus, selfId, key, 'proximity:entered');
+          emitPairEvent(events, selfId, key, 'proximity:entered');
           continue;
         }
         if (rec.state !== 'entered') {
           rec.state = 'entered';
           rec.debounceStartedAtMs = -1;
-          emitPairEvent(bus, selfId, key, 'proximity:entered');
+          emitPairEvent(events, selfId, key, 'proximity:entered');
         }
       }
     }
@@ -585,23 +588,19 @@ function promoteVisibility(
   if (!cur || ORDER[candidate] > ORDER[cur]) out.set(player, candidate);
 }
 
-/** Emit a `proximity:*` event for a pair, but only when the local
+/** Records a `proximity:*` event for a pair, but only when the local
  * player is one of the endpoints. Mirrors the old bridge filter so
  * `Communication`'s voice-room logic stays correct. */
 function emitPairEvent(
-  bus: Bus,
+  events: ProximityEvent[],
   selfId: PlayerId,
   pairKeyStr: string,
-  kind:
-    | 'proximity:entering'
-    | 'proximity:entered'
-    | 'proximity:exiting'
-    | 'proximity:exited',
+  kind: ProximityEvent['kind'],
 ): void {
   const [a, b] = splitKey(pairKeyStr);
   let otherId: PlayerId | null = null;
   if (a === selfId && b !== selfId) otherId = b;
   else if (b === selfId && a !== selfId) otherId = a;
   if (!otherId) return;
-  bus.emit({ kind, otherId } as never);
+  events.push({ kind, otherId });
 }

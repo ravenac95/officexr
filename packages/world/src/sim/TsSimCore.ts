@@ -1,5 +1,5 @@
 import RAPIER from '@dimforge/rapier3d-compat';
-import type { PlayerId, Vec3, WorldObjects } from '@officexr/sdk';
+import { PairTracker, tickProximity, type PlayerId, type PlayerState, type TrackerOutput, type Vec3, type WorldObjects } from '@officexr/sdk';
 import { createInstanceGeometry } from '../app/geometry-service.ts';
 import { excludeLayoutInstances } from '../scenes/compile-map.ts';
 import { stepAirVelocity } from '../physics/air-control.ts';
@@ -18,7 +18,16 @@ import {
   worldObjectsToColliders,
 } from '../physics/rules.ts';
 import { tryStepUp, type StepUpProbe } from '../physics/step-up.ts';
-import type { SimBakedColliders, SimCore, SimInput, SimKinds, SimPeer, SimStepResult } from './SimCore.ts';
+import { extrapolatePos, type Extrapolatable } from './extrapolate.ts';
+import type {
+  SimBakedColliders,
+  SimCore,
+  SimInput,
+  SimKinds,
+  SimPeer,
+  SimProximityInput,
+  SimStepResult,
+} from './SimCore.ts';
 
 /**
  * `SimCore` on rapier3d-compat. The player is a kinematic ball the
@@ -49,6 +58,7 @@ export class TsSimCore implements SimCore {
   private landingBlendMs = 0;
   private blendStartVel = { x: 0, z: 0 };
   private bumpingPeers = new Set<PlayerId>();
+  private readonly pairTracker = new PairTracker();
 
   constructor(charRadius: number) {
     this.body = this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased());
@@ -90,6 +100,14 @@ export class TsSimCore implements SimCore {
     for (const id of removed) {
       this.bumpingPeers.delete(id);
     }
+  }
+
+  tickProximity(players: Record<PlayerId, PlayerState>, input: SimProximityInput): TrackerOutput {
+    return tickProximity(this.pairTracker, { ...input, players });
+  }
+
+  extrapolatePeer(peer: Extrapolatable, nowMs: number): Vec3 {
+    return extrapolatePos(peer, nowMs);
   }
 
   position(): Vec3 {

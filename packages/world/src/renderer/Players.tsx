@@ -29,6 +29,7 @@ import {
   OUTER_SENSOR_GROUPS,
   type ColliderTag,
 } from '../physics/groups.ts';
+import { extrapolatePos } from '../sim/extrapolate.ts';
 import { routeContactEvent } from '../physics/bridge.ts';
 import { AVATAR_YAW_OFFSET, BODY_Y } from '../physics/rules.ts';
 
@@ -64,33 +65,6 @@ interface BumpState {
   startMs: number;
   /** Push direction (away from the other character). */
   normal: { x: number; z: number };
-}
-
-/** Cap on extrapolation time (s). If updates stop arriving, the projected
- * position freezes here instead of running away with stale velocity. */
-const EXTRAPOLATION_CAP_S = 0.1;
-
-/**
- * Compute the rendered XYZ for a player, extrapolated from the last received
- * position using the broadcast velocity. For the local player (tRecv === undefined)
- * this is a no-op — the local store is updated every frame, so pos is fresh.
- */
-export function extrapolatePos(
-  player: { pos: { x: number; y: number; z: number }; vel: { x: number; y: number; z: number }; tRecv?: number },
-  nowMs: number,
-  out: THREE.Vector3,
-): THREE.Vector3 {
-  if (player.tRecv === undefined) {
-    out.set(player.pos.x, player.pos.y, player.pos.z);
-    return out;
-  }
-  const elapsed = Math.min(EXTRAPOLATION_CAP_S, (nowMs - player.tRecv) / 1000);
-  out.set(
-    player.pos.x + player.vel.x * elapsed,
-    player.pos.y + player.vel.y * elapsed,
-    player.pos.z + player.vel.z * elapsed,
-  );
-  return out;
 }
 
 interface PlayerEntry {
@@ -226,8 +200,6 @@ export function Players({
     });
   }, [bus]);
 
-  const tmpVec = useMemo(() => new THREE.Vector3(), []);
-
   // --- Rapier → bus event bridge -----------------------------------
   //
   // The body/sensor colliders on every player carry `userData`
@@ -301,7 +273,7 @@ export function Players({
       // Extrapolate non-self players forward by their broadcast velocity to
       // smooth between rate-limited network updates (30 Hz broadcast →
       // 60 Hz render).
-      const renderPos = extrapolatePos(player, now, tmpVec);
+      const renderPos = extrapolatePos(player, now);
 
       // Drive peer rigid bodies from the store. The SELF rigid body is
       // driven elsewhere by the character controller — skip it here so
