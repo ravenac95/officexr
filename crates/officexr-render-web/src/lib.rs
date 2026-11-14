@@ -1,6 +1,7 @@
 //! `officexr-render` in the browser, one view per canvas, fed from JS:
 //! `init` once, then `createView` per canvas and `setWorld`, `setCamera`
-//! and `setPlayers` on each.
+//! and `setPlayers` on each; a world view's camera can instead follow the
+//! local player through the [`controls`] API.
 //!
 //! A view on the canvas given to `init` draws straight into Bevy's primary
 //! window. With WebGPU every other view is a Bevy window on its own canvas.
@@ -28,6 +29,8 @@ use officexr_render::{
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
+
+mod controls;
 
 static HUB: OnceLock<ViewHub> = OnceLock::new();
 
@@ -162,6 +165,7 @@ pub fn init(origin: String, primary_canvas: JsValue) -> Result<(), JsError> {
     ));
     #[cfg(feature = "webgl2")]
     image_views::add(&mut app);
+    controls::add(&mut app);
     let _ = HUB.set(app.world().resource::<ViewHub>().clone());
     app.run();
     Ok(())
@@ -220,6 +224,7 @@ fn target(id: ViewId, canvas: Canvas) -> ViewTarget {
 #[wasm_bindgen(js_name = destroyView)]
 pub fn destroy_view(id: ViewId) -> Result<(), JsError> {
     send(id, ViewMsg::Destroy)?;
+    controls::forget(id);
     if PRIMARY_VIEW.get() == Some(id) {
         PRIMARY_VIEW.set(None);
     }

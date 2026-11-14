@@ -4466,6 +4466,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "officexr-controls"
+version = "0.0.0"
+dependencies = [
+ "bevy",
+ "officexr-render",
+ "officexr-sim",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "officexr-protocol"
 version = "0.0.0"
 dependencies = [
@@ -4498,6 +4509,7 @@ name = "officexr-render-web"
 version = "0.0.0"
 dependencies = [
  "bevy",
+ "officexr-controls",
  "officexr-render",
  "serde",
  "serde-wasm-bindgen",
