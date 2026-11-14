@@ -1,10 +1,12 @@
-//! Ledge climbing for kinematic characters: lift, carry forward past the
+//! Ledge climbing for kinematic characters: lift, probe forward past the
 //! edge, drop back down, and accept only a grounded landing higher than the
-//! start. Rapier's autostep can't lift a ball over a real riser.
+//! start. The hop itself rises vertically and advances only the walk
+//! distance. Rapier's autostep can't lift a ball over a real riser.
 
 use crate::world_objects::Vec3;
 
-/// At least the ball radius plus a margin, so the contact foot lands on the tread.
+/// How far the forward probe reaches: the ball radius plus a margin, so the
+/// contact foot lands on the tread. Never applied as movement.
 pub const STEP_UP_FORWARD_CLEARANCE: f64 = 0.45;
 /// Above the 0.5 m staircase risers, below a 2 m block.
 pub const STEP_UP_MAX_HEIGHT: f64 = 0.6;
@@ -83,11 +85,60 @@ pub fn try_step_up(probe: &mut impl StepUpProbe, dx: f64, dz: f64) -> Option<Vec
     if !down.grounded || landed_on_character || landed_rise < MIN_LANDED_RISE {
         return None;
     }
+    // Vertical hop plus the swept advance, capped at the walk length.
+    let scale = (len / fwd.x.hypot(fwd.z)).min(1.0);
     Some(Vec3 {
-        x: up.x + fwd.x + down.movement.x,
+        x: fwd.x * scale,
         y: landed_rise,
-        z: up.z + fwd.z + down.movement.z,
+        z: fwd.z * scale,
     })
+}
+
+/// Whether something lies within the probe reach below the ball. A corner
+/// makes the sweep slide, so any deviation from the straight drop counts.
+pub fn has_support(probe: &mut impl StepUpProbe) -> bool {
+    let m = probe
+        .compute(Vec3 {
+            x: 0.0,
+            y: -STEP_UP_FORWARD_CLEARANCE,
+            z: 0.0,
+        })
+        .movement;
+    m.x.hypot(m.z).hypot(m.y + STEP_UP_FORWARD_CLEARANCE) > 0.01
+}
+
+/// Keeps gravity off after a hop until the ball rests on the tread. The hop
+/// only advances the walk distance, so the ball sits at tread height short of
+/// the edge; gravity would slide it back down the riser at slow speeds.
+/// The hold ends on grounding, losing support, being blocked, stopping, or
+/// once the ball has walked the probe reach.
+#[derive(Debug, Default)]
+pub struct StepUpHold {
+    remaining: f64,
+}
+
+impl StepUpHold {
+    pub fn begin(&mut self) {
+        self.remaining = STEP_UP_FORWARD_CLEARANCE;
+    }
+
+    pub fn reset(&mut self) {
+        self.remaining = 0.0;
+    }
+
+    pub fn active(&self) -> bool {
+        self.remaining > 0.0
+    }
+
+    /// Call after each sweep: `walked` of the `intended` horizontal distance was covered.
+    pub fn update(&mut self, walked: f64, intended: f64, grounded: bool, supported: bool) {
+        let blocked = walked < intended * 0.1;
+        self.remaining = if grounded || !supported || intended == 0.0 || blocked {
+            0.0
+        } else {
+            (self.remaining - walked).max(0.0)
+        };
+    }
 }
 
 #[cfg(test)]
@@ -120,6 +171,17 @@ mod tests {
         fn last_contact_is_character(&self) -> bool {
             self.character
         }
+    }
+
+    #[test]
+    fn step_up_hop_advances_only_the_walk_distance() {
+        let mut ledge = LedgeProbe {
+            pos: Vec3::default(),
+            character: false,
+        };
+        let hop = try_step_up(&mut ledge, -0.05, 0.0).expect("ledge");
+        assert!(hop.y > 0.0);
+        assert!(hop.x.hypot(hop.z) <= 0.05 + 0.01);
     }
 
     #[test]

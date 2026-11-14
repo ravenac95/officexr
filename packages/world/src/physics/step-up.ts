@@ -44,10 +44,8 @@
 
 import type { Vec3 } from '@officexr/sdk';
 
-/** Horizontal distance the assist carries the character past the
- * ledge edge — at least the ball radius (0.4) plus a margin so the
- * contact foot lands ON the tread instead of teetering on its corner.
- * The one-frame forward carry is the "hop" feel of taking a step. */
+/** How far the forward probe reaches: the ball radius (0.4) plus a
+ * margin, so the contact foot lands ON the tread. Never applied as movement. */
 export const STEP_UP_FORWARD_CLEARANCE = 0.45;
 
 /** Tallest ledge the assist will climb. The REAL KayKit staircase
@@ -114,7 +112,7 @@ export function tryStepUp(
     z: start.z + up.z,
   });
 
-  // 2. FORWARD: carry the contact foot past the ledge edge.
+  // 2. FORWARD: probe that the contact foot clears the ledge edge.
   const dist = Math.max(len, STEP_UP_FORWARD_CLEARANCE);
   const fwd = probe.compute({
     x: (dx / len) * dist,
@@ -145,10 +143,43 @@ export function tryStepUp(
     return null;
   }
 
-  // The applied delta is the exact sum of the three probe movements.
-  return {
-    x: up.x + fwd.x + down.x,
-    y: landedRise,
-    z: up.z + fwd.z + down.z,
-  };
+  // Vertical hop plus the swept advance, capped at the walk length.
+  const swept = Math.hypot(fwd.x, fwd.z);
+  const scale = Math.min(1, len / swept);
+  return { x: fwd.x * scale, y: landedRise, z: fwd.z * scale };
+}
+
+/** Whether something lies within the probe reach below the ball. A corner makes the sweep slide, so any deviation from the straight drop counts. */
+export function hasSupport(probe: StepUpProbe): boolean {
+  const m = probe.compute({ x: 0, y: -STEP_UP_FORWARD_CLEARANCE, z: 0 });
+  return Math.hypot(m.x, m.y + STEP_UP_FORWARD_CLEARANCE, m.z) > 0.01;
+}
+
+/**
+ * Keeps gravity off after a hop until the ball rests on the tread. The hop
+ * only advances the walk distance, so the ball sits at tread height short of
+ * the edge; gravity would slide it back down the riser at slow speeds.
+ * The hold ends on grounding, losing support, being blocked, stopping, or
+ * once the ball has walked the probe reach.
+ */
+export class StepUpHold {
+  private remaining = 0;
+
+  begin(): void {
+    this.remaining = STEP_UP_FORWARD_CLEARANCE;
+  }
+
+  reset(): void {
+    this.remaining = 0;
+  }
+
+  get active(): boolean {
+    return this.remaining > 0;
+  }
+
+  /** Call after each sweep: `walked` of the `intended` horizontal distance was covered. */
+  update(walked: number, intended: number, grounded: boolean, supported: boolean): void {
+    const blocked = walked < intended * 0.1;
+    this.remaining = grounded || !supported || intended === 0 || blocked ? 0 : Math.max(0, this.remaining - walked);
+  }
 }
