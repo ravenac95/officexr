@@ -84,8 +84,10 @@ officexr/
 - **Database.** The backend (`packages/server/src/db.ts`) reads and
   writes Postgres via `pg` using `SUPABASE_DB_URL`; the browser never talks to the
   database. Offices and per-office character choices live there.
-- **World.** A room renders the office's studio map through `@officexr/world`
-  (`<Scene>`, physics, characters). The headless state and protocol live in
+- **World.** A room renders the office's studio map through `@officexr/world`:
+  `<PlayView>` mounts `<BevyScene>`, which draws through the Bevy renderer
+  (`@officexr/render-wasm`) and steps the local player's `SimCore` in a
+  `requestAnimationFrame` loop (`react/frameLoop.ts`, `react/roomFrame.ts`). The headless state and protocol live in
   `@officexr/sdk`; `@officexr/core-refactor`'s `createStack` builds the channel +
   voice adapter for a session.
 - **Realtime.** Presence, position and chat sync go over a `WsChannel` to the

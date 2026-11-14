@@ -2,6 +2,7 @@ import { Server as HttpServer } from 'node:http';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { dropBundledRenderWasm } from '@officexr/render-wasm/vite-plugin';
 import { createBackend } from '@officexr/server';
 
 // The package scripts load this with `--configLoader runner`: the default loader leaves workspace
@@ -18,6 +19,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       tailwindcss(),
+      dropBundledRenderWasm(),
       {
         name: 'officexr-server',
         configureServer: async (server) => {

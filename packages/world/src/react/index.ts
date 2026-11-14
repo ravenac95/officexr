@@ -14,6 +14,7 @@ export { useWorldConstants } from './useWorldConstants.ts';
 export { GAMEPLAY_CAMERA_MODES, useCameraMode, type GameplayCameraMode } from './useCameraMode.ts';
 export { ErrorBanner, type HudRealtime } from './hud.tsx';
 export { PlayView, simFromSearch, type PlayViewProps } from './PlayView.tsx';
+export { bootBevy } from './bevyRenderer.ts';
 export { WorldLoadingScreen, type WorldLoadingScreenProps } from './LoadingScreen.tsx';
 export {
   usePlaySession,

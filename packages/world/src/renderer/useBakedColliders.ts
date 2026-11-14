@@ -1,8 +1,13 @@
 import { useEffect, useEffectEvent, useState } from 'react';
 import { getVersion } from '../app/bake-registry.ts';
 import { readGlbColliders } from '../app/baked-collider-extras.ts';
+import type { BakedLayoutPlacement } from '../app/map-loader.ts';
 import type { ColliderDescriptor } from '../physics/rules.ts';
-import type { SceneBakedLayout } from './Scene.tsx';
+
+/** A layout placement with the URL of its baked GLB, e.g. `/api/baked-layouts/lobby`. */
+export interface SceneBakedLayout extends BakedLayoutPlacement {
+  gltfPath: string;
+}
 
 /**
  * Each baked layout's layout-local colliders, read from its GLB, by room instance id.

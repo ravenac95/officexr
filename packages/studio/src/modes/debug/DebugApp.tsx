@@ -13,7 +13,9 @@ import {
   LocalStorageMapStorage,
   LocalStorageRoomStorage,
 } from '@officexr/world/scenes';
+import type { CameraMode } from '@officexr/world/renderer';
 import { SidePanel } from '../../ui/SidePanel.tsx';
+import { Section, Toggle } from '../../ui/controls/index.ts';
 import { SaveStatus, WorldPanels } from '../../panels/world/WorldPanels.tsx';
 import { useStudioSettings } from '../../panels/world/useStudioSettings.ts';
 import {
@@ -130,6 +132,7 @@ export function DebugApp() {
   };
 
   const studioSettings = useStudioSettings();
+  const [cameraMode, setCameraMode] = useState<CameraMode>('fixed');
 
   return (
     <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>
@@ -139,10 +142,9 @@ export function DebugApp() {
           position: 'relative',
           minWidth: 0,
           minHeight: 0,
-          // The R3F Canvas inside computes its own size from this
-          // container — without `overflow: hidden` it can briefly
-          // expand past the flex track on first paint and shove the
-          // header off-screen.
+          // The canvas inside sizes itself from this container; without
+          // `overflow: hidden` it can briefly expand past the flex track
+          // on first paint and shove the header off-screen.
           overflow: 'hidden',
         }}
       >
@@ -164,6 +166,8 @@ export function DebugApp() {
             onDismissError={dismissError}
             onMapApplied={respawnBots}
             onFrameStats={publishFrameStats}
+            cameraMode={cameraMode}
+            onCameraModeChange={setCameraMode}
             sim={simFromSearch(window.location.search)}
           />
         )}
@@ -171,7 +175,16 @@ export function DebugApp() {
       <SidePanel>
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <div style={{ flex: '0 0 auto' }}>
-            <MapPickerPanel picker={picker} />
+            <MapPickerPanel picker={picker}>
+              <Section title="Camera">
+                <Toggle
+                  label="free-fly"
+                  hint="WASD/QE fly, drag turns; the player stays put"
+                  value={cameraMode === 'free-fly'}
+                  onChange={(on) => setCameraMode(on ? 'free-fly' : 'fixed')}
+                />
+              </Section>
+            </MapPickerPanel>
           </div>
           <div style={{ flex: 1, minHeight: 0 }}>
             <SaveStatus status={persistence.status} onRetry={persistence.retry} />

@@ -19,6 +19,20 @@ export async function forceWebgl2(page: Page) {
   await page.addInitScript(() => Object.defineProperty(Navigator.prototype, 'gpu', { get: () => undefined }));
 }
 
+/**
+ * Waits until the play view's Bevy renderer has loaded every model (`__officexrBevyReady`), failing
+ * fast on a page error such as a wasm panic. Boots slowly under SwiftShader, hence the long timeout.
+ */
+export async function waitForBevyReady(page: Page, timeout = 170_000): Promise<void> {
+  const pageError = new Promise<never>((_, reject) => page.once('pageerror', reject));
+  const ready = page.waitForFunction(
+    () => (window as { __officexrBevyReady?: boolean }).__officexrBevyReady === true,
+    null,
+    { timeout },
+  );
+  await Promise.race([ready, pageError]);
+}
+
 export async function goToMode(
   page: Page,
   mode: 'map' | 'room' | 'object' | 'character' | 'debug' | 'mugshot',

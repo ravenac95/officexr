@@ -40,7 +40,12 @@ describe('@officexr/world/top-down import graph', () => {
     expect([...bare].filter((s) => FORBIDDEN.test(s))).toEqual([]);
   });
 
-  it('does not reach Scene.tsx', () => {
+  it('reaches neither Scene.tsx nor the Bevy renderer', () => {
     expect([...files].filter((f) => f.endsWith('/Scene.tsx'))).toEqual([]);
+    expect([...bare].filter((s) => s.startsWith('@officexr/render-wasm'))).toEqual([]);
+  });
+
+  it('ticks through the frame loop the 3D view shares', () => {
+    expect([...files].filter((f) => f.endsWith('/react/frameLoop.ts'))).toHaveLength(1);
   });
 });

@@ -1,0 +1,175 @@
+// @vitest-environment jsdom
+import { describe, expect, it, vi } from 'vitest';
+import { createMultiClientHarness } from '@officexr/sdk/test-harness';
+import type { MoveIntent } from '@officexr/render-wasm';
+import type { TrackerOutput, Vec3 } from '@officexr/sdk';
+import type { BotPool } from '../bot/BotPool.ts';
+import type { SimCore, SimInput, SimStepResult } from '../sim/SimCore.ts';
+import { RoomFrame, type PlayersInput, type RoomFrameOptions, type RoomView } from './roomFrame.ts';
+
+const STILL: MoveIntent = { dir: [0, 0], run: false, jump: false, yaw: 0 };
+
+function fakeSim(log: string[], start: Vec3) {
+  let pos = start;
+  const steps: SimInput[] = [];
+  const sim = {
+    syncPeers: () => log.push('sim.syncPeers'),
+    tickProximity: (): TrackerOutput => {
+      log.push('sim.tickProximity');
+      return {
+        events: [{ kind: 'proximity:entering', a: 'alice', b: 'bob' }],
+        conversationFocus: { x: 3, y: 0, z: 4 },
+      } as unknown as TrackerOutput;
+    },
+    extrapolatePeer: (p: { pos: Vec3 }) => p.pos,
+    position: () => pos,
+    teleport: (p: Vec3) => {
+      pos = p;
+    },
+    step: (input: SimInput): SimStepResult => {
+      log.push('sim.step');
+      steps.push(input);
+      pos = { x: pos.x + input.dir.x, y: pos.y, z: pos.z + input.dir.z };
+      return {
+        newPos: pos,
+        broadcastVel: { x: input.dir.x, y: 0, z: input.dir.z },
+        broadcastYaw: input.yaw,
+        moved: input.dir.x !== 0 || input.dir.z !== 0,
+        isAirborne: false,
+        bumps: [],
+      } as unknown as SimStepResult;
+    },
+  };
+  return { sim: sim as unknown as SimCore, steps };
+}
+
+function fakeView(log: string[], intent: MoveIntent = STILL) {
+  const players: PlayersInput[] = [];
+  const view: RoomView = {
+    takeIntent: () => {
+      log.push('view.takeIntent');
+      return intent;
+    },
+    setInputEnabled: () => log.push('view.setInputEnabled'),
+    setWorld: () => log.push('view.setWorld'),
+    setPlayers: (p) => {
+      log.push('view.setPlayers');
+      players.push(p);
+    },
+    setFollowTarget: () => log.push('view.setFollowTarget'),
+    setConversationFocus: () => log.push('view.setConversationFocus'),
+  };
+  return { view, players };
+}
+
+async function setup(opts: { intent?: MoveIntent; options?: Partial<RoomFrameOptions> } = {}) {
+  const harness = createMultiClientHarness();
+  const alice = await harness.add('alice');
+  alice.actions.upsertPlayer({ id: 'bob', name: 'Bob', pos: { x: 5, y: 0, z: 5 } });
+  const log: string[] = [];
+  const { sim, steps } = fakeSim(log, alice.store.getState().players.alice!.pos);
+  const { view, players } = fakeView(log, opts.intent);
+  const setSelfPosition = alice.actions.setSelfPosition.bind(alice.actions);
+  vi.spyOn(alice.actions, 'setSelfPosition').mockImplementation((...args) => {
+    log.push('actions.setSelfPosition');
+    setSelfPosition(...args);
+  });
+  alice.bus.on('proximity:entering', () => log.push('bus.emit'));
+  const bots = { tick: () => log.push('bots.tick') } as unknown as BotPool;
+  const frame = new RoomFrame(
+    { store: alice.store, actions: alice.actions, bus: alice.bus, bots, selfId: 'alice', view },
+    {
+      sim,
+      cameraMode: 'fixed',
+      worldFocused: true,
+      selfReady: true,
+      spawnPoints: [],
+      characterOf: (p) => `char-${p.id}`,
+      kinds: [],
+      bakedLayouts: [],
+      ...opts.options,
+    },
+  );
+  return { frame, log, steps, players, store: alice.store };
+}
+
+describe('RoomFrame', () => {
+  it("keeps SceneFrame's order: intent, proximity and its events, the step, bots, then the view", async () => {
+    const { frame, log } = await setup({ intent: { dir: [1, 0], run: false, jump: false, yaw: 0 } });
+
+    frame.step(0.016, 1000);
+
+    expect(log).toEqual([
+      'view.setInputEnabled',
+      'view.takeIntent',
+      'sim.syncPeers',
+      'sim.tickProximity',
+      'bus.emit',
+      'sim.step',
+      'actions.setSelfPosition',
+      'bots.tick',
+      'view.setWorld',
+      'view.setPlayers',
+      'view.setFollowTarget',
+      'view.setConversationFocus',
+    ]);
+  });
+
+  it("steps the sim along the view's intent and moves the store's player", async () => {
+    const { frame, steps, store } = await setup({ intent: { dir: [0, -1], run: true, jump: true, yaw: 0 } });
+    const before = store.getState().players.alice!.pos;
+    const { playerSpeed, runSpeedMultiplier } = store.getState().worldSettings;
+
+    frame.step(0.016, 1000);
+
+    expect(steps[0]).toMatchObject({ dir: { x: 0, z: -1 }, jump: true, running: true, speed: playerSpeed * runSpeedMultiplier });
+    expect(store.getState().players.alice!.pos.z).toBe(before.z - 1);
+  });
+
+  it('holds the player still in free-fly, where the keys fly the camera', async () => {
+    const { frame, steps } = await setup({
+      intent: { dir: [1, 0], run: false, jump: true, yaw: 0 },
+      options: { cameraMode: 'free-fly' },
+    });
+
+    frame.step(0.016, 1000);
+
+    expect(steps[0]).toMatchObject({ dir: { x: 0, z: 0 }, jump: false });
+  });
+
+  it('holds the player until the world is ready', async () => {
+    const { frame, log } = await setup({ intent: { dir: [1, 0], run: false, jump: false, yaw: 0 }, options: { selfReady: false } });
+
+    frame.step(0.016, 1000);
+
+    expect(log).not.toContain('sim.step');
+  });
+
+  it('draws peers with name tags and the self player without, or not at all in first person', async () => {
+    const { frame, players } = await setup();
+    frame.step(0.016, 1000);
+    expect(players[0]!.players.map((p) => [p.id, p.character, p.name])).toEqual([
+      ['alice', 'char-alice', ''],
+      ['bob', 'char-bob', 'Bob'],
+    ]);
+
+    frame.options = { ...frame.options, cameraMode: 'first-person' };
+    frame.step(0.016, 1016);
+    expect(players[1]!.players.map((p) => p.id)).toEqual(['bob']);
+  });
+
+  it('sends the world once, and again only when the store changes it', async () => {
+    const { frame, log, store } = await setup();
+    const worldSends = () => log.filter((l) => l === 'view.setWorld').length;
+
+    frame.step(0.016, 1000);
+    frame.step(0.016, 1016);
+    expect(worldSends()).toBe(1);
+
+    store.setState(() => ({
+      worldObjects: { cubeSize: 0.5, instances: [{ id: 'a', sourceCommandId: 'c', kindId: 'block', position: [0, 0, 0] }] },
+    }));
+    frame.step(0.016, 1032);
+    expect(worldSends()).toBe(2);
+  });
+});
