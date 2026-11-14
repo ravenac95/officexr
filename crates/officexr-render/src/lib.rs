@@ -21,7 +21,7 @@ use bevy::asset::io::AssetSourceBuilder;
 use bevy::camera::{Exposure, PerspectiveProjection, Projection};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::schedule::SystemCondition;
-use bevy::ecs::schedule::common_conditions::any_match_filter;
+use bevy::ecs::schedule::common_conditions::{any_match_filter, resource_exists_and_changed};
 use bevy::light::GlobalAmbientLight;
 use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
@@ -116,7 +116,7 @@ fn scene_systems(app: &mut App) {
         .add_systems(
             PostUpdate,
             apply_camera
-                .run_if(resource_changed::<SceneCamera>)
+                .run_if(resource_exists_and_changed::<SceneCamera>)
                 .before(TransformSystems::Propagate),
         )
         .add_systems(
@@ -124,6 +124,7 @@ fn scene_systems(app: &mut App) {
             (
                 (
                     objects::sync_kinds,
+                    objects::register_primitives,
                     objects::sync_objects,
                     layouts::sync_layouts,
                 )
@@ -138,8 +139,9 @@ fn scene_systems(app: &mut App) {
                     .run_if(resource_exists::<WorldSceneData>),
                 (
                     spawn_camera.run_if(resource_exists::<SceneCamera>),
-                    sky::sync_background
-                        .run_if(scene_changed.or_eager(any_match_filter::<Added<Camera3d>>)),
+                    sky::sync_background.run_if(
+                        sky::background_changed.or_eager(any_match_filter::<Added<Camera3d>>),
+                    ),
                 )
                     .chain()
                     .run_if(resource_exists::<WorldSceneData>),
@@ -203,12 +205,21 @@ mod tests {
     use super::*;
 
     fn scene(objects: &[(&str, [f32; 3])]) -> WorldSceneData {
+        let objects: Vec<_> = objects
+            .iter()
+            .map(|(id, position)| (*id, "__primitive_blue", *position))
+            .collect();
+        scene_of_kinds(&objects)
+    }
+
+    fn scene_of_kinds(objects: &[(&str, &str, [f32; 3])]) -> WorldSceneData {
         let mut json: serde_json::Value =
             serde_json::from_str(include_str!("../examples/booper.scene.json")).unwrap();
+        json["kinds"] = serde_json::json!([]);
         json["objects"]["instances"] = objects
             .iter()
-            .map(|(id, position)| {
-                serde_json::json!({"id": id, "kindId": "__primitive_blue", "position": position})
+            .map(|(id, kind, position)| {
+                serde_json::json!({"id": id, "kindId": kind, "position": position})
             })
             .collect();
         serde_json::from_value(json).unwrap()
@@ -224,7 +235,7 @@ mod tests {
         }
     }
 
-    fn app(scene: WorldSceneData) -> App {
+    fn bare_app() -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
             .init_asset::<Mesh>()
@@ -235,9 +246,13 @@ mod tests {
             .init_asset::<GltfMesh>()
             .init_asset::<GltfMaterial>()
             .insert_resource(AssetBase::Path(String::new()))
-            .insert_resource(scene)
-            .insert_resource(camera(0.0))
             .add_plugins(scene_systems);
+        app
+    }
+
+    fn app(scene: WorldSceneData) -> App {
+        let mut app = bare_app();
+        app.insert_resource(scene).insert_resource(camera(0.0));
         app.update();
         app
     }
@@ -276,6 +291,7 @@ mod tests {
         let mut app = app(scene(&[("a", [0.0; 3])]));
         let a = app.world().resource::<ObjectIndex>().get("a").unwrap();
         let entities = live(&app);
+        let before = transforms(&mut app);
 
         *app.world_mut().resource_mut::<WorldSceneData>() =
             scene(&[("a", [0.0; 3]), ("b", [4.0, 0.0, 0.0])]);
@@ -286,7 +302,57 @@ mod tests {
         *app.world_mut().resource_mut::<WorldSceneData>() = scene(&[("a", [0.0; 3])]);
         app.update();
         assert_eq!(app.world().resource::<ObjectIndex>().len(), 1);
-        assert_eq!(transforms(&mut app).len(), 1);
+        assert_eq!(app.world().resource::<ObjectIndex>().get("a"), Some(a));
+        assert_eq!(live(&app), entities);
+        assert_eq!(transforms(&mut app), before);
+    }
+
+    #[test]
+    fn changing_an_objects_kind_keeps_its_entity_and_swaps_the_mesh() {
+        let mut app = app(scene_of_kinds(&[("a", "__primitive_blue", [0.0; 3])]));
+        let a = app.world().resource::<ObjectIndex>().get("a").unwrap();
+        let mesh_of = |app: &App| {
+            app.world()
+                .get::<MeshMaterial3d<ObjectMaterial>>(a)
+                .cloned()
+        };
+        let before = mesh_of(&app).unwrap();
+
+        *app.world_mut().resource_mut::<WorldSceneData>() =
+            scene_of_kinds(&[("a", "__primitive_stone", [0.0; 3])]);
+        app.update();
+        app.update();
+
+        assert_eq!(app.world().resource::<ObjectIndex>().get("a"), Some(a));
+        assert_ne!(mesh_of(&app).unwrap(), before);
+    }
+
+    #[test]
+    fn changing_the_lighting_spawns_nothing() {
+        let mut app = app(scene(&[("a", [0.0; 3])]));
+        let entities = live(&app);
+
+        app.world_mut()
+            .resource_mut::<WorldSceneData>()
+            .lighting
+            .sun_intensity += 1.0;
+        app.update();
+
+        assert_eq!(live(&app), entities);
+    }
+
+    #[test]
+    fn systems_wait_for_the_scene_and_the_camera() {
+        let mut app = bare_app();
+        app.update();
+        app.insert_resource(scene(&[("a", [0.0; 3])]));
+        app.update();
+        app.insert_resource(camera(1.0));
+        app.update();
+        app.update();
+
+        let mut cameras = app.world_mut().query_filtered::<(), With<Camera3d>>();
+        assert_eq!(cameras.iter(app.world()).count(), 1);
     }
 
     #[test]

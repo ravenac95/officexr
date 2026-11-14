@@ -100,6 +100,26 @@ pub(crate) fn sky_bundle(
     )
 }
 
+/// Whether the scene's background, lighting or clear colour differs from what this condition last saw.
+pub(crate) fn background_changed(
+    scene: Option<Res<WorldSceneData>>,
+    mut last: Local<Option<(BackgroundConfig, LightingConfig, Option<Color>)>>,
+) -> bool {
+    let Some(scene) = scene.filter(|s| s.is_changed()) else {
+        return false;
+    };
+    let now = (
+        scene.background.clone(),
+        scene.lighting.clone(),
+        scene.clear_color,
+    );
+    if last.as_ref() == Some(&now) {
+        return false;
+    }
+    *last = Some(now);
+    true
+}
+
 /// Keeps the camera's backdrop in line with the scene: its flat colour, or
 /// else the sky dome as the camera's child.
 pub(crate) fn sync_background(

@@ -80,7 +80,7 @@ impl ObjectIndex {
 #[derive(Component)]
 pub(crate) struct Placed(ObjectInstance);
 
-#[allow(clippy::too_many_arguments)]
+/// Loads the kinds the instances reference, and reloads the ones whose definition changed.
 pub(crate) fn sync_kinds(
     mut commands: Commands,
     scene: Res<WorldSceneData>,
@@ -88,16 +88,24 @@ pub(crate) fn sync_kinds(
     assets: Res<AssetServer>,
     mut kinds: ResMut<ObjectKinds>,
     placed: Query<(Entity, &Placed)>,
-    mut cuboid: Local<Option<Handle<Mesh>>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ObjectMaterial>>,
 ) {
-    let wanted: HashSet<&str> = scene.kinds.iter().map(|k| k.id.as_str()).collect();
+    let used: HashSet<&str> = scene
+        .objects
+        .instances
+        .iter()
+        .map(|i| i.kind_id.as_str())
+        .collect();
+    let wanted: Vec<&WorldObjectKind> = scene
+        .kinds
+        .iter()
+        .filter(|k| used.contains(k.id.as_str()))
+        .collect();
+    let wanted_ids: HashSet<&str> = wanted.iter().map(|k| k.id.as_str()).collect();
     kinds
         .0
-        .retain(|id, m| m.gltf.is_none() || wanted.contains(id.as_str()));
+        .retain(|id, m| m.gltf.is_none() || wanted_ids.contains(id.as_str()));
     let mut redefined = HashSet::new();
-    for kind in &scene.kinds {
+    for kind in wanted {
         if kinds.0.get(&kind.id).is_some_and(|m| m.kind == *kind) {
             continue;
         }
@@ -111,6 +119,27 @@ pub(crate) fn sync_kinds(
             },
         );
     }
+    if redefined.is_empty() {
+        return;
+    }
+    // The entities keep their place; `attach_models` redraws them once the new model is ready.
+    for (entity, placed) in &placed {
+        if redefined.contains(placed.0.kind_id.as_str()) {
+            commands
+                .entity(entity)
+                .remove::<(Mesh3d, MeshMaterial3d<ObjectMaterial>)>();
+        }
+    }
+}
+
+/// Registers a ready-made cuboid model for each `__primitive_<colour>` kind the instances use.
+pub(crate) fn register_primitives(
+    scene: Res<WorldSceneData>,
+    mut kinds: ResMut<ObjectKinds>,
+    mut cuboid: Local<Option<Handle<Mesh>>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ObjectMaterial>>,
+) {
     for inst in &scene.objects.instances {
         let Some(colour) = inst.kind_id.strip_prefix(PRIMITIVE_KIND_PREFIX) else {
             continue;
@@ -142,14 +171,6 @@ pub(crate) fn sync_kinds(
                 }),
             },
         );
-    }
-    // The entities keep their place; `attach_models` redraws them once the new model is ready.
-    for (entity, placed) in &placed {
-        if redefined.contains(placed.0.kind_id.as_str()) {
-            commands
-                .entity(entity)
-                .remove::<(Mesh3d, MeshMaterial3d<ObjectMaterial>)>();
-        }
     }
 }
 
@@ -194,13 +215,17 @@ pub(crate) fn sync_objects(
     mut index: ResMut<ObjectIndex>,
     mut objects: Query<(&mut Placed, Option<&mut Transform>)>,
 ) {
-    let wanted: HashMap<&str, &ObjectInstance> = scene
+    let mut wanted: HashMap<&str, &ObjectInstance> = HashMap::new();
+    for inst in scene
         .objects
         .instances
         .iter()
         .filter(|i| kinds.0.contains_key(&i.kind_id))
-        .map(|i| (i.id.as_str(), i))
-        .collect();
+    {
+        if wanted.insert(inst.id.as_str(), inst).is_some() {
+            warn!("duplicate object id {}", inst.id);
+        }
+    }
     index.0.retain(|id, entity| {
         let keep = wanted.contains_key(id.as_str());
         if !keep {
@@ -254,7 +279,9 @@ pub(crate) fn load_kinds(
         else {
             continue;
         };
-        if assets.load_state(&handle).is_failed() {
+        if assets.load_state(&handle).is_failed()
+            || assets.recursive_dependency_load_state(&handle).is_failed()
+        {
             model.state = ModelState::Failed;
             continue;
         }

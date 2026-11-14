@@ -69,6 +69,9 @@ pub fn orbit_camera(
         orbit.target += yaw * Vec3::new(-delta.x, 0.0, -delta.y) * PAN_PER_PX * distance;
     }
     orbit.distance = (orbit.distance * (1.0 - scroll.delta.y * ZOOM_PER_LINE)).clamp(2.0, 500.0);
-    camera.position = orbit.transform().translation.into();
-    camera.look_at = orbit.target.into();
+    let (position, look_at) = (orbit.transform().translation.into(), orbit.target.into());
+    if camera.position != position || camera.look_at != look_at {
+        camera.position = position;
+        camera.look_at = look_at;
+    }
 }

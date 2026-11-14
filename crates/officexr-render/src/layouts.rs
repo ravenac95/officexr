@@ -11,14 +11,17 @@ use crate::placement::baked_layout_transform;
 use crate::scene::{BakedLayoutPlacement, WorldSceneData};
 
 enum LayoutState {
-    Loading(Handle<Gltf>),
-    Spawned(Vec<Entity>),
+    Loading,
+    /// Each mesh entity with its transform inside the GLB, to re-pose when the placement moves.
+    Spawned(Vec<(Entity, Transform)>),
     /// As in three.js, a layout that isn't baked yet is left out.
     Failed,
 }
 
 struct Layout {
     placement: BakedLayoutPlacement,
+    /// Held so the GLB stays loaded while the layout is moved.
+    gltf: Handle<Gltf>,
     state: LayoutState,
 }
 
@@ -29,12 +32,12 @@ impl LayoutIndex {
     pub fn is_loading(&self) -> bool {
         self.0
             .iter()
-            .any(|l| matches!(l.state, LayoutState::Loading(_)))
+            .any(|l| matches!(l.state, LayoutState::Loading))
     }
 }
 
-/// Keeps the layouts the scene still lists as they are, requests the new,
-/// and despawns the gone.
+/// Keeps the layouts the scene still lists as they are, re-poses the moved
+/// ones in place, requests the new, and despawns the gone.
 pub(crate) fn sync_layouts(
     mut commands: Commands,
     scene: Res<WorldSceneData>,
@@ -43,20 +46,46 @@ pub(crate) fn sync_layouts(
     mut index: ResMut<LayoutIndex>,
 ) {
     let mut gone = std::mem::take(&mut index.0);
+    let exact: Vec<Option<Layout>> = scene
+        .baked_layouts
+        .iter()
+        .map(|p| {
+            let i = gone.iter().position(|l| l.placement == *p)?;
+            Some(gone.swap_remove(i))
+        })
+        .collect();
     index.0 = scene
         .baked_layouts
         .iter()
-        .map(|p| match gone.iter().position(|l| l.placement == *p) {
-            Some(i) => gone.swap_remove(i),
-            None => Layout {
-                placement: p.clone(),
-                state: LayoutState::Loading(assets.load(base.asset_path(&p.gltf_path))),
-            },
+        .zip(exact)
+        .map(|(p, kept)| {
+            if let Some(layout) = kept {
+                return layout;
+            }
+            let Some(i) = gone
+                .iter()
+                .position(|l| l.placement.gltf_path == p.gltf_path)
+            else {
+                return Layout {
+                    placement: p.clone(),
+                    gltf: assets.load(base.asset_path(&p.gltf_path)),
+                    state: LayoutState::Loading,
+                };
+            };
+            let mut layout = gone.swap_remove(i);
+            if let LayoutState::Spawned(entities) = &layout.state {
+                let root = baked_layout_transform(p);
+                for (entity, local) in entities {
+                    commands.entity(*entity).insert(root.mul_transform(*local));
+                }
+            }
+            layout.placement = p.clone();
+            layout
         })
         .collect();
     for layout in gone {
         if let LayoutState::Spawned(entities) = layout.state {
-            for entity in entities {
+            for (entity, _) in entities {
                 commands.entity(entity).despawn();
             }
         }
@@ -76,10 +105,13 @@ pub(crate) fn spawn_loaded_layouts(
     mut materials: ResMut<Assets<ObjectMaterial>>,
 ) {
     for layout in &mut index.0 {
-        let LayoutState::Loading(handle) = &layout.state else {
+        if !matches!(layout.state, LayoutState::Loading) {
             continue;
-        };
-        if assets.load_state(handle).is_failed() {
+        }
+        let handle = &layout.gltf;
+        if assets.load_state(handle).is_failed()
+            || assets.recursive_dependency_load_state(handle).is_failed()
+        {
             layout.state = LayoutState::Failed;
             continue;
         }
@@ -98,13 +130,14 @@ pub(crate) fn spawn_loaded_layouts(
                     base: standard_material(&primitive, &gltf_materials),
                     extension: HemisphereFill::new(&scene.lighting),
                 });
-                commands
+                let entity = commands
                     .spawn((
                         Mesh3d(primitive.mesh),
                         MeshMaterial3d(material),
                         root.mul_transform(node_transform),
                     ))
-                    .id()
+                    .id();
+                (entity, node_transform)
             })
             .collect();
         layout.state = LayoutState::Spawned(entities);
