@@ -249,6 +249,7 @@ describe('PresenceList', () => {
     const focus = screen.getByRole('status', { name: 'world focus' });
 
     const bob = goButton('Bob')!;
+    fireEvent(bob, new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
     expect(fireEvent.mouseDown(bob)).toBe(false);
     expect(focus.textContent).toBe('false');
     fireEvent.click(bob);

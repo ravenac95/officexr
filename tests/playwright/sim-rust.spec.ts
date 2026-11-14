@@ -7,6 +7,9 @@ import { goToDebugWithMap, setFixedCamera } from './motion-helpers.ts';
 
 const SELF_ID = 'local-player';
 
+// SwiftShader draws the Bevy page a frame or two a second, and each real input waits on one.
+test.use({ actionTimeout: 30_000 });
+
 type Pos = { x: number; y: number; z: number };
 
 const selfPos = (page: Page): Promise<Pos | null> =>
@@ -29,8 +32,7 @@ test('sim=rust: the local player walks under keyboard input', async ({ page }) =
   const before = await selfPos(page);
   expect(before).not.toBeNull();
 
-  // A synthetic mousedown hands the keyboard to the world: a real click waits on frames SwiftShader is slow to draw.
-  await page.evaluate(() => document.querySelector('canvas')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })));
+  await page.locator('canvas').first().click({ position: { x: 200, y: 200 } });
   await page.keyboard.down('KeyW');
   await page.waitForTimeout(3_000);
   await page.keyboard.up('KeyW');

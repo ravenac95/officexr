@@ -100,7 +100,7 @@ describe('TopDownPlayView', () => {
     const z = () => alice.store.getState().players.alice!.pos.z;
     const startZ = z();
     render(<aside data-studio-panel="true"><button>in panel</button></aside>);
-    fireEvent.mouseDown(screen.getByText('in panel'));
+    fireEvent(screen.getByText('in panel'), new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
     window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(z()).toBe(startZ);

@@ -60,6 +60,7 @@ interface BevySentinels {
 }
 
 const STATS_INTERVAL_MS = 500;
+const SCROLL_KEYS = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 const NO_SPAWNS: readonly Vec3[] = [];
 
 const selectCharRadius = (s: { worldSettings: { charRadius: number } }) => s.worldSettings.charRadius;
@@ -208,19 +209,27 @@ export function BevyScene(props: BevySceneProps) {
     notifyCollidersReady(bakedColliders.map((b) => b.roomInstanceId));
   }, [sim, worldObjects, voxelSize, catalog, kinds, bakedColliders]);
 
-  // E sits; walking, jumping and the stick stand up again through the frame.
+  // E sits (walking, jumping and the stick stand up again through the frame). Space and the arrows
+  // would scroll the page. Bevy hears the keys itself; this only adds what it doesn't do.
+  const sitsOnE = props.cameraMode !== 'free-fly' ? seating : undefined;
   useEffect(() => {
-    if (!seating || !props.worldFocused) {
+    if (!props.worldFocused) {
       return;
     }
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'KeyE' && !e.repeat && !isTypingTarget(e.target) && !hasCommandModifier(e)) {
-        seating.sit();
+      if (isTypingTarget(e.target) || hasCommandModifier(e)) {
+        return;
+      }
+      if (SCROLL_KEYS.has(e.code)) {
+        e.preventDefault();
+      }
+      if (e.code === 'KeyE' && !e.repeat) {
+        sitsOnE?.sit();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [seating, props.worldFocused]);
+  }, [sitsOnE, props.worldFocused]);
 
   const charRadius = useStoreSelector(store, selectCharRadius);
   const { cameraMode, view: constants } = props;
@@ -306,7 +315,7 @@ export function BevyScene(props: BevySceneProps) {
         stats.frames = 0;
         stats.elapsedMs = 0;
       }
-    });
+    }, { onError: (error) => reportError(error) });
     loop.start();
     return () => {
       loop.stop();

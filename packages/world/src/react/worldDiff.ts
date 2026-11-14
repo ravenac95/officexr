@@ -29,8 +29,8 @@ const sameInstance = (a: ObjectInstance, b: ObjectInstance) =>
   a.position[2] === b.position[2];
 
 /**
- * The `setWorld` update that brings a view from `sent` (null for a new view)
- * to `next`, or null when nothing changed. Instances are upserted and removed
+ * The `setWorld` update that brings a view from `sent` (null for a new view,
+ * which the update replaces whole) to `next`, or null when nothing changed. Instances are upserted and removed
  * by id; every other field is resent whole when it changed.
  */
 export function diffWorld(sent: SentWorld | null, next: WorldInputs): { diff: WorldDiff | null; sent: SentWorld } {
@@ -43,7 +43,8 @@ export function diffWorld(sent: SentWorld | null, next: WorldInputs): { diff: Wo
     background: next.background,
     bakedLayoutsKey,
   };
-  const diff: WorldDiff = {};
+  // A new view starts from nothing, whatever an earlier feed left on it.
+  const diff: WorldDiff = sent ? {} : { replace: true };
   const upserts = next.instances.filter((i) => {
     const prev = sent?.instances.get(i.id);
     return !prev || !sameInstance(prev, i);

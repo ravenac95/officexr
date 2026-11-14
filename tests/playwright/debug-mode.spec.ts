@@ -12,6 +12,9 @@ import { goToDebugWithMap } from './motion-helpers.ts';
 
 const SELF_ID = 'local-player';
 
+// SwiftShader draws the Bevy page a frame or two a second, and each real input waits on one.
+test.use({ actionTimeout: 30_000 });
+
 type Pos = { x: number; y: number; z: number };
 
 const storeSummary = (page: Page) =>
@@ -28,8 +31,7 @@ const storeSummary = (page: Page) =>
 /** Holds W on the world and returns how far the local player moved across the ground. */
 async function walkForward(page: Page): Promise<number> {
   const before = (await storeSummary(page)).self!;
-  // A synthetic mousedown hands the keyboard to the world: a real click waits on frames SwiftShader is slow to draw.
-  await page.evaluate(() => document.querySelector('canvas')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })));
+  await page.locator('canvas').first().click({ position: { x: 200, y: 200 } });
   await page.keyboard.down('KeyW');
   await page.waitForTimeout(3_000);
   await page.keyboard.up('KeyW');
@@ -50,9 +52,15 @@ test('Debug mode renders through Bevy; the player walks, and stays put in free-f
 
   expect(await walkForward(page), 'walked on W').toBeGreaterThan(0.5);
 
-  await page.getByRole('switch', { name: 'free-fly' }).dispatchEvent('click');
-  await expect(page.getByRole('switch', { name: 'free-fly' })).toBeChecked();
+  // Real clicks: a panel control takes the keyboard, and a click on the canvas must give it back.
+  const freeFly = page.getByRole('switch', { name: 'free-fly' });
+  await freeFly.click();
+  await expect(freeFly).toBeChecked();
   expect(await walkForward(page), 'W flies the camera, not the player').toBeLessThan(0.05);
+
+  await freeFly.click();
+  await expect(freeFly).not.toBeChecked();
+  expect(await walkForward(page), 'walked again after a panel click and a canvas click').toBeGreaterThan(0.5);
 });
 
 test('Map switch in Debug loads the new map and its baked layout', async ({ page, request }) => {

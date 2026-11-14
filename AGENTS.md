@@ -105,7 +105,8 @@ officexr/
 ## Commands
 
 ```bash
-pnpm dev          # Start web dev server (Vite, http://localhost:5173) with the backend in-process
+pnpm dev          # Start web dev server (Vite, http://localhost:5173) with the backend in-process; its 3D view needs the render-wasm build (below) or VITE_RENDER_WASM_BASE_URL
+pnpm --filter @officexr/render-wasm build   # The Bevy renderer behind the web 3D view and studio debug mode (slow LTO build)
 pnpm build        # Build the web SPA (outputs to packages/web/dist/)
 pnpm preview      # Preview the SPA build (static only: no API)
 pnpm --filter @officexr/server start   # Production backend on :4173, admin on :8787

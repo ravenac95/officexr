@@ -45,12 +45,17 @@ function fakeSim(log: string[], start: Vec3) {
 
 function fakeView(log: string[], intent: MoveIntent = STILL) {
   const players: PlayersInput[] = [];
+  const inputEnabled: boolean[] = [];
+  const state = { intent };
   const view: RoomView = {
     takeIntent: () => {
       log.push('view.takeIntent');
-      return intent;
+      return state.intent;
     },
-    setInputEnabled: () => log.push('view.setInputEnabled'),
+    setInputEnabled: (enabled) => {
+      log.push('view.setInputEnabled');
+      inputEnabled.push(enabled);
+    },
     setWorld: () => log.push('view.setWorld'),
     setPlayers: (p) => {
       log.push('view.setPlayers');
@@ -59,7 +64,7 @@ function fakeView(log: string[], intent: MoveIntent = STILL) {
     setFollowTarget: () => log.push('view.setFollowTarget'),
     setConversationFocus: () => log.push('view.setConversationFocus'),
   };
-  return { view, players };
+  return { view, players, inputEnabled, state };
 }
 
 async function setup(opts: { intent?: MoveIntent; options?: Partial<RoomFrameOptions> } = {}) {
@@ -68,7 +73,7 @@ async function setup(opts: { intent?: MoveIntent; options?: Partial<RoomFrameOpt
   alice.actions.upsertPlayer({ id: 'bob', name: 'Bob', pos: { x: 5, y: 0, z: 5 } });
   const log: string[] = [];
   const { sim, steps } = fakeSim(log, alice.store.getState().players.alice!.pos);
-  const { view, players } = fakeView(log, opts.intent);
+  const { view, players, inputEnabled, state: viewState } = fakeView(log, opts.intent);
   const setSelfPosition = alice.actions.setSelfPosition.bind(alice.actions);
   vi.spyOn(alice.actions, 'setSelfPosition').mockImplementation((...args) => {
     log.push('actions.setSelfPosition');
@@ -90,7 +95,19 @@ async function setup(opts: { intent?: MoveIntent; options?: Partial<RoomFrameOpt
       ...opts.options,
     },
   );
-  return { frame, log, steps, players, store: alice.store };
+  return {
+    frame,
+    log,
+    steps,
+    sim,
+    players,
+    inputEnabled,
+    actions: alice.actions,
+    store: alice.store,
+    setIntent: (intent: MoveIntent) => {
+      viewState.intent = intent;
+    },
+  };
 }
 
 describe('RoomFrame', () => {
@@ -171,5 +188,91 @@ describe('RoomFrame', () => {
     }));
     frame.step(0.016, 1032);
     expect(worldSends()).toBe(2);
+  });
+
+  it('stands a seated player on movement instead of stepping', async () => {
+    const seating = { sit: vi.fn(), stand: vi.fn(), setStandingCheck: vi.fn() };
+    const { frame, log, actions } = await setup({ intent: { dir: [1, 0], run: false, jump: false, yaw: 0 }, options: { seating } });
+    actions.upsertPlayer({ id: 'alice', seat: 'chair-1' });
+
+    frame.step(0.016, 1000);
+
+    expect(seating.stand).toHaveBeenCalledOnce();
+    expect(log).not.toContain('sim.step');
+  });
+
+  it("teleports the sim to a store position set from outside, and doesn't step that frame", async () => {
+    const { frame, log, sim, actions } = await setup({ intent: { dir: [1, 0], run: false, jump: false, yaw: 0 } });
+    actions.setSelfPosition({ x: 40, y: 2, z: 40 }, { x: 0, y: 0, z: 0 }, 0, false);
+
+    frame.step(0.016, 1000);
+
+    expect(sim.position()).toEqual({ x: 40, y: 2, z: 40 });
+    expect(log).not.toContain('sim.step');
+  });
+
+  it('zeroes the velocity once on the frame the player stops', async () => {
+    const { frame, store, setIntent } = await setup({ intent: { dir: [1, 0], run: false, jump: false, yaw: 0 } });
+    frame.step(0.016, 1000);
+    expect(store.getState().players.alice!.vel.x).toBe(1);
+
+    setIntent(STILL);
+    frame.step(0.016, 1016);
+
+    expect(store.getState().players.alice!.vel).toEqual({ x: 0, y: 0, z: 0 });
+  });
+
+  it("walks the stick at its deflection's share of walk speed, turned by the camera's yaw", async () => {
+    const { frame, steps, store } = await setup({
+      intent: { dir: [0, 0], run: false, jump: false, yaw: Math.PI / 2 },
+      options: { moveInput: { current: { x: 0, z: 0.5 } } },
+    });
+
+    frame.step(0.016, 1000);
+
+    const { playerSpeed } = store.getState().worldSettings;
+    expect(steps[0]!.speed).toBeCloseTo(playerSpeed * 0.5);
+    expect(steps[0]!.running).toBe(false);
+    expect(steps[0]!.dir.x).toBeCloseTo(-1);
+    expect(steps[0]!.dir.z).toBeCloseTo(0);
+  });
+
+  it('auto-walks at walk speed without input, and keys cancel it', async () => {
+    const autoWalk = { intent: vi.fn(() => ({ x: 1, z: 0 })), cancel: vi.fn() };
+    const { frame, steps, store, setIntent } = await setup({ options: { autoWalk } });
+
+    frame.step(0.016, 1000);
+    expect(steps[0]).toMatchObject({ dir: { x: 1, z: 0 }, speed: store.getState().worldSettings.playerSpeed });
+    expect(autoWalk.cancel).not.toHaveBeenCalled();
+
+    setIntent({ dir: [0, -1], run: false, jump: false, yaw: 0 });
+    frame.step(0.016, 1016);
+    expect(autoWalk.cancel).toHaveBeenCalledOnce();
+    expect(steps[1]!.dir).toEqual({ x: 0, z: -1 });
+  });
+
+  it('neither the stick nor auto-walk moves the player in free-fly', async () => {
+    const autoWalk = { intent: vi.fn(() => ({ x: 1, z: 0 })), cancel: vi.fn() };
+    const { frame, steps } = await setup({
+      options: { cameraMode: 'free-fly', autoWalk, moveInput: { current: { x: 0, z: 1 } } },
+    });
+
+    frame.step(0.016, 1000);
+
+    expect(steps[0]!.dir).toEqual({ x: 0, z: 0 });
+  });
+
+  it('turns the view\'s input off while a text field has focus, and back on after', async () => {
+    const { frame, inputEnabled } = await setup();
+    const input = document.body.appendChild(document.createElement('input'));
+
+    frame.step(0.016, 1000);
+    input.focus();
+    frame.step(0.016, 1016);
+    input.blur();
+    frame.step(0.016, 1032);
+
+    expect(inputEnabled).toEqual([true, false, true]);
+    input.remove();
   });
 });

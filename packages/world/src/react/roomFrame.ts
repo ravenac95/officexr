@@ -130,10 +130,10 @@ export class RoomFrame {
   private simulate(intent: MoveIntent, dtSec: number, nowMs: number) {
     const { store, actions, bus, selfId } = this.deps;
     const { sim, autoWalk, seating } = this.options;
-    // Free-fly flies the camera on the movement keys, so they don't walk.
+    // Free-fly flies the camera on the movement keys, and nothing walks the player.
     const freeFly = this.options.cameraMode === 'free-fly';
     const keyed = !freeFly && (intent.dir[0] !== 0 || intent.dir[1] !== 0);
-    const stick = keyed ? undefined : this.options.moveInput?.current;
+    const stick = keyed || freeFly ? undefined : this.options.moveInput?.current;
     const deflection = stick ? Math.hypot(stick.x, stick.z) : 0;
     const hasMoveInput = keyed || deflection > 0;
     const jump = !freeFly && intent.jump;
@@ -141,7 +141,8 @@ export class RoomFrame {
       autoWalk?.cancel();
     }
     const selfBeforeWalk = store.getState().players[selfId];
-    const autoWalkDir = !hasMoveInput && selfBeforeWalk ? (autoWalk?.intent(selfBeforeWalk.pos) ?? null) : null;
+    const autoWalkDir =
+      !hasMoveInput && !freeFly && selfBeforeWalk ? (autoWalk?.intent(selfBeforeWalk.pos) ?? null) : null;
 
     // Read after auto-walk, which can seat the player, so this frame's movement doesn't overwrite the seated pose.
     const state = store.getState();
@@ -260,7 +261,6 @@ export class RoomFrame {
     if (sources.every((s, i) => s === this.worldSources[i])) {
       return;
     }
-    this.worldSources = sources;
     const { instances } = state.worldObjects;
     const { diff, sent } = diffWorld(this.sentWorld, {
       instances: excludeInstance ? instances.filter((i) => !excludeInstance(i)) : instances,
@@ -269,10 +269,12 @@ export class RoomFrame {
       background,
       bakedLayouts,
     });
-    this.sentWorld = sent;
     if (diff) {
       this.deps.view.setWorld(diff);
     }
+    // Only once it landed, so a diff that throws is tried again next frame.
+    this.worldSources = sources;
+    this.sentWorld = sent;
   }
 
   private playersInput(state: OfficeState, nowMs: number): PlayersInput {

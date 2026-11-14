@@ -132,7 +132,9 @@ export function DebugApp() {
   };
 
   const studioSettings = useStudioSettings();
-  const [cameraMode, setCameraMode] = useState<CameraMode>('fixed');
+  // Free-fly sits over the gameplay mode, which it hands back when turned off.
+  const [gameplayCameraMode, setGameplayCameraMode] = useState<CameraMode>('fixed');
+  const [freeFly, setFreeFly] = useState(false);
 
   return (
     <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>
@@ -166,8 +168,11 @@ export function DebugApp() {
             onDismissError={dismissError}
             onMapApplied={respawnBots}
             onFrameStats={publishFrameStats}
-            cameraMode={cameraMode}
-            onCameraModeChange={setCameraMode}
+            cameraMode={freeFly ? 'free-fly' : gameplayCameraMode}
+            onCameraModeChange={(mode) => {
+              setFreeFly(false);
+              setGameplayCameraMode(mode);
+            }}
             sim={simFromSearch(window.location.search)}
           />
         )}
@@ -180,8 +185,8 @@ export function DebugApp() {
                 <Toggle
                   label="free-fly"
                   hint="WASD/QE fly, drag turns; the player stays put"
-                  value={cameraMode === 'free-fly'}
-                  onChange={(on) => setCameraMode(on ? 'free-fly' : 'fixed')}
+                  value={freeFly}
+                  onChange={setFreeFly}
                 />
               </Section>
             </MapPickerPanel>

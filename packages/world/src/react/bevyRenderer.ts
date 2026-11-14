@@ -9,11 +9,17 @@ let playCanvasElement: HTMLCanvasElement | null = null;
  * `primary` canvas, if any, as its primary window.
  */
 export function bootBevy(primary?: HTMLCanvasElement): Promise<RendererModule> {
-  booted ??= loadRenderer().then((wasm) => {
-    const origin = modelUrl('/models/').replace(/\/models\/$/, '') || window.location.origin;
-    wasm.init(origin, primary);
-    return wasm;
-  });
+  booted ??= loadRenderer()
+    .then((wasm) => {
+      const origin = modelUrl('/models/').replace(/\/models\/$/, '') || window.location.origin;
+      wasm.init(origin, primary);
+      return wasm;
+    })
+    .catch((error: unknown) => {
+      // A failed load (a dropped connection) is retried by the next mount.
+      booted = null;
+      throw error;
+    });
   return booted;
 }
 

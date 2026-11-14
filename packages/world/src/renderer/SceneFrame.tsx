@@ -71,6 +71,7 @@ const ARROW_KEYS = new Set([
   'ArrowRight',
 ]);
 
+// ponytail(OSO-7950): only the Mugshot mode's Scene mounts this now; it goes with Scene.
 /**
  * Owns the per-frame loop: input into the local player's `SimCore`
  * step, world tick, rule evaluation, sync flushing, bot updates.

@@ -38,7 +38,7 @@ describe('FrameLoop', () => {
     const order: string[] = [];
     vi.spyOn(deps.actions, 'tick').mockImplementation(() => order.push('tickSession'));
     const frames = manualScheduler();
-    const loop = new FrameLoop(deps, () => order.push('frame'), frames.scheduler);
+    const loop = new FrameLoop(deps, () => order.push('frame'), { scheduler: frames.scheduler });
 
     loop.start();
     frames.run(1000);
@@ -50,7 +50,7 @@ describe('FrameLoop', () => {
   it('starts at dt 0 and caps a long gap', async () => {
     const dts: number[] = [];
     const frames = manualScheduler();
-    const loop = new FrameLoop(await session(), (dtSec) => dts.push(dtSec), frames.scheduler);
+    const loop = new FrameLoop(await session(), (dtSec) => dts.push(dtSec), { scheduler: frames.scheduler });
 
     loop.start();
     frames.run(1000);
@@ -60,10 +60,30 @@ describe('FrameLoop', () => {
     expect(dts).toEqual([0, 0.016, MAX_DT_SEC]);
   });
 
+  it('reports a throwing frame and still ticks the session', async () => {
+    const deps = await session();
+    const ticks = vi.spyOn(deps.actions, 'tick');
+    const errors: Error[] = [];
+    const frames = manualScheduler();
+    const loop = new FrameLoop(
+      deps,
+      () => {
+        throw new Error('boom');
+      },
+      { scheduler: frames.scheduler, onError: (e) => errors.push(e) },
+    );
+
+    loop.start();
+    frames.run(1000);
+
+    expect(errors.map((e) => e.message)).toEqual(['boom']);
+    expect(ticks).toHaveBeenCalledWith(1000);
+  });
+
   it('schedules no frame once stopped', async () => {
     const frame = vi.fn();
     const frames = manualScheduler();
-    const loop = new FrameLoop(await session(), frame, frames.scheduler);
+    const loop = new FrameLoop(await session(), frame, { scheduler: frames.scheduler });
 
     loop.start();
     frames.run(1000);

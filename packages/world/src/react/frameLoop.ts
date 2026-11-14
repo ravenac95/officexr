@@ -15,6 +15,12 @@ const animationFrames: FrameScheduler = {
   cancel: (handle) => cancelAnimationFrame(handle),
 };
 
+export interface FrameLoopOptions {
+  scheduler?: FrameScheduler;
+  /** Receives what the view's frame work throws; the session still ticks that frame. */
+  onError?: (error: Error) => void;
+}
+
 /**
  * A play view's `requestAnimationFrame` loop: each frame runs the view's own
  * `frame` work with a capped dt, then ticks the session (rules, sync flush,
@@ -25,14 +31,19 @@ export class FrameLoop {
   private lastMs: number | null = null;
   private handle: number | null = null;
 
+  private readonly scheduler: FrameScheduler;
+
   constructor(
     private readonly session: FrameLoopSession,
     private readonly frame: (dtSec: number, nowMs: number) => void,
-    private readonly scheduler: FrameScheduler = animationFrames,
-  ) {}
+    private readonly options: FrameLoopOptions = {},
+  ) {
+    this.scheduler = options.scheduler ?? animationFrames;
+  }
 
   start(): void {
     if (this.handle === null) {
+      this.prevState = this.session.store.getState();
       this.handle = this.scheduler.request(this.tick);
     }
   }
@@ -49,7 +60,11 @@ export class FrameLoop {
     this.handle = this.scheduler.request(this.tick);
     const dtSec = this.lastMs === null ? 0 : Math.min(Math.max((nowMs - this.lastMs) / 1000, 0), MAX_DT_SEC);
     this.lastMs = nowMs;
-    this.frame(dtSec, nowMs);
+    try {
+      this.frame(dtSec, nowMs);
+    } catch (error) {
+      this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
+    }
     this.prevState = tickSession({
       ...this.session,
       prevState: this.prevState ?? this.session.store.getState(),

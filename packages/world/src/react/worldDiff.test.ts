@@ -16,9 +16,10 @@ const inputs = (instances: ObjectInstance[], over: Partial<WorldInputs> = {}): W
 const KINDS = [{ id: 'block' }];
 
 describe('diffWorld', () => {
-  it("sends a new view everything, as a view's first diff needs", () => {
+  it("replaces a new view's world with everything, as a view's first diff needs", () => {
     const { diff } = diffWorld(null, inputs([block('a')]));
     expect(diff).toEqual({
+      replace: true,
       objects: { instances: [block('a')] },
       kinds: KINDS,
       lighting: DEFAULT_WORLD_CONSTANTS.lighting,

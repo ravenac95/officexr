@@ -59,13 +59,14 @@ export function ChatPanel({ store, actions, selfId }: ChatPanelProps) {
     if (mode !== 'compose') {
       return;
     }
-    const onMouseDown = (e: MouseEvent) => {
+    // pointerdown, as the world's canvas cancels it and so suppresses mousedown.
+    const onPointerDown = (e: PointerEvent) => {
       if (!containerRef.current?.contains(e.target as Node)) {
         peek();
       }
     };
-    document.addEventListener('mousedown', onMouseDown);
-    return () => document.removeEventListener('mousedown', onMouseDown);
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [mode, peek]);
 
   useEffect(() => {
