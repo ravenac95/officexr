@@ -31,7 +31,13 @@ export function HeadlessApp({ op }: { op: string }) {
   }
   if (op === 'bevy') {
     const params = new URLSearchParams(window.location.search);
-    return <BevyPage mugshot={params.get('mugshot')} views={Number(params.get('views') ?? 1)} />;
+    return (
+      <BevyPage
+        mugshot={params.get('mugshot')}
+        views={Number(params.get('views') ?? 1)}
+        pick={params.get('pick') === '1'}
+      />
+    );
   }
   return (
     <div

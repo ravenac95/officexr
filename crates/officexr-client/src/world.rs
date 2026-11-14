@@ -232,6 +232,7 @@ mod tests {
                     gltf_path: "/l.glb".into(),
                     position: [0.0; 3],
                     rotation_y: 0,
+                    ..Default::default()
                 },
             }],
             spawn_points: vec![],
