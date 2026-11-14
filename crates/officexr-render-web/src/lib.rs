@@ -1,7 +1,7 @@
 //! `officexr-render` in the browser, one view per canvas, fed from JS:
-//! `init` once, then `createView` per canvas and `setWorld`, `setCamera`
-//! and `setPlayers` on each; a world view's camera can instead follow the
-//! local player through the [`controls`] API.
+//! `init` once, then `createView` per canvas and `setWorld`, `setCamera`,
+//! `setPlayers` and the editors' [`overlays`] on each; a world view's camera
+//! can instead follow the local player through the [`controls`] API.
 //!
 //! A view on the canvas given to `init` draws straight into Bevy's primary
 //! window. With WebGPU every other view is a Bevy window on its own canvas.
@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 mod controls;
+mod overlays;
 mod picking;
 
 static HUB: OnceLock<ViewHub> = OnceLock::new();
@@ -55,6 +56,8 @@ extern "C" {
     fn remove_attribute(this: &Canvas, name: &str);
     #[wasm_bindgen(js_namespace = document, js_name = querySelector)]
     fn query_selector(selector: &str) -> JsValue;
+    #[wasm_bindgen(js_namespace = JSON, catch)]
+    fn stringify(value: &JsValue) -> Result<JsValue, JsValue>;
 }
 
 #[derive(Deserialize)]
@@ -102,6 +105,13 @@ struct FrameStats {
 
 fn js_err(e: impl std::fmt::Display) -> JsError {
     JsError::new(&e.to_string())
+}
+
+/// `value` as JSON, for serde_json to read: JSON drops `undefined` fields, which
+/// serde-wasm-bindgen hands to the field's type, and serde-wasm-bindgen never
+/// reports a field it wasn't asked for.
+fn to_json(value: &JsValue) -> Option<String> {
+    stringify(value).ok().and_then(|json| json.as_string())
 }
 
 fn hub() -> Result<&'static ViewHub, JsError> {

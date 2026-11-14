@@ -89,6 +89,52 @@ export interface PickEvent {
   screen: [number, number];
 }
 
+/** `#rrggbb`, or `#rrggbbaa` for a translucent colour. */
+export type HexColor = string;
+
+/** A world-space axis-aligned box. */
+export interface WorldAabb {
+  min: Vec3;
+  max: Vec3;
+}
+
+/** In the XZ plane. */
+export type ZoneShape =
+  /** Filled as a fan from the first point, so it must be convex. */
+  | { type: 'polygon'; points: [number, number][] }
+  | { type: 'circle'; center: [number, number]; radius: number };
+
+/** An object instance as `WorldDiff.objects.instances` holds it. */
+export interface OverlayObject {
+  id: string;
+  kindId: string;
+  /** Voxels. */
+  position: Vec3;
+  yawDeg?: number;
+}
+
+/**
+ * Drawn over a view's world. `tag` names it across `setOverlays` calls, and picks on it report
+ * `{ type: 'overlay', tag }`; lines and labels are never hit. With `pickable: false`, picks pass
+ * through it, as tool ghosts need.
+ */
+export type Overlay = { tag: string; pickable?: boolean } & (
+  /** Drawn through other geometry. Edges shared by flush boxes are drawn once. */
+  | { kind: 'outline'; boxes?: WorldAabb[]; segments?: [Vec3, Vec3][]; color: HexColor }
+  /** The objects drawn translucent with the view's kinds (sent with `setWorld`). */
+  | { kind: 'ghost'; objects: OverlayObject[]; opacity: number; pulse?: boolean; tint?: HexColor }
+  /** `EndlessGrid`: lines every `cellSize`, a major one every 10, faded out by `fade` metres from the origin. */
+  | { kind: 'grid'; y: number; cellSize: number; fade: number }
+  /** `DirectionGizmo`: a 1.5 m arrow from `at`, drawn through other geometry. */
+  | { kind: 'directionGizmo'; at: Vec3; direction: Vec3; color: HexColor }
+  /** A spawn point's cone, standing on `pos`. */
+  | { kind: 'marker'; shape: 'spawnCone'; pos: Vec3; yaw: number; color: HexColor }
+  /** A flat area at height `y`, drawn through other geometry. */
+  | { kind: 'zone'; shape: ZoneShape; y: number; color: HexColor }
+  /** White text centred on `at`. */
+  | { kind: 'label'; at: Vec3; text: string }
+);
+
 /** `normal · p + constant = 0`, as three.js's `Plane`. */
 export interface Plane {
   normal: Vec3;
@@ -165,6 +211,8 @@ export interface RendererModule {
   rayAtScreen(id: ViewId, x: number, y: number): { origin: Vec3; dir: Vec3 };
   /** Where that ray meets `plane` ahead of the camera, or `null`. Throws for a zero normal. */
   intersectPlane(id: ViewId, x: number, y: number, plane: Plane): Vec3 | null;
+  /** Replaces the view's overlays; only those whose `tag` is new or whose content changed are redrawn. */
+  setOverlays(id: ViewId, overlays: Overlay[]): void;
 
   // Controls: once any of these is called on a view, its controls drive its camera, overriding
   // `setCamera`, in every frame its mode has something to frame. Top-down and free-fly always do;

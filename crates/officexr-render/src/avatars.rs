@@ -13,6 +13,7 @@ use crate::AssetBase;
 use crate::lighting::{HemisphereFill, ObjectMaterial};
 use crate::picking::PickTarget;
 use crate::views::{View, ViewKind, ViewPlayers, ViewScene};
+use crate::world_label::{self, Labels, WorldLabel};
 
 const RIGS: [&str; 4] = [
     "/models/animations/Rig_Medium_General.glb",
@@ -153,7 +154,6 @@ struct Avatar {
     id: String,
     character: String,
     motion: Motion,
-    tag: Entity,
     /// The `Rig_Medium` node, once bound.
     rig: Option<Entity>,
 }
@@ -162,9 +162,6 @@ struct Avatar {
 /// once its materials are swapped).
 #[derive(Component)]
 pub struct Bound;
-
-#[derive(Component)]
-struct NameTag;
 
 #[derive(Resource)]
 struct Clips {
@@ -197,21 +194,14 @@ pub(crate) fn plugin(app: &mut App) {
         .register_type::<bevy::gltf::GltfSceneName>()
         .register_type::<bevy::gltf::GltfSceneExtras>()
         .register_type::<bevy::camera::visibility::DynamicSkinnedMeshBounds>();
-    app.add_systems(Startup, load_rigs)
-        .add_systems(
-            Update,
-            (build_graph, sync_avatars, bind_avatars, animate, place_tags)
-                .chain()
-                .in_set(crate::views::SceneSystems)
-                .after(crate::views::mirror_resources),
-        )
-        .add_observer(despawn_tag);
-}
-
-fn despawn_tag(remove: On<Remove<Avatar>>, avatars: Query<&Avatar>, mut commands: Commands) {
-    if let Ok(avatar) = avatars.get(remove.entity) {
-        commands.entity(avatar.tag).try_despawn();
-    }
+    app.add_systems(Startup, load_rigs).add_systems(
+        Update,
+        (build_graph, sync_avatars, bind_avatars, animate, show_tags)
+            .chain()
+            .in_set(crate::views::SceneSystems)
+            .after(crate::views::mirror_resources)
+            .before(world_label::place_labels),
+    );
 }
 
 fn load_rigs(mut commands: Commands, base: Res<AssetBase>, assets: Res<AssetServer>) {
@@ -252,20 +242,19 @@ fn build_graph(
 
 fn sync_avatars(
     mut commands: Commands,
-    views: Query<(Entity, &View, &ViewPlayers), Changed<ViewPlayers>>,
+    views: Query<(Entity, &ViewPlayers), Changed<ViewPlayers>>,
     base: Res<AssetBase>,
     assets: Res<AssetServer>,
     mut avatars: Query<(Entity, &Avatar, &mut Transform, &ChildOf)>,
 ) {
-    for (entity, view, players) in &views {
-        let view = (entity, view.camera);
+    for (view, players) in &views {
         sync_view_avatars(&mut commands, view, players, &base, &assets, &mut avatars);
     }
 }
 
 fn sync_view_avatars(
     commands: &mut Commands,
-    (view, camera): (Entity, Option<Entity>),
+    view: Entity,
     players: &Players,
     base: &AssetBase,
     assets: &AssetServer,
@@ -291,37 +280,29 @@ fn sync_view_avatars(
             *t = transform;
             continue;
         }
-        let mut tag = commands.spawn((
-            NameTag,
-            Text::new(p.name.clone()),
-            TextFont::from_font_size(14.0),
-            Node {
-                position_type: PositionType::Absolute,
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
-            Visibility::Hidden,
-        ));
-        if let Some(camera) = camera {
-            tag.insert(UiTargetCamera(camera));
-        }
-        let tag = tag.id();
         let path = base.asset_path(&format!("/models/characters/{}.glb", p.character));
         // ponytail: no bind-pose foot anchor; every KayKit character's lowest vertex is within 2 mm of y=0.
-        commands.spawn((
-            Avatar {
-                id: p.id.clone(),
-                character: p.character.clone(),
-                motion: Motion::Idle,
-                tag,
-                rig: None,
-            },
-            PickTarget::Player { id: p.id.clone() },
-            transform,
-            Visibility::default(),
-            WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(path))),
-            ChildOf(view),
+        let avatar = commands
+            .spawn((
+                Avatar {
+                    id: p.id.clone(),
+                    character: p.character.clone(),
+                    motion: Motion::Idle,
+                    rig: None,
+                },
+                PickTarget::Player { id: p.id.clone() },
+                transform,
+                Visibility::default(),
+                WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(path))),
+                ChildOf(view),
+            ))
+            .id();
+        commands.spawn(world_label::label(
+            p.name.clone(),
+            14.0,
+            Color::srgba(0.0, 0.0, 0.0, 0.55),
+            avatar,
+            Vec3::Y * TAG_HEIGHT_M,
         ));
     }
 }
@@ -450,54 +431,28 @@ fn animate(
     }
 }
 
-#[allow(clippy::type_complexity)]
-fn place_tags(
-    mut commands: Commands,
+/// Shows a named player's tag in a world view whose players aren't paused.
+fn show_tags(
     views: Query<(&View, &ViewPlayers)>,
-    avatars: Query<(&Avatar, &GlobalTransform, &ChildOf)>,
-    cameras: Query<(&Camera, &GlobalTransform)>,
-    mut tags: Query<
-        (
-            &mut Node,
-            &mut Visibility,
-            &ComputedNode,
-            Has<UiTargetCamera>,
-        ),
-        With<NameTag>,
-    >,
+    avatars: Query<(&Avatar, &Labels, &ChildOf)>,
+    mut tags: Query<&mut WorldLabel>,
 ) {
-    for (avatar, transform, view) in &avatars {
+    for (avatar, labels, view) in &avatars {
         let Ok((view, players)) = views.get(view.parent()) else {
             continue;
         };
-        let Some((camera_entity, (camera, camera_transform))) =
-            view.camera.and_then(|c| Some((c, cameras.get(c).ok()?)))
-        else {
-            continue;
-        };
-        let Ok((mut node, mut visibility, computed, target)) = tags.get_mut(avatar.tag) else {
-            continue;
-        };
-        // An avatar spawned before its view's camera.
-        if !target {
-            commands
-                .entity(avatar.tag)
-                .insert(UiTargetCamera(camera_entity));
-        }
-        let named = view.kind == ViewKind::World
+        let shown = view.kind == ViewKind::World
+            && !players.paused
             && players
                 .players
                 .iter()
                 .any(|p| p.id == avatar.id && !p.name.is_empty());
-        let at = transform.translation() + Vec3::Y * TAG_HEIGHT_M;
-        match camera.world_to_viewport(camera_transform, at) {
-            Ok(xy) if named && !players.paused => {
-                let half = computed.size() * computed.inverse_scale_factor() / 2.0;
-                node.left = Val::Px(xy.x - half.x);
-                node.top = Val::Px(xy.y - half.y);
-                *visibility = Visibility::Inherited;
+        for tag in labels.iter() {
+            if let Ok(mut tag) = tags.get_mut(tag)
+                && tag.shown != shown
+            {
+                tag.shown = shown;
             }
-            _ => *visibility = Visibility::Hidden,
         }
     }
 }

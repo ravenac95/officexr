@@ -1,8 +1,10 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use bevy::app::HierarchyPropagatePlugin;
 use bevy::asset::uuid::Uuid;
 use bevy::camera::NormalizedRenderTarget;
 use bevy::ecs::event::PropagateEntityTrigger;
+use bevy::picking::Pickable;
 use bevy::picking::PickingSystems;
 use bevy::picking::backend::ray::{RayId, RayMap};
 use bevy::picking::backend::{HitData, PointerHits};
@@ -124,29 +126,33 @@ pub(crate) fn plugin(app: &mut App) {
     if !app.is_plugin_added::<PickingPlugin>() {
         app.add_plugins((PickingPlugin, InteractionPlugin));
     }
-    app.add_plugins(MeshPickingPlugin)
-        .init_resource::<PickHub>()
-        .add_message::<TargetPressed>()
-        .add_systems(First, feed_pointers.in_set(PickingSystems::Input))
-        .add_systems(
-            PreUpdate,
-            (
-                cast_rays
-                    .in_set(PickingSystems::ProcessInput)
-                    .after(RayMap::repopulate)
-                    .after(crate::views::drain_hub),
-                hit_ground.in_set(PickingSystems::Backend),
-            ),
-        )
-        .add_observer(forward::<PointerOver>)
-        .add_observer(forward::<PointerOut>)
-        .add_observer(forward::<PointerMove>)
-        .add_observer(forward::<PointerPress>)
-        .add_observer(forward::<PointerRelease>)
-        .add_observer(forward::<PointerClick>)
-        .add_observer(forward::<PointerDragStart>)
-        .add_observer(forward::<PointerDrag>)
-        .add_observer(forward::<PointerDragEnd>);
+    // An overlay made unpickable marks its meshes, however late they load.
+    app.add_plugins((
+        MeshPickingPlugin,
+        HierarchyPropagatePlugin::<Pickable>::new(PostUpdate),
+    ))
+    .init_resource::<PickHub>()
+    .add_message::<TargetPressed>()
+    .add_systems(First, feed_pointers.in_set(PickingSystems::Input))
+    .add_systems(
+        PreUpdate,
+        (
+            cast_rays
+                .in_set(PickingSystems::ProcessInput)
+                .after(RayMap::repopulate)
+                .after(crate::views::drain_hub),
+            hit_ground.in_set(PickingSystems::Backend),
+        ),
+    )
+    .add_observer(forward::<PointerOver>)
+    .add_observer(forward::<PointerOut>)
+    .add_observer(forward::<PointerMove>)
+    .add_observer(forward::<PointerPress>)
+    .add_observer(forward::<PointerRelease>)
+    .add_observer(forward::<PointerClick>)
+    .add_observer(forward::<PointerDragStart>)
+    .add_observer(forward::<PointerDrag>)
+    .add_observer(forward::<PointerDragEnd>);
 }
 
 fn pointer_id(view: ViewId) -> PointerId {

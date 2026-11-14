@@ -10,6 +10,7 @@ use bevy::prelude::*;
 
 use crate::AssetBase;
 use crate::lighting::{HemisphereFill, ObjectMaterial};
+use crate::overlays::ViewOverlays;
 use crate::picking::PickTarget;
 use crate::placement::mesh_transform;
 use crate::scene::{LocalAabb, ObjectInstance, WorldObjectKind, WorldSceneData, Xyz};
@@ -89,18 +90,27 @@ impl ObjectIndex {
 
 /// The instance an object entity draws, kept to diff against the next scene.
 #[derive(Component)]
-pub(crate) struct Placed(ObjectInstance);
+pub(crate) struct Placed(pub(crate) ObjectInstance);
 
 /// Loads the kinds the instances reference, and reloads the ones whose definition changed.
 pub(crate) fn sync_kinds(
     mut commands: Commands,
     base: Res<AssetBase>,
     assets: Res<AssetServer>,
-    mut views: Query<(&ViewScene, &mut ObjectKinds, Option<&Children>), Changed<ViewScene>>,
+    mut views: Query<
+        (
+            &ViewScene,
+            Option<&ViewOverlays>,
+            &mut ObjectKinds,
+            Option<&Children>,
+        ),
+        Or<(Changed<ViewScene>, Changed<ViewOverlays>)>,
+    >,
     placed: Query<&Placed>,
 ) {
-    for (scene, mut kinds, children) in &mut views {
-        let redefined = sync_view_kinds(scene, &mut kinds, &base, &assets);
+    for (scene, overlays, mut kinds, children) in &mut views {
+        let used = used_kinds(scene, overlays).collect();
+        let redefined = sync_view_kinds(scene, used, &mut kinds, &base, &assets);
         // The entities keep their place; `attach_models` redraws them once the new model is ready.
         for &entity in children.into_iter().flatten() {
             if placed
@@ -115,19 +125,28 @@ pub(crate) fn sync_kinds(
     }
 }
 
+/// The kind ids of the scene's objects and its ghost overlays' objects.
+fn used_kinds<'a>(
+    scene: &'a WorldSceneData,
+    overlays: Option<&'a ViewOverlays>,
+) -> impl Iterator<Item = &'a str> {
+    let ghosts = overlays.into_iter().flat_map(ViewOverlays::ghost_objects);
+    scene
+        .objects
+        .instances
+        .iter()
+        .chain(ghosts)
+        .map(|i| i.kind_id.as_str())
+}
+
 /// The ids of the kinds (re)requested.
 fn sync_view_kinds(
     scene: &WorldSceneData,
+    used: HashSet<&str>,
     kinds: &mut ObjectKinds,
     base: &AssetBase,
     assets: &AssetServer,
 ) -> HashSet<String> {
-    let used: HashSet<&str> = scene
-        .objects
-        .instances
-        .iter()
-        .map(|i| i.kind_id.as_str())
-        .collect();
     let wanted: Vec<&WorldObjectKind> = scene
         .kinds
         .iter()
@@ -157,17 +176,20 @@ fn sync_view_kinds(
 
 /// Registers a ready-made cuboid model for each `__primitive_<colour>` kind the instances use.
 pub(crate) fn register_primitives(
-    mut views: Query<(&ViewScene, &mut ObjectKinds), Changed<ViewScene>>,
+    mut views: Query<
+        (&ViewScene, Option<&ViewOverlays>, &mut ObjectKinds),
+        Or<(Changed<ViewScene>, Changed<ViewOverlays>)>,
+    >,
     mut cuboid: Local<Option<Handle<Mesh>>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ObjectMaterial>>,
 ) {
-    for (scene, mut kinds) in &mut views {
-        for inst in &scene.objects.instances {
-            let Some(colour) = inst.kind_id.strip_prefix(PRIMITIVE_KIND_PREFIX) else {
+    for (scene, overlays, mut kinds) in &mut views {
+        for kind_id in used_kinds(scene, overlays) {
+            let Some(colour) = kind_id.strip_prefix(PRIMITIVE_KIND_PREFIX) else {
                 continue;
             };
-            if kinds.0.contains_key(&inst.kind_id) {
+            if kinds.0.contains_key(kind_id) {
                 continue;
             }
             let mesh = cuboid
@@ -183,9 +205,9 @@ pub(crate) fn register_primitives(
                 extension: HemisphereFill::new(&scene.lighting),
             });
             kinds.0.insert(
-                inst.kind_id.clone(),
+                kind_id.to_string(),
                 KindModel {
-                    kind: primitive_kind(&inst.kind_id),
+                    kind: primitive_kind(kind_id),
                     gltf: None,
                     state: ModelState::Ready(Model {
                         mesh,
@@ -347,16 +369,18 @@ pub(crate) fn load_kinds(
     }
 }
 
-/// Draws every object whose model is ready and which isn't drawn yet.
+/// Draws every object whose model is ready and which isn't drawn yet, with
+/// the kinds of the view it is in.
 pub(crate) fn attach_models(
     mut commands: Commands,
     views: Query<&ObjectKinds>,
-    undrawn: Query<(Entity, &Placed, &ChildOf), Without<Mesh3d>>,
+    parents: Query<&ChildOf>,
+    undrawn: Query<(Entity, &Placed), Without<Mesh3d>>,
 ) {
-    for (entity, placed, view) in &undrawn {
-        if let Some((model, transform)) = views
-            .get(view.parent())
-            .ok()
+    for (entity, placed) in &undrawn {
+        if let Some((model, transform)) = parents
+            .iter_ancestors(entity)
+            .find_map(|e| views.get(e).ok())
             .and_then(|kinds| kinds.placed(&placed.0))
         {
             commands.entity(entity).insert((

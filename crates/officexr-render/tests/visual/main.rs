@@ -25,7 +25,9 @@ use bevy::render::RenderPlugin;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::time::TimeUpdateStrategy;
 use bevy::winit::WinitPlugin;
+use officexr_render::overlays::{Overlay, ViewOverlays};
 use officexr_render::placement::VOXEL_SIZE;
+use officexr_render::views::View;
 use officexr_render::{
     AssetBase, AvatarBound, LayoutIndex, ObjectKinds, OffscreenTarget, PlayerRender, Players,
     SceneCamera, WorldSceneData, offscreen_app, scene_sim, sim_input,
@@ -63,6 +65,9 @@ struct Scenario {
     /// Sim frames to save from every camera.
     captures: Vec<usize>,
     assert: Vec<Assertion>,
+    /// As `setOverlays` takes them; their ghosts' kinds join the scene's.
+    #[serde(default)]
+    overlays: Vec<Value>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -92,6 +97,9 @@ struct Layout {
 #[serde(deny_unknown_fields)]
 struct Character {
     character: String,
+    /// Shown in a name tag, unless empty or `paused`.
+    #[serde(default)]
+    name: String,
     /// Body root, teleported to before the first step.
     spawn: [f64; 3],
     moves: Vec<Move>,
@@ -178,8 +186,14 @@ fn scene_json(scenario: &Scenario) -> String {
             json!({ "id": format!("i{n}"), "kindId": i.kind_id, "position": i.position, "yawDeg": i.yaw_deg })
         })
         .collect();
+    let ghosts = scenario
+        .overlays
+        .iter()
+        .filter_map(|o| o["objects"].as_array())
+        .flatten();
     let used: HashSet<&str> = instances
         .iter()
+        .chain(ghosts)
         .map(|i| i["kindId"].as_str().unwrap())
         .collect();
     let catalog: Value = read_json(&Path::new(ROOT).join("packages/world/world-object-kinds.json"));
@@ -260,7 +274,7 @@ fn simulate(scenario: &Scenario, scene_json: &str, players: &Players) -> Vec<Vec
                     pos: v(r.new_pos),
                     yaw: yaws[i],
                     vel: v(r.broadcast_vel),
-                    name: String::new(),
+                    name: scenario.characters[i].name.clone(),
                     airborne: r.is_airborne,
                 }
             })
@@ -425,6 +439,22 @@ fn drive(
     t.next += 1;
 }
 
+#[derive(Resource)]
+struct ScenarioOverlays(Vec<Overlay>);
+
+/// Gives the primary view the scenario's overlays once it exists.
+fn add_overlays(
+    mut commands: Commands,
+    overlays: Res<ScenarioOverlays>,
+    views: Query<Entity, (With<View>, Without<ViewOverlays>)>,
+) {
+    for view in &views {
+        commands
+            .entity(view)
+            .insert(ViewOverlays(overlays.0.clone()));
+    }
+}
+
 /// Renders `steps`; fails for each model that didn't load.
 fn render(
     scenario: &Scenario,
@@ -464,7 +494,10 @@ fn render(
             done_for: 0,
             failed: failed.clone(),
         })
-        .add_systems(PreUpdate, drive);
+        .insert_resource(ScenarioOverlays(
+            serde_json::from_value(Value::from(scenario.overlays.clone())).expect("overlays"),
+        ))
+        .add_systems(PreUpdate, (drive, add_overlays));
     app.run();
     let failed = failed.lock().unwrap();
     failed

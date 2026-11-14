@@ -1,0 +1,64 @@
+{
+  "size": [800, 480],
+  "instances": [
+    { "kindId": "stone", "position": [-8, -4, -4] },
+    { "kindId": "stone", "position": [-4, -4, -4] },
+    { "kindId": "stone", "position": [0, -4, -4] },
+    { "kindId": "stone", "position": [4, -4, -4] },
+    { "kindId": "stone", "position": [-8, -4, 0] },
+    { "kindId": "stone", "position": [-4, -4, 0] },
+    { "kindId": "stone", "position": [0, -4, 0] },
+    { "kindId": "stone", "position": [4, -4, 0] },
+    { "kindId": "colored_block_blue", "position": [-6, 0, -2] }
+  ],
+  "characters": [
+    { "character": "Knight", "name": "Ada", "spawn": [0, 2, 0.6], "moves": [{ "frames": 30 }] }
+  ],
+  "overlays": [
+    { "tag": "grid", "kind": "grid", "y": 0.01, "cellSize": 0.5, "fade": 30, "pickable": false },
+    {
+      "tag": "selection",
+      "kind": "outline",
+      "boxes": [{ "min": [-3, 0, -1], "max": [-1, 2, 1] }],
+      "color": "#fde68af2"
+    },
+    {
+      "tag": "add-ghost",
+      "kind": "ghost",
+      "objects": [{ "id": "g0", "kindId": "colored_block_blue", "position": [2, 0, -2] }],
+      "opacity": 0.5,
+      "pickable": false
+    },
+    {
+      "tag": "blocked-ghost",
+      "kind": "ghost",
+      "objects": [{ "id": "g1", "kindId": "stone", "position": [2, 4, -2] }],
+      "opacity": 0.5,
+      "tint": "#ef4444",
+      "pickable": false
+    },
+    { "tag": "tile-axis", "kind": "directionGizmo", "at": [3, 0, -1], "direction": [0, 0, -1], "color": "#3b82f6" },
+    { "tag": "spawn", "kind": "marker", "shape": "spawnCone", "pos": [3.2, 0, 1.4], "yaw": 0, "color": "#22d3ee" },
+    {
+      "tag": "desk-area",
+      "kind": "zone",
+      "shape": { "type": "polygon", "points": [[-4, -2], [-0.6, -2], [-0.6, -1.3], [-4, -1.3]] },
+      "y": 0.06,
+      "color": "#22d3ee59"
+    },
+    {
+      "tag": "voice-zone",
+      "kind": "zone",
+      "shape": { "type": "circle", "center": [-2, 1.4], "radius": 0.9 },
+      "y": 0.05,
+      "color": "#ff00ff66"
+    },
+    { "tag": "desk-label", "kind": "label", "at": [-2.3, 0.06, -1.65], "text": "Desk A" }
+  ],
+  "cameras": [
+    { "name": "front", "position": [0, 5, -8], "lookAt": [0, 0.6, 0], "fov": 50 },
+    { "name": "top", "position": [0, 12, -0.01], "lookAt": [0, 0, 0], "fov": 50 }
+  ],
+  "captures": [29],
+  "assert": [{ "type": "feetOn", "frame": 29, "surfaceY": 0 }]
+}

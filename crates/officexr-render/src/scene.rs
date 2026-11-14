@@ -228,7 +228,7 @@ fn parse_hex<E: serde::de::Error>(s: &str) -> Result<Color, E> {
         .map_err(|e| E::custom(format!("bad colour {s:?}: {e}")))
 }
 
-fn hex<'de, D: Deserializer<'de>>(d: D) -> Result<Color, D::Error> {
+pub(crate) fn hex<'de, D: Deserializer<'de>>(d: D) -> Result<Color, D::Error> {
     parse_hex(&String::deserialize(d)?)
 }
 
@@ -236,7 +236,7 @@ fn some_opt_hex<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Option<Color>>
     opt_hex(d).map(Some)
 }
 
-fn opt_hex<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Color>, D::Error> {
+pub(crate) fn opt_hex<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Color>, D::Error> {
     Option::<String>::deserialize(d)?
         .map(|s| parse_hex(&s))
         .transpose()
