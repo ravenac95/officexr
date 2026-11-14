@@ -3,7 +3,6 @@ import { useApplication, useCatalogReady } from '@officexr/world/react';
 import type { DeskArea } from '@officexr/world/scenes';
 import { LeftPanel } from '../../ui/LeftPanel.tsx';
 import { SidePanel } from '../../ui/SidePanel.tsx';
-import { EnvironmentPanel } from './EnvironmentPanel.tsx';
 import { MapEditorCanvas } from './MapEditorCanvas.tsx';
 import { MapPicker } from './MapPicker.tsx';
 import { MapToolbar } from './MapToolbar.tsx';
@@ -23,8 +22,8 @@ import { useMapDocument, type UseMapDocumentOptions } from './useMapDocument.ts'
 import { useMapRoomLibrary } from './useMapRoomLibrary.ts';
 
 /**
- * Map editor. Composes rooms into a playable world, configures
- * environment, and places spawn points.
+ * Map editor. Composes rooms into a playable world and places
+ * spawn points.
  *
  * Layout:
  *   - LeftPanel:  RoomPalette (saved rooms) + MapPicker (load/new).
@@ -32,8 +31,7 @@ import { useMapRoomLibrary } from './useMapRoomLibrary.ts';
  *                 markers + desk-area rectangles + selection outline)
  *                 with a top-right MapToolbar overlay (Select / Move /
  *                 Spawn / Desk area).
- *   - SidePanel:  RoomInstanceList, SpawnList, DeskAreaList, environment
- *                 panel.
+ *   - SidePanel:  RoomInstanceList, SpawnList, DeskAreaList.
  */
 export function MapApp() {
   const { rooms: roomService, geometry, catalog } = useApplication();
@@ -189,12 +187,6 @@ export function MapApp() {
               onSelect={map.setSelection}
               onRemove={map.removeDeskArea}
               onRename={map.setDeskAreaLabel}
-            />
-          </div>
-          <div style={{ flex: 1, minHeight: 0 }}>
-            <EnvironmentPanel
-              environment={map.doc.environment}
-              setEnvironment={map.setEnvironment}
             />
           </div>
         </div>

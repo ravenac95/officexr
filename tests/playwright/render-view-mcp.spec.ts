@@ -23,13 +23,6 @@ const mapDoc = {
   updatedAt: 0,
   rooms: [{ id: 'r1', roomName: ROOM, position: [0, 0, 0], rotationY: 0 }],
   spawnPoints: [],
-  environment: {
-    sun: { positionX: 20, positionY: 40, positionZ: 20, color: '#ffffff', intensity: 1.4 },
-    sky: null,
-    stars: null,
-    hdri: null,
-    ambientIntensity: 0.15,
-  },
 };
 
 interface ToolResult {
