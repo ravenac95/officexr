@@ -2,6 +2,8 @@
 //! side uses (`WorldObjectKind`, `WorldObjects`, `LightingViewConfig`,
 //! `BackgroundConstants`, `BakedLayoutPlacement`).
 
+use std::collections::HashMap;
+
 use bevy::color::{Color, Srgba};
 use bevy::math::Vec3;
 use bevy::prelude::Resource;
@@ -19,6 +21,74 @@ pub struct WorldSceneData {
     /// A flat background instead of the sky, as the studio's editor canvases draw.
     #[serde(default, deserialize_with = "opt_hex")]
     pub clear_color: Option<Color>,
+}
+
+/// An update to a view's scene. `kinds` and `objects.instances` are upserted
+/// by id, `remove` drops objects by id, and every other field present
+/// replaces the scene's. A full scene is a valid diff.
+#[derive(Deserialize, Default, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct WorldDiff {
+    pub kinds: Option<Vec<WorldObjectKind>>,
+    pub objects: Option<WorldObjects>,
+    #[serde(default)]
+    pub remove: Vec<String>,
+    pub lighting: Option<LightingConfig>,
+    pub background: Option<BackgroundConfig>,
+    pub baked_layouts: Option<Vec<BakedLayoutPlacement>>,
+    /// `null` brings the sky back.
+    #[serde(default, deserialize_with = "some_opt_hex")]
+    pub clear_color: Option<Option<Color>>,
+}
+
+impl WorldDiff {
+    /// `None` when there is no scene yet and the diff lacks lighting or background.
+    pub fn apply(self, scene: Option<WorldSceneData>) -> Option<WorldSceneData> {
+        let mut scene = match (scene, self.lighting, self.background) {
+            (Some(mut scene), lighting, background) => {
+                scene.lighting = lighting.unwrap_or(scene.lighting);
+                scene.background = background.unwrap_or(scene.background);
+                scene
+            }
+            (None, Some(lighting), Some(background)) => WorldSceneData {
+                kinds: vec![],
+                objects: WorldObjects { instances: vec![] },
+                lighting,
+                background,
+                baked_layouts: vec![],
+                clear_color: None,
+            },
+            (None, ..) => return None,
+        };
+        upsert(&mut scene.kinds, self.kinds, |k| &k.id);
+        let instances = &mut scene.objects.instances;
+        instances.retain(|i| !self.remove.contains(&i.id));
+        upsert(instances, self.objects.map(|o| o.instances), |i| &i.id);
+        if let Some(layouts) = self.baked_layouts {
+            scene.baked_layouts = layouts;
+        }
+        if let Some(clear_color) = self.clear_color {
+            scene.clear_color = clear_color;
+        }
+        Some(scene)
+    }
+}
+
+fn upsert<T>(items: &mut Vec<T>, new: Option<Vec<T>>, id: impl Fn(&T) -> &String) {
+    let mut at: HashMap<String, usize> = items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| (id(item).clone(), i))
+        .collect();
+    for item in new.into_iter().flatten() {
+        match at.get(id(&item)) {
+            Some(&i) => items[i] = item,
+            None => {
+                at.insert(id(&item).clone(), items.len());
+                items.push(item);
+            }
+        }
+    }
 }
 
 /// One room placement of a baked layout GLB.
@@ -149,6 +219,10 @@ fn hex<'de, D: Deserializer<'de>>(d: D) -> Result<Color, D::Error> {
     parse_hex(&String::deserialize(d)?)
 }
 
+fn some_opt_hex<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Option<Color>>, D::Error> {
+    opt_hex(d).map(Some)
+}
+
 fn opt_hex<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Color>, D::Error> {
     Option::<String>::deserialize(d)?
         .map(|s| parse_hex(&s))
@@ -172,5 +246,46 @@ mod tests {
                 .unwrap();
         assert_eq!(scene.baked_layouts[0].gltf_path, "/baked-layouts/a.glb");
         assert_eq!(scene.baked_layouts[0].rotation_y, 1);
+    }
+
+    fn diff(json: serde_json::Value) -> WorldDiff {
+        serde_json::from_value(json).unwrap()
+    }
+
+    #[test]
+    fn diffs_upsert_and_remove_objects_by_id() {
+        let full: WorldDiff =
+            serde_json::from_str(include_str!("../examples/booper.scene.json")).unwrap();
+        let scene = full.apply(None).unwrap();
+        let first = scene.objects.instances[0].id.clone();
+        let count = scene.objects.instances.len();
+
+        let scene = diff(serde_json::json!({
+            "objects": {"instances": [
+                {"id": first, "kindId": "k", "position": [9, 0, 0]},
+                {"id": "new", "kindId": "k", "position": [0, 0, 0]},
+            ]},
+            "clearColor": "#102030",
+        }))
+        .apply(Some(scene))
+        .unwrap();
+        assert_eq!(scene.objects.instances.len(), count + 1);
+        assert_eq!(scene.objects.instances[0].position, [9.0, 0.0, 0.0]);
+        assert!(scene.clear_color.is_some());
+
+        let scene = diff(serde_json::json!({"remove": ["new"], "clearColor": null}))
+            .apply(Some(scene))
+            .unwrap();
+        assert_eq!(scene.objects.instances.len(), count);
+        assert_eq!(scene.clear_color, None);
+    }
+
+    #[test]
+    fn the_first_diff_needs_lighting_and_background() {
+        assert!(
+            diff(serde_json::json!({"remove": []}))
+                .apply(None)
+                .is_none()
+        );
     }
 }

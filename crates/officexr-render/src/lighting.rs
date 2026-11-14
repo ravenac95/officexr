@@ -14,8 +14,12 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
 
-use crate::scene::{AuxLightType, LightingConfig, WorldSceneData};
-use crate::{CAMERA_FAR, SceneCamera};
+use std::collections::HashSet;
+
+use crate::CAMERA_FAR;
+use crate::objects::ObjectKinds;
+use crate::scene::{AuxLightType, LightingConfig};
+use crate::views::{Lit, ViewCamera, ViewScene};
 
 const HEMISPHERE_SKY: [u8; 3] = [0xae, 0xdc, 0xff];
 const HEMISPHERE_GROUND: [u8; 3] = [0x3a, 0x2f, 0x24];
@@ -64,49 +68,67 @@ pub(crate) struct Sun;
 #[derive(Component)]
 pub(crate) struct AuxLight;
 
-/// Whether the scene's lighting differs from the one this condition last saw.
-pub(crate) fn lighting_changed(
-    scene: Option<Res<WorldSceneData>>,
-    mut last: Local<Option<LightingConfig>>,
-) -> bool {
-    let Some(scene) = scene.filter(|s| s.is_changed()) else {
-        return false;
-    };
-    if last.as_ref() == Some(&scene.lighting) {
-        return false;
-    }
-    *last = Some(scene.lighting.clone());
-    true
-}
-
-/// Re-tints every object material, whichever system made it.
-pub(crate) fn sync_hemisphere(
-    scene: Res<WorldSceneData>,
+/// Re-lights each view whose scene's lighting differs from the one it was last given.
+#[allow(clippy::type_complexity)]
+pub(crate) fn sync_lighting(
+    mut commands: Commands,
+    views: Query<
+        (
+            Entity,
+            &ViewScene,
+            Option<&Lit>,
+            &ObjectKinds,
+            Option<&Children>,
+        ),
+        Changed<ViewScene>,
+    >,
+    suns: Query<(), With<Sun>>,
+    aux: Query<(), With<AuxLight>>,
+    children: Query<&Children>,
+    drawn: Query<&MeshMaterial3d<ObjectMaterial>>,
     mut materials: ResMut<Assets<ObjectMaterial>>,
 ) {
-    let fill = HemisphereFill::new(&scene.lighting);
-    for (_, material) in materials.iter_mut() {
-        material.extension = fill.clone();
+    for (view, scene, lit, kinds, own) in &views {
+        if lit.is_some_and(|l| l.0 == scene.lighting) {
+            continue;
+        }
+        let own = || own.into_iter().flatten().copied();
+        let sun = own().find(|e| suns.contains(*e));
+        let aux = own().find(|e| aux.contains(*e));
+        sync_lights(&mut commands, view, &scene.lighting, (sun, aux));
+        // Every material of the view, whichever system made it.
+        let fill = HemisphereFill::new(&scene.lighting);
+        let handles: HashSet<_> = drawn
+            .iter_many(children.iter_descendants(view))
+            .flatten()
+            .map(|m| m.id())
+            .chain(kinds.materials().map(|m| m.id()))
+            .collect();
+        for id in handles {
+            if let Some(mut material) = materials.get_mut(id) {
+                material.extension = fill.clone();
+            }
+        }
+        commands.entity(view).insert(Lit(scene.lighting.clone()));
     }
 }
 
 /// Spawns the sun and the auxiliary light on first use, then updates them in place.
-pub(crate) fn sync_lights(
-    mut commands: Commands,
-    scene: Res<WorldSceneData>,
-    suns: Query<Entity, With<Sun>>,
-    aux: Query<Entity, With<AuxLight>>,
+fn sync_lights(
+    commands: &mut Commands,
+    view: Entity,
+    l: &LightingConfig,
+    (sun_light, aux_light): (Option<Entity>, Option<Entity>),
 ) {
-    let l = &scene.lighting;
     let sun = Vec3::from(l.sun_position);
     let at_sun = Transform::from_translation(sun).looking_at(Vec3::ZERO, Vec3::Y);
     commands.insert_resource(DirectionalLightShadowMap {
         size: l.shadow_map_size as usize,
     });
     let texel = shadow_texel_size(l);
-    let mut sun_entity = match suns.single() {
-        Ok(e) => commands.entity(e),
-        Err(_) => commands.spawn_empty(),
+    let mut sun_entity = match sun_light {
+        Some(e) => commands.entity(e),
+        None => commands.spawn(ChildOf(view)),
     };
     sun_entity.insert((
         Sun,
@@ -129,7 +151,7 @@ pub(crate) fn sync_lights(
     ));
 
     if l.aux_light_type == AuxLightType::None {
-        for e in &aux {
+        if let Some(e) = aux_light {
             commands.entity(e).despawn();
         }
         return;
@@ -141,9 +163,9 @@ pub(crate) fn sync_lights(
     } else {
         f32::MAX
     };
-    let mut aux_entity = match aux.single() {
-        Ok(e) => commands.entity(e),
-        Err(_) => commands.spawn(AuxLight),
+    let mut aux_entity = match aux_light {
+        Some(e) => commands.entity(e),
+        None => commands.spawn((AuxLight, ChildOf(view))),
     };
     aux_entity
         .remove::<(PointLight, SpotLight)>()
@@ -194,13 +216,18 @@ pub fn snap_to_shadow_texel(point: Vec3, basis: Mat3, texel_size: f32) -> Vec3 {
 /// from the sun out to `|sunPosition| + shadowRange + 20`.
 // ponytail: the box centres on the camera look_at; TS uses the light target (origin, or the player in gameplay).
 fn fit_sun_shadow(
-    scene: Res<WorldSceneData>,
-    camera: Res<SceneCamera>,
-    mut suns: Query<(&Transform, &mut Cascades), With<Sun>>,
+    views: Query<(&ViewScene, &ViewCamera)>,
+    mut suns: Query<(&Transform, &mut Cascades, &ChildOf), With<Sun>>,
 ) {
-    let l = &scene.lighting;
-    for (transform, mut cascades) in &mut suns {
-        let cascade = sun_cascade(transform.rotation, Vec3::from(camera.look_at), l);
+    for (transform, mut cascades, view) in &mut suns {
+        let Ok((scene, camera)) = views.get(view.parent()) else {
+            continue;
+        };
+        let cascade = sun_cascade(
+            transform.rotation,
+            Vec3::from(camera.look_at),
+            &scene.lighting,
+        );
         for view in cascades.cascades.values_mut() {
             *view = vec![cascade.clone()];
         }
@@ -243,18 +270,11 @@ fn sun_cascade(rotation: Quat, focus: Vec3, l: &LightingConfig) -> Cascade {
 }
 
 pub(crate) fn plugin(app: &mut App) {
-    app.add_systems(
-        Update,
-        (sync_lights, sync_hemisphere).run_if(lighting_changed),
-    )
-    .add_systems(
+    app.add_systems(Update, sync_lighting).add_systems(
         PostUpdate,
         fit_sun_shadow
-            .run_if(resource_exists::<WorldSceneData>)
             .after(SimulationLightSystems::UpdateDirectionalLightCascades)
-            .before(SimulationLightSystems::UpdateLightFrusta)
-            .run_if(resource_exists::<WorldSceneData>)
-            .run_if(resource_exists::<SceneCamera>),
+            .before(SimulationLightSystems::UpdateLightFrusta),
     );
 }
 

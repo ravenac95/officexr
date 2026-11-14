@@ -1,5 +1,12 @@
-//! `officexr-render` in a browser canvas, fed from JS: `start`, then
-//! `setScene` whenever the map changes and `setPlayers` every frame.
+//! `officexr-render` in the browser, one view per canvas, fed from JS:
+//! `init` once, then `createView` per canvas and `setWorld`, `setCamera`
+//! and `setPlayers` on each.
+//!
+//! With WebGPU each view is a Bevy window on its canvas. WebGL2 can't do
+//! that: wgpu's GL backend binds the device to the first canvas's context,
+//! so a second window draws into the first canvas. There every view renders
+//! to an image instead, read back each frame and painted into its canvas,
+//! and Bevy's own window sits on a hidden 1 px host canvas.
 #![cfg(target_arch = "wasm32")]
 
 #[cfg(not(any(feature = "webgpu", feature = "webgl2")))]
@@ -7,31 +14,28 @@ compile_error!("enable exactly one of the `webgpu` and `webgl2` features");
 #[cfg(all(feature = "webgpu", feature = "webgl2"))]
 compile_error!("the `webgpu` and `webgl2` features are mutually exclusive");
 
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 
 use bevy::asset::AssetMetaCheck;
 use bevy::prelude::*;
+use bevy::window::ExitCondition;
+use officexr_render::views::{ViewHub, ViewId, ViewKind, ViewMsg, ViewTarget};
 use officexr_render::{
-    AssetBase, AvatarBound, LayoutIndex, ObjectKinds, OfficeXrRenderPlugin, PlayerRender, Players,
-    SceneCamera, WorldSceneData, mugshot_player,
+    AssetBase, OfficeXrRenderPlugin, PlayerRender, Players, SceneCamera, WorldDiff, mugshot_player,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-/// Frames drawn after every model has loaded before `isReady`, so the
-/// swapped-in avatar materials have rendered.
-const SETTLE_FRAMES: u32 = 3;
+static HUB: OnceLock<ViewHub> = OnceLock::new();
 
-static INBOX: Mutex<Inbox> = Mutex::new(Inbox {
-    scene: None,
-    players: None,
-});
-static READY: AtomicBool = AtomicBool::new(false);
-
-struct Inbox {
-    scene: Option<(WorldSceneData, SceneCamera)>,
-    players: Option<Players>,
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_name = HTMLCanvasElement)]
+    type Canvas;
+    #[wasm_bindgen(method, js_name = setAttribute)]
+    fn set_attribute(this: &Canvas, name: &str, value: &str);
+    #[wasm_bindgen(js_namespace = document, js_name = querySelector)]
+    fn query_selector(selector: &str) -> JsValue;
 }
 
 #[derive(Deserialize)]
@@ -64,69 +68,150 @@ struct PlayerInput {
     airborne: bool,
 }
 
+#[derive(Serialize)]
+struct Readiness {
+    ready: bool,
+    pending: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FrameStats {
+    draw_calls: usize,
+    triangles: usize,
+}
+
 fn js_err(e: impl std::fmt::Display) -> JsError {
     JsError::new(&e.to_string())
 }
 
-/// Boots Bevy on the `canvas` selector; `origin` serves `/models/...`.
-#[wasm_bindgen]
-pub fn start(canvas: String, origin: String) {
-    App::new()
-        .add_plugins((
-            AssetBase::Http(origin),
-            DefaultPlugins
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        canvas: Some(canvas),
-                        fit_canvas_to_parent: true,
-                        ..default()
-                    }),
-                    ..default()
-                })
-                // The dev server answers missing `.meta` files with index.html.
-                .set(AssetPlugin {
-                    meta_check: AssetMetaCheck::Never,
-                    ..default()
-                }),
-            OfficeXrRenderPlugin,
-        ))
-        .init_resource::<Players>()
-        .add_systems(PreUpdate, drain_inbox)
-        .add_systems(Last, track_ready)
-        .run();
+fn hub() -> Result<&'static ViewHub, JsError> {
+    HUB.get().ok_or_else(|| js_err("call init first"))
 }
 
-/// Replaces the scene (`WorldSceneData` JSON). With `mugshot`, that
-/// character is settled on the scene and drawn paused instead of the
+fn send(id: ViewId, msg: ViewMsg) -> Result<(), JsError> {
+    if hub()?.send(id, msg) {
+        Ok(())
+    } else {
+        Err(js_err(format!("no view {id}")))
+    }
+}
+
+/// Boots Bevy once; `origin` serves `/models/...`.
+#[wasm_bindgen]
+pub fn init(origin: String) {
+    if HUB.get().is_some() {
+        return;
+    }
+    let mut app = App::new();
+    app.add_plugins((
+        AssetBase::Http(origin),
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: host_window(),
+                exit_condition: ExitCondition::DontExit,
+                ..default()
+            })
+            // The dev server answers missing `.meta` files with index.html.
+            .set(AssetPlugin {
+                meta_check: AssetMetaCheck::Never,
+                ..default()
+            }),
+        OfficeXrRenderPlugin,
+    ));
+    #[cfg(feature = "webgl2")]
+    image_views::add(&mut app);
+    let _ = HUB.set(app.world().resource::<ViewHub>().clone());
+    app.run();
+}
+
+#[cfg(feature = "webgpu")]
+fn host_window() -> Option<Window> {
+    None
+}
+
+/// WebGL2 makes its device from the primary window's canvas.
+#[cfg(feature = "webgl2")]
+fn host_window() -> Option<Window> {
+    Some(Window {
+        canvas: Some(image_views::host_canvas()),
+        resolution: (1, 1).into(),
+        ..default()
+    })
+}
+
+/// A view on `canvas` (an element or a selector), of kind `world` or `preview`.
+#[wasm_bindgen(js_name = createView)]
+pub fn create_view(canvas: JsValue, kind: &str) -> Result<ViewId, JsError> {
+    let kind = match kind {
+        "world" => ViewKind::World,
+        "preview" => ViewKind::Preview,
+        _ => return Err(js_err(format!("unknown view kind {kind:?}"))),
+    };
+    let canvas = match canvas.as_string() {
+        Some(selector) => query_selector(&selector),
+        None => canvas,
+    };
+    let canvas: Canvas = canvas
+        .dyn_into()
+        .map_err(|_| js_err("expected a canvas element or a selector matching one"))?;
+    Ok(hub()?.create(kind, |id| {
+        canvas.set_attribute("data-officexr-view", &id.to_string());
+        target(id, canvas)
+    }))
+}
+
+#[cfg(feature = "webgpu")]
+fn target(id: ViewId, _: Canvas) -> ViewTarget {
+    ViewTarget::Window(format!("canvas[data-officexr-view=\"{id}\"]"))
+}
+
+#[cfg(feature = "webgl2")]
+fn target(id: ViewId, canvas: Canvas) -> ViewTarget {
+    ViewTarget::Image(image_views::register(id, canvas))
+}
+
+/// Despawns the view's window, camera and scene.
+#[wasm_bindgen(js_name = destroyView)]
+pub fn destroy_view(id: ViewId) -> Result<(), JsError> {
+    send(id, ViewMsg::Destroy)?;
+    #[cfg(feature = "webgl2")]
+    image_views::unregister(id);
+    Ok(())
+}
+
+/// Applies a world diff (`WorldDiff` JSON). With `mugshot`, that character
+/// is settled on the diff's objects and drawn paused instead of the
 /// `setPlayers` feed.
-#[wasm_bindgen(js_name = setScene)]
-pub fn set_scene(
-    scene_json: &str,
-    camera: JsValue,
-    mugshot: Option<String>,
-) -> Result<(), JsError> {
-    let scene: WorldSceneData = serde_json::from_str(scene_json).map_err(js_err)?;
+#[wasm_bindgen(js_name = setWorld)]
+pub fn set_world(id: ViewId, diff_json: &str, mugshot: Option<String>) -> Result<(), JsError> {
+    let diff: WorldDiff = serde_json::from_str(diff_json).map_err(js_err)?;
+    send(id, ViewMsg::World(Box::new(diff)))?;
+    if let Some(character) = mugshot {
+        send(id, ViewMsg::Players(mugshot_player(diff_json, character)))?;
+    }
+    Ok(())
+}
+
+#[wasm_bindgen(js_name = setCamera)]
+pub fn set_camera(id: ViewId, camera: JsValue) -> Result<(), JsError> {
     let camera: CameraInput = serde_wasm_bindgen::from_value(camera).map_err(js_err)?;
-    let mut inbox = INBOX.lock().unwrap();
-    inbox.players = mugshot.map(|character| mugshot_player(scene_json, character));
-    inbox.scene = Some((
-        scene,
-        SceneCamera {
+    send(
+        id,
+        ViewMsg::Camera(SceneCamera {
             position: camera.position,
             look_at: camera.look_at,
             fov_deg: camera.fov_deg,
             near: camera.near,
             far: camera.far,
-        },
-    ));
-    READY.store(false, Ordering::Relaxed);
-    Ok(())
+        }),
+    )
 }
 
 #[wasm_bindgen(js_name = setPlayers)]
-pub fn set_players(players: JsValue) -> Result<(), JsError> {
+pub fn set_players(id: ViewId, players: JsValue) -> Result<(), JsError> {
     let input: PlayersInput = serde_wasm_bindgen::from_value(players).map_err(js_err)?;
-    INBOX.lock().unwrap().players = Some(Players {
+    let players = Players {
         players: input
             .players
             .into_iter()
@@ -144,44 +229,166 @@ pub fn set_players(players: JsValue) -> Result<(), JsError> {
         player_speed: input.player_speed,
         run_speed: input.run_speed,
         ..default()
-    });
-    Ok(())
+    };
+    send(id, ViewMsg::Players(players))
 }
 
-/// Every model of the last scene has loaded and settled.
+/// `ready` once every model of the view has loaded and settled; `pending`
+/// counts the models and avatars still loading.
 #[wasm_bindgen(js_name = isReady)]
-pub fn is_ready() -> bool {
-    READY.load(Ordering::Relaxed)
+pub fn is_ready(id: ViewId) -> Result<JsValue, JsError> {
+    let status = hub()?
+        .status(id)
+        .ok_or_else(|| js_err(format!("no view {id}")))?;
+    serde_wasm_bindgen::to_value(&Readiness {
+        ready: status.ready,
+        pending: status.pending,
+    })
+    .map_err(js_err)
 }
 
-fn drain_inbox(mut commands: Commands, mut players: ResMut<Players>) {
-    let mut inbox = INBOX.lock().unwrap();
-    if let Some((scene, camera)) = inbox.scene.take() {
-        commands.insert_resource(scene);
-        commands.insert_resource(camera);
-    }
-    if let Some(next) = inbox.players.take() {
-        // A mugshot's paused player stays put until the next scene.
-        if !players.paused || next.paused {
-            *players = next;
-        }
-    }
+#[wasm_bindgen(js_name = frameStats)]
+pub fn frame_stats(id: ViewId) -> Result<JsValue, JsError> {
+    let status = hub()?
+        .status(id)
+        .ok_or_else(|| js_err(format!("no view {id}")))?;
+    serde_wasm_bindgen::to_value(&FrameStats {
+        draw_calls: status.draw_calls,
+        triangles: status.triangles,
+    })
+    .map_err(js_err)
 }
 
-fn track_ready(
-    mut settled: Local<u32>,
-    scene: Option<Res<WorldSceneData>>,
-    kinds: Res<ObjectKinds>,
-    layouts: Res<LayoutIndex>,
-    players: Res<Players>,
-    bound: Query<(), With<AvatarBound>>,
-) {
-    let loaded = scene.is_some_and(|s| !s.is_changed())
-        && !kinds.is_loading()
-        && !layouts.is_loading()
-        && bound.iter().len() == players.players.len();
-    *settled = if loaded { *settled + 1 } else { 0 };
-    if *settled == SETTLE_FRAMES {
-        READY.store(true, Ordering::Relaxed);
+#[cfg(feature = "webgl2")]
+mod image_views {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    use bevy::prelude::*;
+    use bevy::render::gpu_readback::ReadbackComplete;
+    use officexr_render::views::{View, ViewHub, ViewId, ViewMsg};
+    use wasm_bindgen::Clamped;
+    use wasm_bindgen::prelude::*;
+
+    use super::Canvas;
+
+    const HOST_ID: &str = "officexr-render-host";
+    /// wgpu's `COPY_BYTES_PER_ROW_ALIGNMENT`.
+    const ROW_ALIGNMENT: usize = 256;
+
+    #[wasm_bindgen]
+    extern "C" {
+        #[wasm_bindgen(method, getter, js_name = clientWidth)]
+        fn client_width(this: &Canvas) -> f64;
+        #[wasm_bindgen(method, getter, js_name = clientHeight)]
+        fn client_height(this: &Canvas) -> f64;
+        #[wasm_bindgen(method, getter)]
+        fn width(this: &Canvas) -> u32;
+        #[wasm_bindgen(method, setter)]
+        fn set_width(this: &Canvas, width: u32);
+        #[wasm_bindgen(method, setter)]
+        fn set_height(this: &Canvas, height: u32);
+        #[wasm_bindgen(method, getter)]
+        fn height(this: &Canvas) -> u32;
+        #[wasm_bindgen(method, js_name = getContext)]
+        fn get_context(this: &Canvas, kind: &str) -> Context2d;
+        #[wasm_bindgen(js_namespace = document, js_name = createElement)]
+        fn create_element(tag: &str) -> Canvas;
+        #[wasm_bindgen(js_namespace = ["document", "body"], js_name = append)]
+        fn append_to_body(node: &Canvas);
+        #[wasm_bindgen(js_name = devicePixelRatio, thread_local_v2)]
+        static DEVICE_PIXEL_RATIO: f64;
+
+        type Context2d;
+        #[wasm_bindgen(method, js_name = putImageData)]
+        fn put_image_data(this: &Context2d, data: &ImageData, x: f64, y: f64);
+
+        type ImageData;
+        #[wasm_bindgen(constructor, catch)]
+        fn new(data: Clamped<&[u8]>, width: u32, height: u32) -> Result<ImageData, JsValue>;
+    }
+
+    thread_local! {
+        /// Each image view's canvas and the size last asked of it.
+        static CANVASES: RefCell<HashMap<ViewId, (Canvas, UVec2)>> = RefCell::default();
+    }
+
+    pub(super) fn host_canvas() -> String {
+        let host = create_element("canvas");
+        host.set_attribute("id", HOST_ID);
+        host.set_attribute(
+            "style",
+            "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none",
+        );
+        append_to_body(&host);
+        format!("#{HOST_ID}")
+    }
+
+    fn css_size(canvas: &Canvas) -> UVec2 {
+        let ratio = DEVICE_PIXEL_RATIO.with(|r| *r);
+        UVec2::new(
+            (canvas.client_width() * ratio).round() as u32,
+            (canvas.client_height() * ratio).round() as u32,
+        )
+    }
+
+    pub(super) fn register(id: ViewId, canvas: Canvas) -> UVec2 {
+        let size = css_size(&canvas);
+        CANVASES.with(|c| c.borrow_mut().insert(id, (canvas, size)));
+        size
+    }
+
+    pub(super) fn unregister(id: ViewId) {
+        CANVASES.with(|c| c.borrow_mut().remove(&id));
+    }
+
+    pub(super) fn add(app: &mut App) {
+        app.add_systems(First, follow_css_size).add_observer(paint);
+    }
+
+    /// Resizes each view's image to its canvas's CSS size; a hidden canvas pauses it.
+    fn follow_css_size(hub: Res<ViewHub>) {
+        CANVASES.with(|c| {
+            for (id, (canvas, last)) in c.borrow_mut().iter_mut() {
+                let size = css_size(canvas);
+                if size != *last {
+                    *last = size;
+                    hub.send(*id, ViewMsg::Resize(size));
+                }
+            }
+        });
+    }
+
+    /// Copies a view's read-back image, minus wgpu's row padding, into its canvas.
+    fn paint(frame: On<ReadbackComplete>, views: Query<&View>) {
+        let Ok(view) = views.get(frame.entity) else {
+            return;
+        };
+        CANVASES.with(|c| {
+            let canvases = c.borrow();
+            let Some((canvas, size)) = canvases.get(&view.id) else {
+                return;
+            };
+            let (width, height) = (size.x as usize, size.y as usize);
+            let stride = (width * 4).next_multiple_of(ROW_ALIGNMENT);
+            // Zero-sized, or read back before the last resize.
+            if width == 0 || frame.data.len() != stride * height {
+                return;
+            }
+            let pixels: Vec<u8> = frame
+                .data
+                .chunks_exact(stride)
+                .flat_map(|row| &row[..width * 4])
+                .copied()
+                .collect();
+            let Ok(image) = ImageData::new(Clamped(&pixels), size.x, size.y) else {
+                return;
+            };
+            if canvas.width() != size.x || canvas.height() != size.y {
+                canvas.set_width(size.x);
+                canvas.set_height(size.y);
+            }
+            canvas.get_context("2d").put_image_data(&image, 0.0, 0.0);
+        });
     }
 }

@@ -12,6 +12,7 @@ use crate::AssetBase;
 use crate::lighting::{HemisphereFill, ObjectMaterial};
 use crate::placement::mesh_transform;
 use crate::scene::{LocalAabb, ObjectInstance, WorldObjectKind, WorldSceneData, Xyz};
+use crate::views::ViewScene;
 
 const PRIMITIVE_KIND_PREFIX: &str = "__primitive_";
 const PRIMITIVE_BLOCK_SIZE: f32 = 2.0;
@@ -38,14 +39,23 @@ struct KindModel {
     state: ModelState,
 }
 
-#[derive(Resource, Default)]
+/// A view's kinds and their models.
+#[derive(Component, Default)]
 pub struct ObjectKinds(HashMap<String, KindModel>);
 
 impl ObjectKinds {
-    pub fn is_loading(&self) -> bool {
+    pub fn pending(&self) -> usize {
         self.0
             .values()
-            .any(|m| matches!(m.state, ModelState::Loading))
+            .filter(|m| matches!(m.state, ModelState::Loading))
+            .count()
+    }
+
+    pub(crate) fn materials(&self) -> impl Iterator<Item = &Handle<ObjectMaterial>> {
+        self.0.values().filter_map(|m| match &m.state {
+            ModelState::Ready(model) => Some(&model.material),
+            _ => None,
+        })
     }
 
     fn placed(&self, inst: &ObjectInstance) -> Option<(&Model, Transform)> {
@@ -58,21 +68,13 @@ impl ObjectKinds {
     }
 }
 
-/// The entity drawing each object, by object id.
-#[derive(Resource, Default)]
+/// The entity drawing each of a view's objects, by object id.
+#[derive(Component, Default)]
 pub struct ObjectIndex(HashMap<String, Entity>);
 
 impl ObjectIndex {
-    pub fn get(&self, id: &str) -> Option<Entity> {
-        self.0.get(id).copied()
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+    pub fn ids(&self) -> impl Iterator<Item = (&str, Entity)> {
+        self.0.iter().map(|(id, e)| (id.as_str(), *e))
     }
 }
 
@@ -83,12 +85,34 @@ pub(crate) struct Placed(ObjectInstance);
 /// Loads the kinds the instances reference, and reloads the ones whose definition changed.
 pub(crate) fn sync_kinds(
     mut commands: Commands,
-    scene: Res<WorldSceneData>,
     base: Res<AssetBase>,
     assets: Res<AssetServer>,
-    mut kinds: ResMut<ObjectKinds>,
-    placed: Query<(Entity, &Placed)>,
+    mut views: Query<(&ViewScene, &mut ObjectKinds, Option<&Children>), Changed<ViewScene>>,
+    placed: Query<&Placed>,
 ) {
+    for (scene, mut kinds, children) in &mut views {
+        let redefined = sync_view_kinds(scene, &mut kinds, &base, &assets);
+        // The entities keep their place; `attach_models` redraws them once the new model is ready.
+        for &entity in children.into_iter().flatten() {
+            if placed
+                .get(entity)
+                .is_ok_and(|p| redefined.contains(&p.0.kind_id))
+            {
+                commands
+                    .entity(entity)
+                    .remove::<(Mesh3d, MeshMaterial3d<ObjectMaterial>)>();
+            }
+        }
+    }
+}
+
+/// The ids of the kinds (re)requested.
+fn sync_view_kinds(
+    scene: &WorldSceneData,
+    kinds: &mut ObjectKinds,
+    base: &AssetBase,
+    assets: &AssetServer,
+) -> HashSet<String> {
     let used: HashSet<&str> = scene
         .objects
         .instances
@@ -109,7 +133,7 @@ pub(crate) fn sync_kinds(
         if kinds.0.get(&kind.id).is_some_and(|m| m.kind == *kind) {
             continue;
         }
-        redefined.insert(kind.id.as_str());
+        redefined.insert(kind.id.clone());
         kinds.0.insert(
             kind.id.clone(),
             KindModel {
@@ -119,58 +143,49 @@ pub(crate) fn sync_kinds(
             },
         );
     }
-    if redefined.is_empty() {
-        return;
-    }
-    // The entities keep their place; `attach_models` redraws them once the new model is ready.
-    for (entity, placed) in &placed {
-        if redefined.contains(placed.0.kind_id.as_str()) {
-            commands
-                .entity(entity)
-                .remove::<(Mesh3d, MeshMaterial3d<ObjectMaterial>)>();
-        }
-    }
+    redefined
 }
 
 /// Registers a ready-made cuboid model for each `__primitive_<colour>` kind the instances use.
 pub(crate) fn register_primitives(
-    scene: Res<WorldSceneData>,
-    mut kinds: ResMut<ObjectKinds>,
+    mut views: Query<(&ViewScene, &mut ObjectKinds), Changed<ViewScene>>,
     mut cuboid: Local<Option<Handle<Mesh>>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ObjectMaterial>>,
 ) {
-    for inst in &scene.objects.instances {
-        let Some(colour) = inst.kind_id.strip_prefix(PRIMITIVE_KIND_PREFIX) else {
-            continue;
-        };
-        if kinds.0.contains_key(&inst.kind_id) {
-            continue;
+    for (scene, mut kinds) in &mut views {
+        for inst in &scene.objects.instances {
+            let Some(colour) = inst.kind_id.strip_prefix(PRIMITIVE_KIND_PREFIX) else {
+                continue;
+            };
+            if kinds.0.contains_key(&inst.kind_id) {
+                continue;
+            }
+            let mesh = cuboid
+                .get_or_insert_with(|| meshes.add(Cuboid::from_length(PRIMITIVE_BLOCK_SIZE)))
+                .clone();
+            let material = materials.add(ObjectMaterial {
+                // three.js's `MeshStandardMaterial` defaults.
+                base: StandardMaterial {
+                    base_color: primitive_colour(colour).into(),
+                    perceptual_roughness: 1.0,
+                    ..default()
+                },
+                extension: HemisphereFill::new(&scene.lighting),
+            });
+            kinds.0.insert(
+                inst.kind_id.clone(),
+                KindModel {
+                    kind: primitive_kind(&inst.kind_id),
+                    gltf: None,
+                    state: ModelState::Ready(Model {
+                        mesh,
+                        material,
+                        node_transform: Transform::IDENTITY,
+                    }),
+                },
+            );
         }
-        let mesh = cuboid
-            .get_or_insert_with(|| meshes.add(Cuboid::from_length(PRIMITIVE_BLOCK_SIZE)))
-            .clone();
-        let material = materials.add(ObjectMaterial {
-            // three.js's `MeshStandardMaterial` defaults.
-            base: StandardMaterial {
-                base_color: primitive_colour(colour).into(),
-                perceptual_roughness: 1.0,
-                ..default()
-            },
-            extension: HemisphereFill::new(&scene.lighting),
-        });
-        kinds.0.insert(
-            inst.kind_id.clone(),
-            KindModel {
-                kind: primitive_kind(&inst.kind_id),
-                gltf: None,
-                state: ModelState::Ready(Model {
-                    mesh,
-                    material,
-                    node_transform: Transform::IDENTITY,
-                }),
-            },
-        );
     }
 }
 
@@ -210,10 +225,21 @@ fn primitive_colour(name: &str) -> Srgba {
 /// Instances of an unknown kind are left out.
 pub(crate) fn sync_objects(
     mut commands: Commands,
-    scene: Res<WorldSceneData>,
-    kinds: Res<ObjectKinds>,
-    mut index: ResMut<ObjectIndex>,
+    mut views: Query<(Entity, &ViewScene, &ObjectKinds, &mut ObjectIndex), Changed<ViewScene>>,
     mut objects: Query<(&mut Placed, Option<&mut Transform>)>,
+) {
+    for (view, scene, kinds, mut index) in &mut views {
+        sync_view_objects(&mut commands, view, scene, kinds, &mut index, &mut objects);
+    }
+}
+
+fn sync_view_objects(
+    commands: &mut Commands,
+    view: Entity,
+    scene: &WorldSceneData,
+    kinds: &ObjectKinds,
+    index: &mut ObjectIndex,
+    objects: &mut Query<(&mut Placed, Option<&mut Transform>)>,
 ) {
     let mut wanted: HashMap<&str, &ObjectInstance> = HashMap::new();
     for inst in scene
@@ -235,7 +261,7 @@ pub(crate) fn sync_objects(
     });
     for (id, inst) in wanted {
         let Some(&entity) = index.0.get(id) else {
-            let entity = commands.spawn(Placed(inst.clone())).id();
+            let entity = commands.spawn((Placed(inst.clone()), ChildOf(view))).id();
             index.0.insert(id.to_string(), entity);
             continue;
         };
@@ -259,8 +285,7 @@ pub(crate) fn sync_objects(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn load_kinds(
-    mut kinds: ResMut<ObjectKinds>,
-    scene: Res<WorldSceneData>,
+    mut views: Query<(&mut ObjectKinds, &ViewScene)>,
     assets: Res<AssetServer>,
     gltfs: Res<Assets<Gltf>>,
     nodes: Res<Assets<GltfNode>>,
@@ -268,54 +293,60 @@ pub(crate) fn load_kinds(
     gltf_materials: Res<Assets<GltfMaterial>>,
     mut materials: ResMut<Assets<ObjectMaterial>>,
 ) {
-    if !kinds.is_loading() {
-        return;
-    }
-    for model in kinds.0.values_mut() {
-        let Some(handle) = model
-            .gltf
-            .clone()
-            .filter(|_| matches!(model.state, ModelState::Loading))
-        else {
-            continue;
-        };
-        if assets.load_state(&handle).is_failed()
-            || assets.recursive_dependency_load_state(&handle).is_failed()
-        {
-            model.state = ModelState::Failed;
+    for (mut kinds, scene) in &mut views {
+        if kinds.pending() == 0 {
             continue;
         }
-        if !assets.is_loaded_with_dependencies(&handle) {
-            continue;
+        for model in kinds.0.values_mut() {
+            let Some(handle) = model
+                .gltf
+                .clone()
+                .filter(|_| matches!(model.state, ModelState::Loading))
+            else {
+                continue;
+            };
+            if assets.load_state(&handle).is_failed()
+                || assets.recursive_dependency_load_state(&handle).is_failed()
+            {
+                model.state = ModelState::Failed;
+                continue;
+            }
+            if !assets.is_loaded_with_dependencies(&handle) {
+                continue;
+            }
+            let Some((node_transform, primitive)) = gltfs
+                .get(&handle)
+                .and_then(|g| mesh_primitives(g, &nodes, &gltf_meshes).into_iter().next())
+            else {
+                warn!("no mesh in {}", model.kind.gltf_path);
+                model.state = ModelState::Failed;
+                continue;
+            };
+            let material = materials.add(ObjectMaterial {
+                base: apply_overrides(standard_material(&primitive, &gltf_materials), &model.kind),
+                extension: HemisphereFill::new(&scene.lighting),
+            });
+            model.state = ModelState::Ready(Model {
+                mesh: primitive.mesh,
+                material,
+                node_transform,
+            });
         }
-        let Some((node_transform, primitive)) = gltfs
-            .get(&handle)
-            .and_then(|g| mesh_primitives(g, &nodes, &gltf_meshes).into_iter().next())
-        else {
-            warn!("no mesh in {}", model.kind.gltf_path);
-            model.state = ModelState::Failed;
-            continue;
-        };
-        let material = materials.add(ObjectMaterial {
-            base: apply_overrides(standard_material(&primitive, &gltf_materials), &model.kind),
-            extension: HemisphereFill::new(&scene.lighting),
-        });
-        model.state = ModelState::Ready(Model {
-            mesh: primitive.mesh,
-            material,
-            node_transform,
-        });
     }
 }
 
 /// Draws every object whose model is ready and which isn't drawn yet.
 pub(crate) fn attach_models(
     mut commands: Commands,
-    kinds: Res<ObjectKinds>,
-    undrawn: Query<(Entity, &Placed), Without<Mesh3d>>,
+    views: Query<&ObjectKinds>,
+    undrawn: Query<(Entity, &Placed, &ChildOf), Without<Mesh3d>>,
 ) {
-    for (entity, placed) in &undrawn {
-        if let Some((model, transform)) = kinds.placed(&placed.0) {
+    for (entity, placed, view) in &undrawn {
+        if let Some((model, transform)) = views
+            .get(view.parent())
+            .ok()
+            .and_then(|kinds| kinds.placed(&placed.0))
+        {
             commands.entity(entity).insert((
                 Mesh3d(model.mesh.clone()),
                 MeshMaterial3d(model.material.clone()),
