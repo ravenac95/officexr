@@ -1,6 +1,4 @@
 import React, { useMemo } from 'react';
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createDefaultApi } from '@officexr/world/app';
 import { ApplicationProvider } from '@officexr/world/react';
 import {
@@ -16,7 +14,7 @@ import type { ModelSourcesClient } from './modes/object/upload/modelSourcesClien
 import type { AgentTokensClient } from './agent-tokens/agentTokensClient.ts';
 import { InMemorySoundLibraryStorage } from './modes/sounds/soundLibraryStorage.ts';
 import { StudioPage } from './StudioPage.tsx';
-import { paths, STUDIO_API_ORIGIN, studioApiUrl, studioFetch } from './apiOrigin.ts';
+import { paths, studioApiUrl, studioFetch } from './apiOrigin.ts';
 import { SignInGate } from './SignInGate.tsx';
 import { HeadlessApp } from './modes/headless/HeadlessApp.tsx';
 import { createTestApi } from './test-harness/createTestApi.ts';
@@ -77,23 +75,12 @@ function buildTestStorages(): TestStorages {
  */
 function Studio({ params, testMode }: { params: URLSearchParams; testMode: boolean }) {
   const op = params.get('op');
-  const sceneId = params.get('scene') ?? undefined;
 
   const api = useMemo(() => {
     if (testMode) return createTestApi();
-    const loader = new GLTFLoader();
-    if (STUDIO_API_ORIGIN) {
-      loader.setWithCredentials(true).setCrossOrigin('use-credentials');
-    }
     return createDefaultApi({
       apiPath: studioApiUrl(paths.worldObjectKinds),
       fetcher: studioFetch,
-      // From the studio API, not the asset CDN: the bake needs the uncompressed models and this
-      // loader has no meshopt decoder, while the CDN serves meshopt-compressed copies.
-      loadGltf: async (path) => {
-        const gltf = await loader.loadAsync(studioApiUrl(path));
-        return { scene: gltf.scene as THREE.Object3D };
-      },
     });
   }, [testMode]);
 
@@ -102,7 +89,7 @@ function Studio({ params, testMode }: { params: URLSearchParams; testMode: boole
     [testMode],
   );
 
-  const tree = op ? <HeadlessApp op={op} sceneId={sceneId} /> : <StudioPage />;
+  const tree = op ? <HeadlessApp op={op} /> : <StudioPage />;
 
   return (
     <ApplicationProvider api={api}>

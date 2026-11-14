@@ -18,14 +18,12 @@ export { ProximityGlow } from './ProximityGlow.tsx';
 export { CameraRig } from './CameraRig.tsx';
 export { requestMotionPermission, type MotionLookState, type MotionPermission } from './motionLook.ts';
 export { SceneFrame } from './SceneFrame.tsx';
-export { createWorldXRStore } from './xrStore.ts';
-export { useXRSessionModeSupported, type XRStore } from '@react-three/xr';
 export { ObjectInstances, type MaterialOverride } from './ObjectInstances.tsx';
 export {
   LightingRig,
-  DEFAULT_EDITOR_LIGHTING,
   type LightingSettings,
 } from './LightingRig.tsx';
+export { DEFAULT_EDITOR_LIGHTING } from '../app/editor-lighting.ts';
 export { EditorCamera } from './EditorCamera.tsx';
 // Renderer-side helpers re-exported for editor overlays (e.g. the
 // Room editor's GhostLayer needs to build a transparent material from

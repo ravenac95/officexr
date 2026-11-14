@@ -34,8 +34,6 @@ interface PlayersProps {
    * a React re-render. Ref is created in Scene.tsx and threaded to both
    * SceneFrame and Players. */
   isAirborneRef: React.MutableRefObject<boolean>;
-  /** Hides the self avatar, as in first-person, while an immersive XR session is presenting. */
-  xrPresenting: boolean;
   onPingPlayer?: (id: PlayerId) => void;
 }
 
@@ -92,7 +90,6 @@ export function Players({
   selfPosRef,
   paused,
   isAirborneRef,
-  xrPresenting,
   selfReady = true,
   onPingPlayer,
 }: PlayersProps) {
@@ -317,7 +314,7 @@ export function Players({
                     playerId={p.id}
                     model={model}
                     motion={motionByPlayer[p.id] ?? 'idle'}
-                    invisible={isSelf && (cameraMode === 'first-person' || xrPresenting)}
+                    invisible={isSelf && cameraMode === 'first-person'}
                     animScale={animScaleByPlayer[p.id] ?? 1}
                     bumpCounter={bumpCounters[p.id] ?? 0}
                     store={store}

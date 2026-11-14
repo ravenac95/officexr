@@ -75,11 +75,7 @@ interface SceneFrameProps {
    * without React re-renders. Ref is created in Scene.tsx and threaded to
    * both SceneFrame and Players. */
   isAirborneRef: React.MutableRefObject<boolean>;
-  /** While an immersive XR session is presenting, movement follows the headset's yaw. */
-  xrPresenting: boolean;
 }
-
-const headsetForward = new THREE.Vector3();
 
 const ARROW_KEYS = new Set([
   'ArrowUp',
@@ -120,7 +116,6 @@ export function SceneFrame({
   worldFocused,
   spawnPoints,
   isAirborneRef,
-  xrPresenting,
 }: SceneFrameProps) {
   // Mirror the spawn list into a ref so the per-frame fall-respawn
   // check below can read the live value without re-binding the
@@ -237,7 +232,7 @@ export function SceneFrame({
   // driving the SimCore. They share one frame's snapshot of store state,
   // and r3f's single useFrame ordering is what keeps them consistent.
   // Removing it means moving each into its own sim stage or frame hook.
-  useFrame(({ gl }, dtSec) => {
+  useFrame((_, dtSec) => {
     const dt = dtSec * 1000;
     const now = performance.now();
     const keys = keysDown.current;
@@ -349,9 +344,8 @@ export function SceneFrame({
         let dx = 0;
         let dz = 0;
         if (hasMoveInput) {
-          const cameraYaw = xrPresenting
-            ? yawFromDirection(gl.xr.getCamera().getWorldDirection(headsetForward))
-            : cameraMode === 'fixed'
+          const cameraYaw =
+            cameraMode === 'fixed'
               ? fixedMovementYaw(
                   fixedAzimuthDeg,
                   viewOffsetsRef.current.fixedAzimuthOffsetRad,
