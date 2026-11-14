@@ -30,10 +30,10 @@ use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow, WindowRef};
 use officexr_render::views::{SceneSystems, View, ViewCamera, ViewId};
 use serde::{Deserialize, Serialize};
 
-pub use config::{CameraConfig, FixedCamera};
+pub use config::{CameraConfig, FixedCamera, OrbitCamera, RotateButton};
 use look::{
-    Look, MOUSE_SENSITIVITY, apply_look_delta, apply_zoom, dom_wheel_delta, fixed_movement_yaw,
-    is_look_mode, is_yaw_pitch_mode, wheel_zoom_factor,
+    Drag, Look, MOUSE_SENSITIVITY, Modifiers, Orbit, apply_look_delta, apply_zoom, dom_wheel_delta,
+    drag_for, fixed_movement_yaw, is_look_mode, is_yaw_pitch_mode, wheel_zoom_factor,
 };
 use rig::{FlyKeys, Rig};
 
@@ -49,6 +49,8 @@ pub enum CameraMode {
     TopDown,
     /// Flies free of the player on WASD/QE, turned by dragging.
     FreeFly,
+    /// Orbits a target the user pans and zooms, for editors and previews.
+    Orbit,
 }
 
 /// This frame's movement: a world-space XZ direction (unit or zero), turned
@@ -76,8 +78,8 @@ pub struct Controls {
     intent: MoveIntent,
     /// The yaw `intent` is relative to.
     yaw: f32,
-    /// A free-fly drag that started on this view's window.
-    dragging: bool,
+    /// A drag that started on this view's window, and the button holding it.
+    drag: Option<(MouseButton, Drag)>,
 }
 
 impl Default for Controls {
@@ -92,7 +94,7 @@ impl Default for Controls {
             rig: Rig::default(),
             intent: MoveIntent::default(),
             yaw: 0.0,
-            dragging: false,
+            drag: None,
         }
     }
 }
@@ -117,6 +119,19 @@ impl Controls {
     /// The camera yaw the intent is relative to.
     pub fn camera_yaw(&self) -> f32 {
         self.yaw
+    }
+
+    /// Moves the orbit camera at once, without easing. Each frame clamps it
+    /// to the config's limits.
+    pub fn set_orbit(&mut self, place: impl FnOnce(&mut Orbit)) {
+        self.rig.place_orbit(place);
+    }
+
+    /// Points the orbit camera at the box from `min` to `max` and backs it
+    /// off until the box fits.
+    pub fn frame_bounds(&mut self, min: Vec3, max: Vec3) {
+        let config = &self.config.orbit;
+        self.rig.place_orbit(|orbit| orbit.frame(min, max, config));
     }
 
     fn look_sign(&self) -> f32 {
@@ -145,7 +160,8 @@ impl ControlsHub {
 
 /// Set by a picking layer when this frame's mouse press landed on a pickable
 /// target (e.g. a ping bell), so the press neither takes pointer lock nor
-/// starts a free-fly drag. Set it in `PreUpdate` (as Bevy's picking observers
+/// starts a drag. Claim only primary-button presses: the right and middle
+/// buttons drive the orbit camera wherever they land. Set it in `PreUpdate` (as Bevy's picking observers
 /// run) or before [`ControlsSystems`]; the plugin clears it every frame.
 #[derive(Resource, Default)]
 pub struct PointerClaimed(pub bool);
@@ -312,9 +328,9 @@ struct WindowInput {
     locked: bool,
     scale_factor: f32,
     motion: Vec2,
-    /// The left button went down here, on nothing a picker claimed.
-    pressed: bool,
-    left_held: bool,
+    /// Buttons that went down here, on nothing a picker claimed.
+    pressed: Vec<MouseButton>,
+    held: Vec<MouseButton>,
     /// DOM wheel deltas (positive = down), each with its zoom factor.
     wheel: Vec<(f32, f32)>,
 }
@@ -333,7 +349,7 @@ fn gather_mouse(
     windows: Query<(Entity, &Window, &CursorOptions)>,
 ) {
     let claimed = std::mem::take(&mut claimed.0);
-    let left_held = buttons.pressed(MouseButton::Left);
+    let held: Vec<MouseButton> = buttons.get_pressed().copied().collect();
     inputs.0 = windows
         .iter()
         .map(|(entity, window, cursor)| {
@@ -341,19 +357,18 @@ fn gather_mouse(
                 locked: is_locked(cursor),
                 scale_factor: window.scale_factor(),
                 motion: motion.delta / window.scale_factor(),
-                left_held,
+                held: held.clone(),
                 ..default()
             };
             (entity, input)
         })
         .collect();
     for press in presses.read() {
-        if press.button == MouseButton::Left
-            && press.state == ButtonState::Pressed
+        if press.state == ButtonState::Pressed
             && !claimed
             && let Some(input) = inputs.0.get_mut(&press.window)
         {
-            input.pressed = true;
+            input.pressed.push(press.button);
         }
     }
     for wheel in wheels.read() {
@@ -388,12 +403,20 @@ fn steer(
             .and_then(|w| inputs.0.get(&w))
             .unwrap_or(&empty);
         if controls.input_enabled {
-            mouse(controls, window);
-            if controls.mode == CameraMode::FreeFly {
-                controls.rig.free_fly.fly(fly_keys(&keys), dt);
+            let held = Modifiers {
+                shift: keys.any(&SHIFT),
+                ctrl: keys.any(&CTRL),
+            };
+            mouse(controls, window, held);
+            match controls.mode {
+                CameraMode::FreeFly => controls.rig.free_fly.fly(fly_keys(&keys), dt),
+                CameraMode::Orbit if controls.config.orbit.move_keys => {
+                    controls.rig.orbit_goal.fly(orbit_keys(&keys), dt);
+                }
+                _ => {}
             }
         } else {
-            controls.dragging = false;
+            controls.drag = None;
         }
         controls.yaw = match controls.mode {
             CameraMode::Fixed => fixed_movement_yaw(
@@ -401,9 +424,13 @@ fn steer(
                 controls.look.offsets.fixed_azimuth_offset_rad,
                 controls.config.fixed.movement_yaw_offset_deg,
             ),
+            CameraMode::Orbit => controls.rig.orbit_goal.azimuth,
             _ => controls.look.yaw,
         };
-        controls.intent = if controls.input_enabled {
+        // The orbit's move keys are WASD too: moving the player as well would move both.
+        let keys_move_player =
+            !(controls.mode == CameraMode::Orbit && controls.config.orbit.move_keys);
+        controls.intent = if controls.input_enabled && keys_move_player {
             let untaken_jump = controls.intent.jump;
             let mut intent = intent(&keys, controls.yaw);
             intent.jump |= untaken_jump;
@@ -434,28 +461,50 @@ fn steer(
 }
 
 /// Applies a window's mouse input to a view on it.
-fn mouse(controls: &mut Controls, input: &WindowInput) {
+fn mouse(controls: &mut Controls, input: &WindowInput, held: Modifiers) {
     let mode = controls.mode;
     if input.locked && is_yaw_pitch_mode(mode) {
         let d = input.motion * controls.look_sign() * MOUSE_SENSITIVITY;
         apply_look_delta(mode, d.x, d.y, &mut controls.look);
     }
-    if mode == CameraMode::FreeFly {
-        controls.dragging = (controls.dragging || input.pressed) && input.left_held;
-        if controls.dragging {
-            controls.rig.free_fly.drag(input.motion);
+    let orbit = &controls.config.orbit;
+    let rig = &mut controls.rig;
+    controls.drag = controls
+        .drag
+        .or_else(|| {
+            input
+                .pressed
+                .iter()
+                .find_map(|&b| drag_for(mode, b, held, orbit).map(|drag| (b, drag)))
+        })
+        .filter(|(button, _)| input.held.contains(button));
+    match (mode, controls.drag.map(|(_, drag)| drag)) {
+        (CameraMode::FreeFly, Some(Drag::Turn)) => rig.free_fly.drag(input.motion),
+        (CameraMode::Orbit, Some(Drag::Rotate)) => rig.orbit_goal.rotate(input.motion, orbit),
+        (CameraMode::Orbit, Some(Drag::Pan)) => rig.orbit_goal.pan(input.motion),
+        (CameraMode::Orbit, Some(Drag::Dolly)) => {
+            rig.zoom_orbit(|o| o.dolly(input.motion.y, orbit));
         }
+        _ => {}
     }
     for &(delta, factor) in &input.wheel {
-        if mode == CameraMode::FreeFly {
-            controls.rig.free_fly.dolly(delta);
-        } else if is_look_mode(mode) {
-            apply_zoom(factor, &mut controls.look.offsets);
+        match mode {
+            CameraMode::FreeFly => rig.free_fly.dolly(delta),
+            CameraMode::Orbit => rig.zoom_orbit(|o| o.zoom(factor, orbit)),
+            _ if is_look_mode(mode) => apply_zoom(factor, &mut controls.look.offsets),
+            _ => {}
         }
     }
 }
 
 const SHIFT: [KeyCode; 2] = [KeyCode::ShiftLeft, KeyCode::ShiftRight];
+/// Ctrl, or cmd on macOS.
+const CTRL: [KeyCode; 4] = [
+    KeyCode::ControlLeft,
+    KeyCode::ControlRight,
+    KeyCode::SuperLeft,
+    KeyCode::SuperRight,
+];
 
 /// WASD or the arrows, turned by `yaw`; shift runs and space jumps.
 fn intent(keys: &MovementKeys, yaw: f32) -> MoveIntent {
@@ -475,6 +524,16 @@ fn intent(keys: &MovementKeys, yaw: f32) -> MoveIntent {
         run: keys.any(&SHIFT),
         jump: keys.just_pressed(KeyCode::Space),
     }
+}
+
+/// The map editor's: WASD across the ground, Q/E up and down, and nothing
+/// else, so ctrl held for a shortcut doesn't sink the target.
+fn orbit_keys(keys: &MovementKeys) -> Vec3 {
+    Vec3::new(
+        keys.axis(&[KeyCode::KeyD], &[KeyCode::KeyA]),
+        keys.axis(&[KeyCode::KeyE], &[KeyCode::KeyQ]),
+        keys.axis(&[KeyCode::KeyW], &[KeyCode::KeyS]),
+    )
 }
 
 fn fly_keys(keys: &MovementKeys) -> FlyKeys {
@@ -561,10 +620,14 @@ mod tests {
     }
 
     fn click(app: &mut App) {
+        press(app, MouseButton::Left, ButtonState::Pressed);
+    }
+
+    fn press(app: &mut App, button: MouseButton, state: ButtonState) {
         let window = window(app);
         app.world_mut().write_message(MouseButtonInput {
-            button: MouseButton::Left,
-            state: ButtonState::Pressed,
+            button,
+            state,
             window,
         });
     }
@@ -771,5 +834,165 @@ mod tests {
         app.update();
         assert!(controls(&app, id, Controls::take_intent).jump);
         assert!(!controls(&app, id, Controls::take_intent).jump);
+    }
+
+    #[test]
+    fn an_orbit_drag_rotates_or_pans_until_released_unless_a_picker_claimed_it() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| c.mode = CameraMode::Orbit);
+        let orbit = |app: &App| controls(app, id, |c| c.rig.orbit_goal);
+        let motion = |app: &mut App| {
+            app.world_mut().write_message(MouseMotion {
+                delta: Vec2::new(40.0, 0.0),
+            });
+        };
+
+        press(&mut app, MouseButton::Right, ButtonState::Pressed);
+        motion(&mut app);
+        app.update();
+        let mut expected = look::Orbit::default();
+        expected.rotate(Vec2::new(40.0 / SCALE, 0.0), &OrbitCamera::default());
+        assert_eq!(orbit(&app), expected);
+        let yaw = controls(&app, id, |c| c.camera_yaw());
+        assert!((yaw - expected.azimuth).abs() < 1e-6);
+
+        press(&mut app, MouseButton::Right, ButtonState::Released);
+        motion(&mut app);
+        app.update();
+        assert_eq!(orbit(&app), expected);
+
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.press(KeyCode::ShiftLeft);
+        press(&mut app, MouseButton::Right, ButtonState::Pressed);
+        motion(&mut app);
+        app.update();
+        let before = expected;
+        expected.pan(Vec2::new(40.0 / SCALE, 0.0));
+        assert_eq!(orbit(&app), expected);
+        assert_ne!(expected.target, before.target);
+        press(&mut app, MouseButton::Right, ButtonState::Released);
+        app.update();
+
+        app.world_mut().resource_mut::<PointerClaimed>().0 = true;
+        press(&mut app, MouseButton::Right, ButtonState::Pressed);
+        motion(&mut app);
+        app.update();
+        assert_eq!(orbit(&app), expected);
+    }
+
+    #[test]
+    fn the_wheel_zooms_the_orbit_and_frame_bounds_snaps_it() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| c.mode = CameraMode::Orbit);
+        let window = window(&mut app);
+        app.world_mut().write_message(MouseWheel {
+            unit: MouseScrollUnit::Pixel,
+            x: 0.0,
+            y: -200.0,
+            window,
+            phase: TouchPhase::Moved,
+        });
+        app.update();
+        // -200 device px at 2x is a 100 CSS px wheel down.
+        let distance = controls(&app, id, |c| c.rig.orbit.distance);
+        assert!((distance - 16.0 * 0.1f32.exp()).abs() < 1e-3);
+
+        controls(&app, id, |c| {
+            c.frame_bounds(Vec3::new(9.0, 0.0, 9.0), Vec3::new(11.0, 2.0, 11.0));
+        });
+        app.update();
+        let camera = camera(&mut app, id);
+        assert!((Vec3::from(camera.look_at) - Vec3::new(10.0, 1.0, 10.0)).length() < 1e-4);
+    }
+
+    #[test]
+    fn set_orbit_places_the_editor_camera_at_once_within_the_limits() {
+        let (mut app, id) = app();
+        let (target, eye) = (Vec3::new(0.0, 0.5, 0.0), Vec3::new(2.5, 2.0, 2.5));
+        controls(&app, id, |c| {
+            c.mode = CameraMode::Orbit;
+            c.config.orbit = OrbitCamera {
+                min_distance: 1.5,
+                max_distance: 40.0,
+                damping_secs: 0.33,
+                ..OrbitCamera::default()
+            };
+            c.set_orbit(|orbit| *orbit = Orbit::from_eye(target, eye));
+        });
+        app.update();
+        let camera = camera(&mut app, id);
+        assert!((Vec3::from(camera.position) - eye).length() < 1e-4);
+        assert!((Vec3::from(camera.look_at) - target).length() < 1e-4);
+
+        let orbit = |app: &App| controls(app, id, |c| c.rig.orbit);
+        controls(&app, id, |c| {
+            c.set_orbit(|orbit| {
+                orbit.elevation = 0.7;
+                orbit.distance = 60.0;
+            });
+        });
+        app.update();
+        assert_eq!(orbit(&app).target, target);
+        assert_eq!((orbit(&app).elevation, orbit(&app).distance), (0.7, 40.0));
+
+        // The map editor's pose, set before its limits: the frame clamps to
+        // the limits in force by then.
+        controls(&app, id, |c| {
+            c.set_orbit(|orbit| orbit.distance = 60.0);
+            c.config.orbit = OrbitCamera {
+                min_distance: 4.0,
+                max_distance: 500.0,
+                ..OrbitCamera::default()
+            };
+        });
+        app.update();
+        assert_eq!(orbit(&app).distance, 60.0);
+    }
+
+    #[test]
+    fn orbit_move_keys_ignore_ctrl_and_space_and_leave_the_player_still() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| {
+            c.mode = CameraMode::Orbit;
+            c.config.orbit.move_keys = true;
+        });
+        let target = |app: &App| controls(app, id, |c| c.rig.orbit_goal.target);
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.press(KeyCode::ControlLeft);
+        keys.press(KeyCode::Space);
+        app.update();
+        assert_eq!(target(&app), look::Orbit::default().target);
+
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.press(KeyCode::KeyW);
+        keys.press(KeyCode::KeyE);
+        app.update();
+        let moved = target(&app) - look::Orbit::default().target;
+        assert!(moved.y > 0.0 && Vec2::new(moved.x, moved.z).length() > 0.0);
+        assert_eq!(
+            controls(&app, id, Controls::take_intent),
+            MoveIntent::default()
+        );
+    }
+
+    #[test]
+    fn orbit_zoom_skips_the_damping_as_drei_does() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| {
+            c.mode = CameraMode::Orbit;
+            c.config.orbit.damping_secs = 0.33;
+        });
+        let window = window(&mut app);
+        app.world_mut().write_message(MouseWheel {
+            unit: MouseScrollUnit::Pixel,
+            x: 0.0,
+            y: -200.0,
+            window,
+            phase: TouchPhase::Moved,
+        });
+        app.update();
+        let (shown, goal) = controls(&app, id, |c| (c.rig.orbit, c.rig.orbit_goal));
+        assert_eq!(shown.distance, goal.distance);
+        assert_ne!(goal.distance, 16.0);
     }
 }
