@@ -7,7 +7,6 @@ import {
   serializeMap,
 } from './serialize.ts';
 import { newPlaceCube } from './commands.ts';
-import { DEFAULT_MAP_ENVIRONMENT } from './map-document.ts';
 
 class MemoryStorage implements Storage {
   private data = new Map<string, string>();
@@ -114,7 +113,6 @@ describe('LocalStorageMapStorage', () => {
     title: 'Town',
     rooms: [{ id: 'r-1', roomName: 'default-v2', position: [0, 0, 0] }],
     spawnPoints: [{ id: 's-1', position: [0, 0, 0] }],
-    environment: { ...DEFAULT_MAP_ENVIRONMENT, sun: { ...DEFAULT_MAP_ENVIRONMENT.sun } },
   });
 
   beforeEach(() => {

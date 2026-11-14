@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Environment, Html, Sky, Stars } from '@react-three/drei';
+import { Html } from '@react-three/drei';
 import {
   type LayoutDocument,
   type SerializedMap,
@@ -14,15 +14,14 @@ import { bakedLayoutUrl, computeRoomVoiceZones, deskAreaLabel } from '@officexr/
 import { useApplication, useCatalogReady } from '@officexr/world/react';
 import {
   BakedLayout,
-  DEFAULT_EDITOR_LIGHTING,
   EndlessGrid,
   LightingRig,
   ObjectInstances,
+  SkyDome,
   VOXEL_SIZE,
   placementTransform,
-  type LightingSettings,
 } from '@officexr/world/renderer';
-import type { WorldObjects } from '@officexr/sdk';
+import { DEFAULT_WORLD_CONSTANTS, type WorldObjects } from '@officexr/sdk';
 import type { MapSelection } from './useMapDocument.ts';
 import type { MapTool } from './mapTools.ts';
 import { resolveRoomPointerAction } from './mapPointerActions.ts';
@@ -46,28 +45,7 @@ import {
  */
 const ROOM_SNAP_THRESHOLD_VOXELS = 2;
 
-/**
- * Translate the map document's `MapEnvironment` (sun position +
- * color + intensity + ambient intensity) into the renderer's
- * `LightingSettings` shape. The map editor's environment panel
- * only exposes the sun + ambient fields; the rest pick up the
- * editor defaults (no shadow casting, no sun disc, no aux light).
- */
-function mapDocToLighting(
-  env: import('@officexr/world/scenes').MapEnvironment,
-): LightingSettings {
-  return {
-    ...DEFAULT_EDITOR_LIGHTING,
-    sunPosition: [
-      env.sun.positionX,
-      env.sun.positionY,
-      env.sun.positionZ,
-    ],
-    sunColor: env.sun.color,
-    sunIntensity: env.sun.intensity,
-    ambientFillIntensity: env.ambientIntensity,
-  };
-}
+const { lighting, background } = DEFAULT_WORLD_CONSTANTS;
 
 interface MapEditorCanvasProps {
   doc: SerializedMap;
@@ -106,9 +84,18 @@ export function MapEditorCanvas(props: MapEditorCanvasProps) {
       shadows={false}
     >
       <CanvasFrameStats />
-      <color attach="background" args={['#0b1220']} />
-      <LightingRig lighting={mapDocToLighting(props.doc.environment)} />
-      <EnvironmentLayer environment={props.doc.environment} />
+      <LightingRig lighting={lighting} />
+      <SkyDome
+        topColor={background.topColor}
+        horizonColor={background.horizonColor}
+        bottomColor={background.bottomColor}
+        sun={{
+          position: lighting.sunPosition,
+          color: lighting.sunColor,
+          discRadius: lighting.sunDiscRadius,
+          glow: lighting.sunDiscIntensity,
+        }}
+      />
       <EndlessGrid />
       <FloorPicker
         onPlaceSpawn={props.onPlaceSpawn}
@@ -141,66 +128,6 @@ export function MapEditorCanvas(props: MapEditorCanvasProps) {
       />
       <FlyCamera />
     </Canvas>
-  );
-}
-
-// --- Environment (drei Sky + Stars + Environment HDRI) ----------
-
-interface EnvironmentLayerProps {
-  environment: import('@officexr/world/scenes').MapEnvironment;
-}
-
-/**
- * Conditionally mounts drei's Sky / Stars / Environment based on the
- * map's `MapEnvironment` block. Each section is independent — a map
- * can have Stars without Sky and HDRI without either.
- *
- * The Environment preset name is round-tripped through `hdri.url`;
- * `environment-presets.ts` is the source of truth for the allowed
- * preset slugs. `'none'` is the explicit "no preset" sentinel and
- * collapses to `hdri = null` in the document, so it never reaches
- * this component.
- */
-function EnvironmentLayer({ environment }: EnvironmentLayerProps) {
-  const { sky, stars, hdri } = environment;
-  // drei's <Sky> wants a sunPosition vector — derive from
-  // inclination/azimuth so the user's sliders matter even when the
-  // sun is shadow-cast from the same direction by `directionalLight`
-  // above. We DELIBERATELY don't try to keep these locked together —
-  // the user might want a dramatic backlight where the sun-shadow
-  // direction and the sky's bright spot disagree.
-  return (
-    <>
-      {sky?.enabled ? (
-        <Sky
-          turbidity={sky.turbidity}
-          rayleigh={sky.rayleigh}
-          inclination={sky.inclination}
-          azimuth={sky.azimuth}
-        />
-      ) : null}
-      {stars?.enabled ? (
-        <Stars
-          radius={stars.radius}
-          depth={stars.depth}
-          count={stars.count}
-          factor={stars.factor}
-          saturation={stars.saturation}
-          fade={stars.fade}
-        />
-      ) : null}
-      {hdri ? (
-        <Environment
-          // The doc stash the preset name in `url` (see
-          // `environment-presets.ts` for the rationale). When the
-          // schema grows to support uploaded HDRs, switch to
-          // `files={hdri.url}` when it looks like a URL.
-          preset={hdri.url as any}
-          environmentIntensity={hdri.intensity}
-          background={hdri.background}
-        />
-      ) : null}
-    </>
   );
 }
 
@@ -278,7 +205,7 @@ export function RoomsLayer(props: RoomsLayerProps) {
   const catalogReady = useCatalogReady();
 
   const { doc, rooms, layouts } = props;
-  // Recomputed when placements, the library or layouts change, not on environment/spawn edits. v1 docs get none.
+  // Recomputed when placements, the library or layouts change, not on spawn edits. v1 docs get none.
   const allAabbs = useMemo<readonly RoomAABBVoxel[]>(
     () =>
       catalogReady && doc.schemaVersion === 2
@@ -638,7 +565,7 @@ function VoiceZoneLayer({
   const { geometry, rooms: roomService } = useApplication();
   const catalogReady = useCatalogReady();
   // v1 docs (only the LocalStorage fallback can hand the editor one) show no overlay.
-  // Keyed on rooms, not the whole doc, so environment and spawn edits don't recompile the map.
+  // Keyed on rooms, not the whole doc, so spawn edits don't recompile the map.
   const zones = useMemo(
     () =>
       catalogReady && doc.schemaVersion === 2

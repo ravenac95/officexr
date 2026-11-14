@@ -108,7 +108,6 @@ describe('document deserializers', () => {
       name: 'm',
       rooms: [{ id: 'r', roomName: 'r', position }],
       spawnPoints: [],
-      environment: {},
     });
     expect(() => deserializeMap(map([0, 0, 4]))).not.toThrow();
     expect(() => deserializeMap(map([0, 0.5, 4]))).toThrow(/integer voxel offsets/);

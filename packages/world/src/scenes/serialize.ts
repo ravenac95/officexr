@@ -486,7 +486,6 @@ export interface SerializeMapInput {
   title?: string;
   rooms: MapDocumentV2['rooms'];
   spawnPoints: MapDocumentV2['spawnPoints'];
-  environment: MapDocumentV2['environment'];
   deskAreas?: MapDocumentV2['deskAreas'];
 }
 
@@ -498,7 +497,6 @@ export function serializeMap(input: SerializeMapInput): MapDocumentV2 {
     updatedAt: Date.now(),
     rooms: input.rooms,
     spawnPoints: input.spawnPoints,
-    environment: input.environment,
     ...(input.deskAreas !== undefined && { deskAreas: input.deskAreas }),
   };
 }
@@ -575,13 +573,12 @@ export function deserializeMap(raw: unknown): SerializedMap {
   if (!Array.isArray(obj.spawnPoints)) {
     throw new Error('map: missing `spawnPoints` array');
   }
-  if (!obj.environment || typeof obj.environment !== 'object') {
-    throw new Error('map: missing `environment` object');
-  }
   if (obj.deskAreas !== undefined) {
     validateDeskAreas(obj.deskAreas, new Set((obj.rooms as { id?: string }[]).map((ri) => ri.id ?? '')));
   }
-  return obj as unknown as SerializedMap;
+  // Maps saved before the environment block was removed still carry it.
+  const { environment: _environment, ...map } = obj;
+  return map as unknown as SerializedMap;
 }
 
 /**

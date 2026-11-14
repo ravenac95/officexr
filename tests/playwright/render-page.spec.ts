@@ -9,14 +9,6 @@ import { expect, test, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
 import { boxGlb } from './lib/box-glb.ts';
 
-const ENVIRONMENT = {
-  sun: { positionX: 20, positionY: 40, positionZ: 20, color: '#ffffff', intensity: 1.4 },
-  sky: null,
-  stars: null,
-  hdri: null,
-  ambientIntensity: 0.15,
-};
-
 const blueBlock = (id: string, position: number[]) => ({
   id,
   op: 'placeObject',
@@ -44,7 +36,7 @@ const layout = (name: string, position = [0, 0, 0]) => ({
 
 const map = (name: string, rooms: object[]) => ({
   name,
-  doc: { schemaVersion: 2, name, title: name, updatedAt: 0, rooms, spawnPoints: [], environment: ENVIRONMENT },
+  doc: { schemaVersion: 2, name, title: name, updatedAt: 0, rooms, spawnPoints: [] },
 });
 
 // `wing` is baked-only (its geometry is a green GLB) and placed twice; `hall`

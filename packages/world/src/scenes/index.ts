@@ -70,12 +70,6 @@ export {
   type SerializedMap,
   type RoomInstance,
   type SpawnPoint,
-  type MapEnvironment,
-  type MapSunSettings,
-  type MapSkySettings,
-  type MapStarsSettings,
-  type MapHdriSettings,
-  DEFAULT_MAP_ENVIRONMENT,
   emptyMapDocument,
 } from './map-document.ts';
 export {
