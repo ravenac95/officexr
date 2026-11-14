@@ -270,12 +270,13 @@ fn sun_cascade(rotation: Quat, focus: Vec3, l: &LightingConfig) -> Cascade {
 }
 
 pub(crate) fn plugin(app: &mut App) {
-    app.add_systems(Update, sync_lighting).add_systems(
-        PostUpdate,
-        fit_sun_shadow
-            .after(SimulationLightSystems::UpdateDirectionalLightCascades)
-            .before(SimulationLightSystems::UpdateLightFrusta),
-    );
+    app.add_systems(Update, sync_lighting.after(crate::views::mirror_resources))
+        .add_systems(
+            PostUpdate,
+            fit_sun_shadow
+                .after(SimulationLightSystems::UpdateDirectionalLightCascades)
+                .before(SimulationLightSystems::UpdateLightFrusta),
+        );
 }
 
 #[cfg(test)]

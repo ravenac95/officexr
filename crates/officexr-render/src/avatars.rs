@@ -192,7 +192,9 @@ pub(crate) fn plugin(app: &mut App) {
     app.add_systems(Startup, load_rigs)
         .add_systems(
             Update,
-            (build_graph, sync_avatars, bind_avatars, animate, place_tags).chain(),
+            (build_graph, sync_avatars, bind_avatars, animate, place_tags)
+                .chain()
+                .after(crate::views::mirror_resources),
         )
         .add_observer(despawn_tag);
 }

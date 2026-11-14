@@ -158,14 +158,13 @@ pub(crate) fn plugin(app: &mut App) {
             PostUpdate,
             PropagateSet::<RenderLayers>::default().before(VisibilitySystems::CheckVisibility),
         )
-        .add_systems(
-            PreUpdate,
-            (mirror_resources, drain_hub, pause_occluded).chain(),
-        )
+        .add_systems(PreUpdate, (drain_hub, pause_occluded))
+        // In `Update`, so resource changes made in `PreUpdate` draw this frame.
+        .add_systems(Update, mirror_resources)
         .add_systems(Last, report_status);
 }
 
-fn mirror_resources(
+pub(crate) fn mirror_resources(
     mut commands: Commands,
     scene: Option<Res<WorldSceneData>>,
     camera: Option<Res<SceneCamera>>,

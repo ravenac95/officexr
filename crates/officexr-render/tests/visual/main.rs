@@ -403,9 +403,13 @@ fn drive(
     let Some(step) = t.steps.get(t.next) else {
         t.done_for += 1;
         if t.done_for == SAVE_FRAMES {
-            let kinds = kinds.failed().map(|id| format!("kind {id}"));
-            let layouts = layouts.failed().map(|path| format!("layout {path}"));
-            *t.failed.lock().unwrap() = kinds.chain(layouts).collect();
+            *t.failed.lock().unwrap() = views
+                .iter()
+                .flat_map(|(kinds, layouts)| {
+                    let kinds = kinds.failed().map(|id| format!("kind {id}"));
+                    kinds.chain(layouts.failed().map(|path| format!("layout {path}")))
+                })
+                .collect();
             exit.write(AppExit::Success);
         }
         return;
