@@ -15,7 +15,7 @@ use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
 
 use crate::scene::{AuxLightType, LightingConfig, WorldSceneData};
-use crate::{CAMERA_FAR, SceneCamera, SceneEntity};
+use crate::{CAMERA_FAR, SceneCamera};
 
 const HEMISPHERE_SKY: [u8; 3] = [0xae, 0xdc, 0xff];
 const HEMISPHERE_GROUND: [u8; 3] = [0x3a, 0x2f, 0x24];
@@ -61,7 +61,42 @@ fn hemisphere_color([r, g, b]: [u8; 3]) -> LinearRgba {
 #[derive(Component)]
 pub(crate) struct Sun;
 
-pub(crate) fn spawn_lights(mut commands: Commands, scene: Res<WorldSceneData>) {
+#[derive(Component)]
+pub(crate) struct AuxLight;
+
+/// Whether the scene's lighting differs from the one this condition last saw.
+pub(crate) fn lighting_changed(
+    scene: Option<Res<WorldSceneData>>,
+    mut last: Local<Option<LightingConfig>>,
+) -> bool {
+    let Some(scene) = scene.filter(|s| s.is_changed()) else {
+        return false;
+    };
+    if last.as_ref() == Some(&scene.lighting) {
+        return false;
+    }
+    *last = Some(scene.lighting.clone());
+    true
+}
+
+/// Re-tints every object material, whichever system made it.
+pub(crate) fn sync_hemisphere(
+    scene: Res<WorldSceneData>,
+    mut materials: ResMut<Assets<ObjectMaterial>>,
+) {
+    let fill = HemisphereFill::new(&scene.lighting);
+    for (_, material) in materials.iter_mut() {
+        material.extension = fill.clone();
+    }
+}
+
+/// Spawns the sun and the auxiliary light on first use, then updates them in place.
+pub(crate) fn sync_lights(
+    mut commands: Commands,
+    scene: Res<WorldSceneData>,
+    suns: Query<Entity, With<Sun>>,
+    aux: Query<Entity, With<AuxLight>>,
+) {
     let l = &scene.lighting;
     let sun = Vec3::from(l.sun_position);
     let at_sun = Transform::from_translation(sun).looking_at(Vec3::ZERO, Vec3::Y);
@@ -69,8 +104,11 @@ pub(crate) fn spawn_lights(mut commands: Commands, scene: Res<WorldSceneData>) {
         size: l.shadow_map_size as usize,
     });
     let texel = shadow_texel_size(l);
-    commands.spawn((
-        SceneEntity,
+    let mut sun_entity = match suns.single() {
+        Ok(e) => commands.entity(e),
+        Err(_) => commands.spawn_empty(),
+    };
+    sun_entity.insert((
         Sun,
         DirectionalLight {
             color: l.sun_color,
@@ -90,6 +128,12 @@ pub(crate) fn spawn_lights(mut commands: Commands, scene: Res<WorldSceneData>) {
         at_sun,
     ));
 
+    if l.aux_light_type == AuxLightType::None {
+        for e in &aux {
+            commands.entity(e).despawn();
+        }
+        return;
+    }
     // three.js lights are in candela; Bevy's point and spot lights in lumens.
     let lumens = l.aux_intensity * 4.0 * PI;
     let range = if l.aux_distance > 0.0 {
@@ -97,34 +141,33 @@ pub(crate) fn spawn_lights(mut commands: Commands, scene: Res<WorldSceneData>) {
     } else {
         f32::MAX
     };
+    let mut aux_entity = match aux.single() {
+        Ok(e) => commands.entity(e),
+        Err(_) => commands.spawn(AuxLight),
+    };
+    aux_entity
+        .remove::<(PointLight, SpotLight)>()
+        .insert(at_sun);
     // ponytail: Bevy's range falloff is fixed inverse-square; `auxDecay` other than 2 is ignored.
     match l.aux_light_type {
         AuxLightType::None => {}
         AuxLightType::Point => {
-            commands.spawn((
-                SceneEntity,
-                PointLight {
-                    color: l.sun_color,
-                    intensity: lumens,
-                    range,
-                    ..default()
-                },
-                at_sun,
-            ));
+            aux_entity.insert(PointLight {
+                color: l.sun_color,
+                intensity: lumens,
+                range,
+                ..default()
+            });
         }
         AuxLightType::Spot => {
-            commands.spawn((
-                SceneEntity,
-                SpotLight {
-                    color: l.sun_color,
-                    intensity: lumens,
-                    range,
-                    outer_angle: l.aux_angle,
-                    inner_angle: l.aux_angle * (1.0 - l.aux_penumbra),
-                    ..default()
-                },
-                at_sun,
-            ));
+            aux_entity.insert(SpotLight {
+                color: l.sun_color,
+                intensity: lumens,
+                range,
+                outer_angle: l.aux_angle,
+                inner_angle: l.aux_angle * (1.0 - l.aux_penumbra),
+                ..default()
+            });
         }
     }
 }
@@ -201,6 +244,10 @@ fn sun_cascade(rotation: Quat, focus: Vec3, l: &LightingConfig) -> Cascade {
 
 pub(crate) fn plugin(app: &mut App) {
     app.add_systems(
+        Update,
+        (sync_lights, sync_hemisphere).run_if(lighting_changed),
+    )
+    .add_systems(
         PostUpdate,
         fit_sun_shadow
             .run_if(resource_exists::<WorldSceneData>)

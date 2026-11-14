@@ -42,7 +42,6 @@ impl Orbit {
     }
 }
 
-/// The plugin's camera; inserted once, since changing it respawns the scene.
 pub fn initial() -> SceneCamera {
     let t = Orbit::default().transform().translation;
     SceneCamera {
@@ -59,7 +58,7 @@ pub fn orbit_camera(
     motion: Res<AccumulatedMouseMotion>,
     scroll: Res<AccumulatedMouseScroll>,
     mut orbit: ResMut<Orbit>,
-    mut cameras: Query<&mut Transform, With<Camera3d>>,
+    mut camera: ResMut<SceneCamera>,
 ) {
     let delta = motion.delta;
     if buttons.pressed(MouseButton::Left) {
@@ -70,7 +69,6 @@ pub fn orbit_camera(
         orbit.target += yaw * Vec3::new(-delta.x, 0.0, -delta.y) * PAN_PER_PX * distance;
     }
     orbit.distance = (orbit.distance * (1.0 - scroll.delta.y * ZOOM_PER_LINE)).clamp(2.0, 500.0);
-    for mut transform in &mut cameras {
-        *transform = orbit.transform();
-    }
+    camera.position = orbit.transform().translation.into();
+    camera.look_at = orbit.target.into();
 }

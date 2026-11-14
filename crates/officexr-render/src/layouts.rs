@@ -4,38 +4,69 @@
 use bevy::gltf::{Gltf, GltfMaterial, GltfMesh, GltfNode};
 use bevy::prelude::*;
 
+use crate::AssetBase;
 use crate::lighting::{HemisphereFill, ObjectMaterial};
 use crate::objects::{mesh_primitives, standard_material};
 use crate::placement::baked_layout_transform;
 use crate::scene::{BakedLayoutPlacement, WorldSceneData};
-use crate::{AssetBase, SceneEntity};
+
+enum LayoutState {
+    Loading(Handle<Gltf>),
+    Spawned(Vec<Entity>),
+    /// As in three.js, a layout that isn't baked yet is left out.
+    Failed,
+}
+
+struct Layout {
+    placement: BakedLayoutPlacement,
+    state: LayoutState,
+}
 
 #[derive(Resource, Default)]
-pub struct PendingLayouts(Vec<(BakedLayoutPlacement, Handle<Gltf>)>);
+pub struct LayoutIndex(Vec<Layout>);
 
-impl PendingLayouts {
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+impl LayoutIndex {
+    pub fn is_loading(&self) -> bool {
+        self.0
+            .iter()
+            .any(|l| matches!(l.state, LayoutState::Loading(_)))
     }
 }
 
-pub(crate) fn request_layouts(
+/// Keeps the layouts the scene still lists as they are, requests the new,
+/// and despawns the gone.
+pub(crate) fn sync_layouts(
+    mut commands: Commands,
     scene: Res<WorldSceneData>,
     base: Res<AssetBase>,
     assets: Res<AssetServer>,
-    mut pending: ResMut<PendingLayouts>,
+    mut index: ResMut<LayoutIndex>,
 ) {
-    pending.0 = scene
+    let mut gone = std::mem::take(&mut index.0);
+    index.0 = scene
         .baked_layouts
         .iter()
-        .map(|p| (p.clone(), assets.load(base.asset_path(&p.gltf_path))))
+        .map(|p| match gone.iter().position(|l| l.placement == *p) {
+            Some(i) => gone.swap_remove(i),
+            None => Layout {
+                placement: p.clone(),
+                state: LayoutState::Loading(assets.load(base.asset_path(&p.gltf_path))),
+            },
+        })
         .collect();
+    for layout in gone {
+        if let LayoutState::Spawned(entities) = layout.state {
+            for entity in entities {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_loaded_layouts(
     mut commands: Commands,
-    mut pending: ResMut<PendingLayouts>,
+    mut index: ResMut<LayoutIndex>,
     scene: Res<WorldSceneData>,
     assets: Res<AssetServer>,
     gltfs: Res<Assets<Gltf>>,
@@ -44,30 +75,38 @@ pub(crate) fn spawn_loaded_layouts(
     gltf_materials: Res<Assets<GltfMaterial>>,
     mut materials: ResMut<Assets<ObjectMaterial>>,
 ) {
-    pending.0.retain(|(placement, handle)| {
+    for layout in &mut index.0 {
+        let LayoutState::Loading(handle) = &layout.state else {
+            continue;
+        };
         if assets.load_state(handle).is_failed() {
-            // As in three.js, a layout that isn't baked yet is left out.
-            return false;
+            layout.state = LayoutState::Failed;
+            continue;
         }
         if !assets.is_loaded_with_dependencies(handle) {
-            return true;
+            continue;
         }
         let Some(gltf) = gltfs.get(handle) else {
-            return false;
+            layout.state = LayoutState::Failed;
+            continue;
         };
-        let root = baked_layout_transform(placement);
-        for (node_transform, primitive) in mesh_primitives(gltf, &nodes, &gltf_meshes) {
-            let material = materials.add(ObjectMaterial {
-                base: standard_material(&primitive, &gltf_materials),
-                extension: HemisphereFill::new(&scene.lighting),
-            });
-            commands.spawn((
-                SceneEntity,
-                Mesh3d(primitive.mesh),
-                MeshMaterial3d(material),
-                root.mul_transform(node_transform),
-            ));
-        }
-        false
-    });
+        let root = baked_layout_transform(&layout.placement);
+        let entities = mesh_primitives(gltf, &nodes, &gltf_meshes)
+            .into_iter()
+            .map(|(node_transform, primitive)| {
+                let material = materials.add(ObjectMaterial {
+                    base: standard_material(&primitive, &gltf_materials),
+                    extension: HemisphereFill::new(&scene.lighting),
+                });
+                commands
+                    .spawn((
+                        Mesh3d(primitive.mesh),
+                        MeshMaterial3d(material),
+                        root.mul_transform(node_transform),
+                    ))
+                    .id()
+            })
+            .collect();
+        layout.state = LayoutState::Spawned(entities);
+    }
 }

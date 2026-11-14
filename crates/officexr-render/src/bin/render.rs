@@ -18,7 +18,7 @@ use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::ExitCondition;
 use officexr_render::{
-    AssetBase, OfficeXrRenderPlugin, PendingKinds, PendingLayouts, SceneCamera, WorldSceneData,
+    AssetBase, LayoutIndex, ObjectKinds, OfficeXrRenderPlugin, SceneCamera, WorldSceneData,
     mugshot_player,
 };
 
@@ -127,8 +127,8 @@ fn capture_and_exit(
     mut measured: Local<Duration>,
     time: Res<Time<Real>>,
     output: Res<Output>,
-    kinds: Res<PendingKinds>,
-    layouts: Res<PendingLayouts>,
+    kinds: Res<ObjectKinds>,
+    layouts: Res<LayoutIndex>,
     mut exit: MessageWriter<AppExit>,
 ) {
     *frame += 1;
@@ -137,7 +137,7 @@ fn capture_and_exit(
     }
     if *frame == CAPTURE_AT {
         let mean = *measured / (CAPTURE_AT - MEASURE_FROM);
-        if !kinds.is_empty() || !layouts.is_empty() {
+        if kinds.is_loading() || layouts.is_loading() {
             warn!("capturing with models still loading");
         }
         println!("frame_ms={:.2}", mean.as_secs_f64() * 1e3);
