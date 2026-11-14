@@ -7,7 +7,6 @@ import {
   serializeMap,
 } from './serialize.ts';
 import { newPlaceCube } from './commands.ts';
-import { DEFAULT_MAP_ENVIRONMENT } from './map-document.ts';
 
 /**
  * In-memory fetch mock that emulates `vite-plugin-storage.ts`'s
@@ -159,7 +158,6 @@ describe('FilesystemMapStorage (mocked /api/maps)', () => {
       name: 'town',
       rooms: [{ id: 'r-1', roomName: 'default-v2', position: [0, 0, 0] }],
       spawnPoints: [{ id: 's-1', position: [0, 0, 0] }],
-      environment: { ...DEFAULT_MAP_ENVIRONMENT, sun: { ...DEFAULT_MAP_ENVIRONMENT.sun } },
     });
     await storage.save('town', m);
     const back = await storage.load('town');
@@ -183,7 +181,6 @@ describe('FilesystemMapStorage (mocked /api/maps)', () => {
         name: 'x',
         rooms: [],
         spawnPoints: [],
-        environment: { ...DEFAULT_MAP_ENVIRONMENT, sun: { ...DEFAULT_MAP_ENVIRONMENT.sun } },
       }),
     );
     await storage.delete('x');

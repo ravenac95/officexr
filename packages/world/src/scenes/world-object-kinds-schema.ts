@@ -117,9 +117,12 @@ export interface WorldObjectKind {
     min: { x: number; y: number; z: number };
     max: { x: number; y: number; z: number };
   };
+  /** Marks `dimensions` and `localAABB` as hand-set: the bake skips this kind
+   * and only reports when the model's measured size differs. */
+  dimensionsPinned?: boolean;
   /**
    * Optional override for the Rapier collider shape emitted by
-   * `MapColliders` and `worldObjectsToCuboids`. When absent the default
+   * `worldObjectsToColliders`. When absent the default
    * is a single AABB cuboid (one-box-per-placed-object).
    *
    * 'compound-steps': emit one solid column per step instead of a single
@@ -127,7 +130,7 @@ export interface WorldObjectKind {
    * collider would block the character at the front face rather than
    * letting it climb the steps. Step parameters (`stepCount`, `stepRise`,
    * `stepRun`, `stepDepth`) describe the staircase geometry in the kind's
-   * own local space; `worldObjectsToCuboids` / `MapColliders` translate
+   * own local space; `worldObjectsToCuboids` translates
    * them to world space at placement time.
    *
    * OCP note: new collider shapes (e.g. 'slope', 'hollow') would each
@@ -192,8 +195,8 @@ export type ColliderComplexity =
  * that cannot be accurately represented by a single AABB cuboid.
  *
  * ISP note: callers that only emit the default AABB collider never need
- * to read this field — it is consumed exclusively by MapColliders and
- * worldObjectsToCuboids, both of which are the correct level of
+ * to read this field — it is consumed exclusively by
+ * worldObjectsToColliders / worldObjectsToCuboids, both of which are the correct level of
  * abstraction for this decision.
  */
 export type ColliderShapeSpec =
@@ -422,11 +425,12 @@ export function normalizeKind(raw: unknown, idx: number): WorldObjectKind {
       : WORLD_OBJECT_KIND_DEFAULTS.optimization,
     dimensions: normalizeDimensions(k.dimensions),
     localAABB: normalizeLocalAABB(k.localAABB),
+    dimensionsPinned: normalizeOptionalBoolean(k.dimensionsPinned, idx, 'dimensionsPinned'),
     colliderShape: normalizeColliderShape(k.colliderShape),
     colliderComplexity: normalizeColliderComplexity(k.colliderComplexity, idx),
     rotationStepDeg: normalizeRotationStep(k.rotationStepDeg, idx),
     seat: normalizeSeat(k.seat, idx),
-    isDesk: normalizeIsDesk(k.isDesk, idx),
+    isDesk: normalizeOptionalBoolean(k.isDesk, idx, 'isDesk'),
   };
 }
 
@@ -464,12 +468,12 @@ function normalizeSeat(raw: unknown, idx: number): SeatSpec | undefined {
   return { offset: { x: offset.x, y: offset.y, z: offset.z }, yawDeg: seat.yawDeg };
 }
 
-function normalizeIsDesk(raw: unknown, idx: number): boolean | undefined {
+function normalizeOptionalBoolean(raw: unknown, idx: number, field: string): boolean | undefined {
   if (raw === undefined) {
     return undefined;
   }
   if (typeof raw !== 'boolean') {
-    throw new Error(`world-object-kind-catalog: kinds[${idx}].isDesk must be a boolean, got ${String(raw)}`);
+    throw new Error(`world-object-kind-catalog: kinds[${idx}].${field} must be a boolean, got ${String(raw)}`);
   }
   return raw;
 }

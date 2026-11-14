@@ -111,10 +111,10 @@ export function shouldRespawnFalling(
  *
  * Two floor sources, combined by min:
  *  - Cube bottom face = `inst.position[1] * cubeSize` (matches the
- *    collider placement in `<MapColliders>` and `worldObjectsToCuboids`).
+ *    collider placement in `SimCore` and `worldObjectsToCuboids`).
  *  - Spawn point y. Baked-layout maps (e.g. `booper`) put the floor
  *    geometry inside a baked GLB rendered/collided by `<BakedLayout>`
- *    + `<BakedLayoutColliders>`, NOT inside `worldObjects.instances`
+ *    + `useBakedColliders`, NOT inside `worldObjects.instances`
  *    (the referenced room is empty). Without the spawn-derived floor,
  *    the backstop threshold would collapse to `-Infinity` for those
  *    maps and the backstop check `newPos.y < threshold` would never
@@ -146,7 +146,7 @@ export function respawnThreshold(
 }
 
 /** Cuboid collider descriptor in world space. Engine-agnostic —
- * the Rapier adapter (browser-side `<MapColliders>` or bot-side
+ * the Rapier adapter (`SimCore`'s static colliders or bot-side
  * `BotPhysicsWorld.syncCubes`) turns this into a real collider. */
 export interface CuboidDescriptor {
   center: { x: number; y: number; z: number };
@@ -201,8 +201,8 @@ export interface ColliderShapeLookup {
  * This approximation replaces the single bounding-box cuboid with a
  * staircase topology that Rapier's kinematic character controller can
  * physically climb. The cuboid shape is a deliberate approximation —
- * the exact GLTF mesh triangles are not used because @react-three/rapier
- * does not expose TriMesh static colliders in the current version.
+ * the exact GLTF mesh triangles are not used because the original Rapier wrapper
+ * did not expose TriMesh static colliders.
  * See STAIRS-INVESTIGATION-FINDING.md §4 for the full rationale.
  */
 function compoundStepCuboids(
@@ -280,7 +280,7 @@ export function worldObjectsToCuboids(
  * Walk `worldObjects.instances` and emit world-space collider
  * descriptors — cuboids (default AABB, compound-steps, scanned) and
  * trimeshes (slope kinds). The single source of collider geometry for
- * all three consumers: `<MapColliders>` (player, unbaked rooms),
+ * all three consumers: `SimCore` static colliders (player, unbaked rooms),
  * `BotPhysicsWorld.syncCubes` (bots), and the bake's embedded extras
  * (player, baked rooms).
  */

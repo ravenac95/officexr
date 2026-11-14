@@ -4,7 +4,7 @@
  * The bot spec (`scenario-stairs.spec.ts`) exercises BotPhysicsWorld,
  * which builds its colliders from `worldObjects` + `colliderShape`.
  * The LOCAL PLAYER walks on a different collider source:
- * `<BakedLayoutColliders>`, fed by the cuboids the bake embedded in
+ * `SimCore`, fed by the cuboids the bake embedded in
  * the GLB's scene extras (see `app/baked-collider-extras.ts`). This
  * spec covers that player-side path — nothing else does.
  *

@@ -2,65 +2,185 @@
 //! kind shares one mesh and one material, which Bevy batches into a single
 //! instanced draw.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bevy::gltf::{Gltf, GltfMaterial, GltfMesh, GltfNode};
 use bevy::pbr::gltf::standard_material_from_gltf_material;
 use bevy::prelude::*;
 
+use crate::AssetBase;
 use crate::lighting::{HemisphereFill, ObjectMaterial};
 use crate::placement::mesh_transform;
 use crate::scene::{LocalAabb, ObjectInstance, WorldObjectKind, WorldSceneData, Xyz};
-use crate::{AssetBase, SceneEntity};
 
 const PRIMITIVE_KIND_PREFIX: &str = "__primitive_";
 const PRIMITIVE_BLOCK_SIZE: f32 = 2.0;
 
-/// Kinds whose glTF is still loading, with their instances.
-#[derive(Resource, Default)]
-pub struct PendingKinds(Vec<(WorldObjectKind, Handle<Gltf>, Vec<ObjectInstance>)>);
+/// The mesh and material one kind's instances share.
+#[derive(Clone)]
+pub(crate) struct Model {
+    mesh: Handle<Mesh>,
+    material: Handle<ObjectMaterial>,
+    node_transform: Transform,
+}
 
-impl PendingKinds {
+enum ModelState {
+    Loading,
+    Ready(Model),
+    /// A kind whose model fails to load is left out.
+    Failed,
+}
+
+struct KindModel {
+    kind: WorldObjectKind,
+    /// `None` for `__primitive_<colour>` kinds, which have no catalog entry.
+    gltf: Option<Handle<Gltf>>,
+    state: ModelState,
+}
+
+#[derive(Resource, Default)]
+pub struct ObjectKinds(HashMap<String, KindModel>);
+
+impl ObjectKinds {
+    pub fn is_loading(&self) -> bool {
+        self.0
+            .values()
+            .any(|m| matches!(m.state, ModelState::Loading))
+    }
+
+    fn placed(&self, inst: &ObjectInstance) -> Option<(&Model, Transform)> {
+        let kind = self.0.get(&inst.kind_id)?;
+        let ModelState::Ready(model) = &kind.state else {
+            return None;
+        };
+        let transform = mesh_transform(inst, &kind.kind).mul_transform(model.node_transform);
+        Some((model, transform))
+    }
+}
+
+/// The entity drawing each object, by object id.
+#[derive(Resource, Default)]
+pub struct ObjectIndex(HashMap<String, Entity>);
+
+impl ObjectIndex {
+    pub fn get(&self, id: &str) -> Option<Entity> {
+        self.0.get(id).copied()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 }
 
-pub(crate) fn request_kinds(
+/// The instance an object entity draws, kept to diff against the next scene.
+#[derive(Component)]
+pub(crate) struct Placed(ObjectInstance);
+
+/// Loads the kinds the instances reference, and reloads the ones whose definition changed.
+pub(crate) fn sync_kinds(
+    mut commands: Commands,
     scene: Res<WorldSceneData>,
     base: Res<AssetBase>,
     assets: Res<AssetServer>,
-    mut pending: ResMut<PendingKinds>,
+    mut kinds: ResMut<ObjectKinds>,
+    placed: Query<(Entity, &Placed)>,
 ) {
-    let kinds: HashMap<&str, &WorldObjectKind> =
-        scene.kinds.iter().map(|k| (k.id.as_str(), k)).collect();
-    let mut by_kind: HashMap<&str, Vec<ObjectInstance>> = HashMap::new();
-    for inst in &scene.objects.instances {
-        if kinds.contains_key(inst.kind_id.as_str()) {
-            by_kind.entry(&inst.kind_id).or_default().push(inst.clone());
+    let used: HashSet<&str> = scene
+        .objects
+        .instances
+        .iter()
+        .map(|i| i.kind_id.as_str())
+        .collect();
+    let wanted: Vec<&WorldObjectKind> = scene
+        .kinds
+        .iter()
+        .filter(|k| used.contains(k.id.as_str()))
+        .collect();
+    let wanted_ids: HashSet<&str> = wanted.iter().map(|k| k.id.as_str()).collect();
+    kinds
+        .0
+        .retain(|id, m| m.gltf.is_none() || wanted_ids.contains(id.as_str()));
+    let mut redefined = HashSet::new();
+    for kind in wanted {
+        if kinds.0.get(&kind.id).is_some_and(|m| m.kind == *kind) {
+            continue;
+        }
+        redefined.insert(kind.id.as_str());
+        kinds.0.insert(
+            kind.id.clone(),
+            KindModel {
+                kind: kind.clone(),
+                gltf: Some(assets.load(base.asset_path(&kind.gltf_path))),
+                state: ModelState::Loading,
+            },
+        );
+    }
+    if redefined.is_empty() {
+        return;
+    }
+    // The entities keep their place; `attach_models` redraws them once the new model is ready.
+    for (entity, placed) in &placed {
+        if redefined.contains(placed.0.kind_id.as_str()) {
+            commands
+                .entity(entity)
+                .remove::<(Mesh3d, MeshMaterial3d<ObjectMaterial>)>();
         }
     }
-    pending.0 = by_kind
-        .into_iter()
-        .map(|(id, instances)| {
-            let kind = kinds[id].clone();
-            let gltf = assets.load(base.asset_path(&kind.gltf_path));
-            (kind, gltf, instances)
-        })
-        .collect();
 }
 
-/// `PrimitiveInstanceGroup`: the mugshot's `__primitive_<colour>` kinds are
-/// plain 2 m boxes the size of their colliders, with no catalog entry.
-pub(crate) fn spawn_primitives(
-    mut commands: Commands,
+/// Registers a ready-made cuboid model for each `__primitive_<colour>` kind the instances use.
+pub(crate) fn register_primitives(
     scene: Res<WorldSceneData>,
+    mut kinds: ResMut<ObjectKinds>,
+    mut cuboid: Local<Option<Handle<Mesh>>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ObjectMaterial>>,
 ) {
+    for inst in &scene.objects.instances {
+        let Some(colour) = inst.kind_id.strip_prefix(PRIMITIVE_KIND_PREFIX) else {
+            continue;
+        };
+        if kinds.0.contains_key(&inst.kind_id) {
+            continue;
+        }
+        let mesh = cuboid
+            .get_or_insert_with(|| meshes.add(Cuboid::from_length(PRIMITIVE_BLOCK_SIZE)))
+            .clone();
+        let material = materials.add(ObjectMaterial {
+            // three.js's `MeshStandardMaterial` defaults.
+            base: StandardMaterial {
+                base_color: primitive_colour(colour).into(),
+                perceptual_roughness: 1.0,
+                ..default()
+            },
+            extension: HemisphereFill::new(&scene.lighting),
+        });
+        kinds.0.insert(
+            inst.kind_id.clone(),
+            KindModel {
+                kind: primitive_kind(&inst.kind_id),
+                gltf: None,
+                state: ModelState::Ready(Model {
+                    mesh,
+                    material,
+                    node_transform: Transform::IDENTITY,
+                }),
+            },
+        );
+    }
+}
+
+/// `PrimitiveInstanceGroup`: the mugshot's `__primitive_<colour>` kinds are
+/// plain 2 m boxes the size of their colliders.
+fn primitive_kind(id: &str) -> WorldObjectKind {
     let half = PRIMITIVE_BLOCK_SIZE / 2.0;
-    let kind = WorldObjectKind {
-        id: String::new(),
+    let corner = |v: f32| Xyz { x: v, y: v, z: v };
+    WorldObjectKind {
+        id: id.to_string(),
         gltf_path: String::new(),
         scale: 1.0,
         tint: None,
@@ -71,50 +191,75 @@ pub(crate) fn spawn_primitives(
         emissive_intensity: 0.0,
         dimensions: None,
         local_aabb: Some(LocalAabb {
-            min: Xyz {
-                x: -half,
-                y: -half,
-                z: -half,
-            },
-            max: Xyz {
-                x: half,
-                y: half,
-                z: half,
-            },
+            min: corner(-half),
+            max: corner(half),
         }),
-    };
-    let mesh = meshes.add(Cuboid::from_length(PRIMITIVE_BLOCK_SIZE));
-    for inst in &scene.objects.instances {
-        let Some(colour) = inst.kind_id.strip_prefix(PRIMITIVE_KIND_PREFIX) else {
+    }
+}
+
+fn primitive_colour(name: &str) -> Srgba {
+    match name {
+        "blue" => Srgba::rgb_u8(0x3b, 0x6b, 0xf2),
+        "stone" => Srgba::rgb_u8(0xa8, 0xa8, 0xa8),
+        _ => Srgba::rgb_u8(0xff, 0x00, 0xff),
+    }
+}
+
+/// Diffs the scene's instances against the entities by object id: spawns
+/// the new, despawns the gone, and re-poses or re-kinds the changed.
+/// Instances of an unknown kind are left out.
+pub(crate) fn sync_objects(
+    mut commands: Commands,
+    scene: Res<WorldSceneData>,
+    kinds: Res<ObjectKinds>,
+    mut index: ResMut<ObjectIndex>,
+    mut objects: Query<(&mut Placed, Option<&mut Transform>)>,
+) {
+    let mut wanted: HashMap<&str, &ObjectInstance> = HashMap::new();
+    for inst in scene
+        .objects
+        .instances
+        .iter()
+        .filter(|i| kinds.0.contains_key(&i.kind_id))
+    {
+        if wanted.insert(inst.id.as_str(), inst).is_some() {
+            warn!("duplicate object id {}", inst.id);
+        }
+    }
+    index.0.retain(|id, entity| {
+        let keep = wanted.contains_key(id.as_str());
+        if !keep {
+            commands.entity(*entity).despawn();
+        }
+        keep
+    });
+    for (id, inst) in wanted {
+        let Some(&entity) = index.0.get(id) else {
+            let entity = commands.spawn(Placed(inst.clone())).id();
+            index.0.insert(id.to_string(), entity);
             continue;
         };
-        let base_color = match colour {
-            "blue" => Srgba::rgb_u8(0x3b, 0x6b, 0xf2),
-            "stone" => Srgba::rgb_u8(0xa8, 0xa8, 0xa8),
-            _ => Srgba::rgb_u8(0xff, 0x00, 0xff),
+        let Ok((mut placed, transform)) = objects.get_mut(entity) else {
+            continue;
         };
-        let material = materials.add(ObjectMaterial {
-            // three.js's `MeshStandardMaterial` defaults.
-            base: StandardMaterial {
-                base_color: base_color.into(),
-                perceptual_roughness: 1.0,
-                ..default()
-            },
-            extension: HemisphereFill::new(&scene.lighting),
-        });
-        commands.spawn((
-            SceneEntity,
-            Mesh3d(mesh.clone()),
-            MeshMaterial3d(material),
-            mesh_transform(inst, &kind),
-        ));
+        if placed.0 == *inst {
+            continue;
+        }
+        let same_kind = placed.0.kind_id == inst.kind_id;
+        placed.0 = inst.clone();
+        if !same_kind {
+            commands
+                .entity(entity)
+                .remove::<(Mesh3d, MeshMaterial3d<ObjectMaterial>)>();
+        } else if let (Some(mut transform), Some((_, moved))) = (transform, kinds.placed(inst)) {
+            *transform = moved;
+        }
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn spawn_loaded_kinds(
-    mut commands: Commands,
-    mut pending: ResMut<PendingKinds>,
+pub(crate) fn load_kinds(
+    mut kinds: ResMut<ObjectKinds>,
     scene: Res<WorldSceneData>,
     assets: Res<AssetServer>,
     gltfs: Res<Assets<Gltf>>,
@@ -123,35 +268,61 @@ pub(crate) fn spawn_loaded_kinds(
     gltf_materials: Res<Assets<GltfMaterial>>,
     mut materials: ResMut<Assets<ObjectMaterial>>,
 ) {
-    pending.0.retain(|(kind, handle, instances)| {
-        if assets.load_state(handle).is_failed() {
-            // A kind whose model fails to load is left out.
-            return false;
+    if !kinds.is_loading() {
+        return;
+    }
+    for model in kinds.0.values_mut() {
+        let Some(handle) = model
+            .gltf
+            .clone()
+            .filter(|_| matches!(model.state, ModelState::Loading))
+        else {
+            continue;
+        };
+        if assets.load_state(&handle).is_failed()
+            || assets.recursive_dependency_load_state(&handle).is_failed()
+        {
+            model.state = ModelState::Failed;
+            continue;
         }
-        if !assets.is_loaded_with_dependencies(handle) {
-            return true;
+        if !assets.is_loaded_with_dependencies(&handle) {
+            continue;
         }
         let Some((node_transform, primitive)) = gltfs
-            .get(handle)
+            .get(&handle)
             .and_then(|g| mesh_primitives(g, &nodes, &gltf_meshes).into_iter().next())
         else {
-            warn!("no mesh in {}", kind.gltf_path);
-            return false;
+            warn!("no mesh in {}", model.kind.gltf_path);
+            model.state = ModelState::Failed;
+            continue;
         };
         let material = materials.add(ObjectMaterial {
-            base: apply_overrides(standard_material(&primitive, &gltf_materials), kind),
+            base: apply_overrides(standard_material(&primitive, &gltf_materials), &model.kind),
             extension: HemisphereFill::new(&scene.lighting),
         });
-        for inst in instances {
-            commands.spawn((
-                SceneEntity,
-                Mesh3d(primitive.mesh.clone()),
-                MeshMaterial3d(material.clone()),
-                mesh_transform(inst, kind).mul_transform(node_transform),
+        model.state = ModelState::Ready(Model {
+            mesh: primitive.mesh,
+            material,
+            node_transform,
+        });
+    }
+}
+
+/// Draws every object whose model is ready and which isn't drawn yet.
+pub(crate) fn attach_models(
+    mut commands: Commands,
+    kinds: Res<ObjectKinds>,
+    undrawn: Query<(Entity, &Placed), Without<Mesh3d>>,
+) {
+    for (entity, placed) in &undrawn {
+        if let Some((model, transform)) = kinds.placed(&placed.0) {
+            commands.entity(entity).insert((
+                Mesh3d(model.mesh.clone()),
+                MeshMaterial3d(model.material.clone()),
+                transform,
             ));
         }
-        false
-    });
+    }
 }
 
 /// Every mesh primitive in scene-traversal order, with its node's

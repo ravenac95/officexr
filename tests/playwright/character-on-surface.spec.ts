@@ -6,7 +6,7 @@
  *
  * Goal: pin "character actually stands ON the cube surface" as a
  * regression target. The scene reuses the exact same `<Scene>` and
- * `<MapColliders>` Debug uses; the only behavioral knob is the new
+ * `SimCore` colliders Debug uses; the only behavioral knob is the new
  * `paused` prop which disables the AnimationMixer. If the character
  * placement math regresses (feet sink into the floor, hover too
  * high, etc.), the diff highlights the foot region and the test

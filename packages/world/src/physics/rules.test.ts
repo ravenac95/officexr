@@ -60,7 +60,7 @@ describe('physics/rules', () => {
 
     it('uses spawn-point y as the floor when there are no cubes (baked-layout maps)', () => {
       // The booper map case: room is empty (instances=[]) because the
-      // platforms live in a baked GLB collided by `<BakedLayoutColliders>`.
+      // platforms live in a baked GLB collided via `useBakedColliders`.
       // Without the spawn-derived fallback, threshold would be -Infinity
       // and the backstop fall check would never fire.
       const w: WorldObjects = { cubeSize: 2, instances: [] };

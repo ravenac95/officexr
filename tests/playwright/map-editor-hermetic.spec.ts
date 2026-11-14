@@ -19,20 +19,6 @@ import {
   distinctColorsInCanvas,
 } from './helpers.ts';
 
-const ENVIRONMENT = {
-  sun: {
-    positionX: 20,
-    positionY: 40,
-    positionZ: 20,
-    color: '#ffffff',
-    intensity: 1.4,
-  },
-  sky: null,
-  stars: null,
-  hdri: null,
-  ambientIntensity: 0.15,
-};
-
 const blueBlock = (id: string, position: number[]) => ({
   id,
   op: 'placeObject',
@@ -60,7 +46,6 @@ const SEED = {
           { id: 'inst-c', roomName: 'baked-room', position: [0, 0, 8], rotationY: 0 },
         ],
         spawnPoints: [],
-        environment: ENVIRONMENT,
       },
     },
     {
@@ -72,7 +57,6 @@ const SEED = {
         updatedAt: 0,
         rooms: [],
         spawnPoints: [],
-        environment: ENVIRONMENT,
       },
     },
   ],

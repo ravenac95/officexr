@@ -79,7 +79,7 @@ export interface ScanCuboidsResult {
 
 /** Multiply a column-major affine mat4 by a point (w=1). glTF node
  * matrices are TRS-affine, so no perspective divide is needed. */
-function transformPoint(
+export function transformPoint(
   m: readonly number[],
   x: number,
   y: number,

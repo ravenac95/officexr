@@ -73,7 +73,7 @@ export interface BotDriverOptions {
   /** Optional collider-shape override lookup (typically
    * `(id) => api.catalog.getKind(id)?.colliderShape`). Threads through
    * to `BotPhysicsWorld` so compound-step staircase colliders mirror
-   * what `MapColliders` emits on the browser side. */
+   * what `SimCore`'s static colliders hold on the browser side. */
   colliderShape?: import('../physics/rules.ts').ColliderShapeLookup;
 }
 
@@ -152,12 +152,9 @@ export class BotDriver {
 
   async start(): Promise<void> {
     // Rapier's wasm has to be initialised before `new RAPIER.World(...)`.
-    // In Node (bots-cli) we do this once at process start; in the
-    // browser, `<Physics>` from `@react-three/rapier` may not have
-    // resolved its init by the time the Leva bot count slider has
-    // already kicked us off here. `RAPIER.init()` is idempotent and
-    // cheap on second call, so awaiting it inside start() guarantees
-    // the wasm is ready regardless of which path we came in through.
+    // `RAPIER.init()` is idempotent and cheap on second call, so awaiting
+    // it inside start() guarantees the wasm is ready regardless of which
+    // path we came in through.
     await RAPIER.init();
 
     const botId = this.botId;

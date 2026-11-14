@@ -4,7 +4,7 @@
  *
  * Three layers in this codebase:
  *   1. Application Layer (THIS FILE + ./catalog-service, ./geometry-service,
- *      ./room-service, ./bake-service, ./scene-service). Pure TypeScript.
+ *      ./room-service). Pure TypeScript.
  *      No React, no THREE, no DOM globals. Dependencies are injected via
  *      constructors / factory functions.
  *   2. UI Layer (React components in studio/ + renderer/). Reads from
@@ -38,12 +38,6 @@ export interface WorldAABB {
 export interface VoxelFootprint {
   readonly min: Vec3;
   readonly max: Vec3;
-}
-
-export interface KindDimensions {
-  readonly width: number;
-  readonly height: number;
-  readonly depth: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -145,78 +139,6 @@ export interface RoomService {
 }
 
 // ---------------------------------------------------------------------------
-// BakeService
-// ---------------------------------------------------------------------------
-
-/**
- * Measures a kind's bounding-box dimensions from its GLTF AABB. Used by
- * both the live "Recompute from GLTF" button AND the headless bake runner
- * so there is exactly ONE measurement code path.
- */
-export interface KindLocalAABB {
-  readonly min: Readonly<{ x: number; y: number; z: number }>;
-  readonly max: Readonly<{ x: number; y: number; z: number }>;
-}
-
-/** Combined per-kind measurement: extents (back-compat) PLUS the
- * local-coord AABB (so the geometry service can translate the GLTF's
- * varying origin convention to a uniform anchor-lower-left world AABB). */
-export interface KindMeasurement {
-  readonly width: number;
-  readonly height: number;
-  readonly depth: number;
-  readonly localAABB: KindLocalAABB;
-}
-
-export interface BakeService {
-  measureKind(id: string): Promise<KindDimensions>;
-  /** Returns the FULL local-coordinate AABB of the GLTF (post-scale).
-   * Used to verify the GLTF origin convention (bottom-center vs
-   * bottom-corner) so the renderer / wireframe coordinate convention
-   * matches what's actually drawn. */
-  measureKindLocalAABB(id: string): Promise<KindLocalAABB>;
-  /** Measure one kind, returning both extents and local AABB in one
-   * GLTF load. Used by the catalog bake to populate `kind.dimensions`
-   * + `kind.localAABB` together. */
-  measureKindFull(id: string): Promise<KindMeasurement>;
-  /** Measure all non-character kinds, returning the FULL measurement
-   * (extents + local AABB). Returns a Map keyed by kind id; kinds
-   * that fail to load resolve as `null`. */
-  measureAll(): Promise<Map<string, KindMeasurement | null>>;
-}
-
-// ---------------------------------------------------------------------------
-// SceneService
-// ---------------------------------------------------------------------------
-
-export interface CameraPose {
-  readonly target: Vec3;
-  /** Spherical orbit coords (radians for azimuth/elevation; metres for distance). */
-  readonly azimuth: number;
-  readonly elevation: number;
-  readonly distance: number;
-}
-
-export interface ProgrammaticScene {
-  readonly id: string;
-  readonly instances: readonly ObjectInstance[];
-  readonly camera: CameraPose;
-  /** Source-command ids that should be marked as selected — drives the
-   * selection wireframe in visual regression tests. */
-  readonly selection: ReadonlySet<string>;
-}
-
-/**
- * Static lookup of named scenes used by visual regression tests. Pure;
- * no state. Lives in the application layer so the headless harness and
- * future automated tooling can render the exact same scenes.
- */
-export interface SceneService {
-  list(): readonly string[];
-  load(id: string): ProgrammaticScene;
-}
-
-// ---------------------------------------------------------------------------
 // ApplicationApi — the umbrella the UI + headless layers consume
 // ---------------------------------------------------------------------------
 
@@ -225,6 +147,4 @@ export interface ApplicationApi {
   readonly catalog: CatalogService;
   readonly geometry: InstanceGeometryService;
   readonly rooms: RoomService;
-  readonly bake: BakeService;
-  readonly scenes: SceneService;
 }

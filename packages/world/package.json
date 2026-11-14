@@ -35,7 +35,6 @@
     "bake:dimensions": "tsx scripts/bake-kind-dimensions.ts",
     "bake:layout": "tsx scripts/bake-layout.ts",
     "export:render-scene": "tsx scripts/export-render-scene.ts",
-    "test:bounds-visual": "tsx scripts/test-bounds-visual.ts",
     "scan:colliders": "tsx scripts/scan-kind-colliders.ts"
   },
   "dependencies": {
@@ -48,8 +47,6 @@
     "@officexr/sim-wasm": "workspace:*",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.1",
-    "@react-three/rapier": "^2.2.0",
-    "@react-three/xr": "^6.6.32",
     "meshoptimizer": "^1.1.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
@@ -59,14 +56,11 @@
   "devDependencies": {
     "@testing-library/react": "^16.1.0",
     "@types/node": "^22.7.5",
-    "@types/pngjs": "^6.0.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.182.0",
     "jsdom": "^25.0.1",
-    "pixelmatch": "^7.1.0",
     "playwright": "^1.59.1",
-    "pngjs": "^7.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5",
     "vite": "^6",

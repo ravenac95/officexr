@@ -50,6 +50,10 @@ export class WasmSimCore implements SimCore {
     return this.sim.position();
   }
 
+  standingAt(feet: Vec3, charRadius: number): boolean {
+    return this.sim.standingAt(feet, charRadius);
+  }
+
   teleport(pos: Vec3): void {
     this.sim.teleport(pos);
   }

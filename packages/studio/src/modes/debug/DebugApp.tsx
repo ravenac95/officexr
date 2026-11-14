@@ -90,7 +90,7 @@ export function DebugApp() {
   // Collider-shape override lookup from the catalog. Threaded into
   // useStackSwitcher → BotPool → BotPhysicsWorld so compound-step
   // staircase colliders in the bot's private Rapier world mirror what
-  // MapColliders emits on the browser side (one source of truth for
+  // SimCore's static colliders hold (one source of truth for
   // staircase physics topology).
   const colliderShape = useCallback(
     (kindId: string) => catalog.getKind(kindId)?.colliderShape,

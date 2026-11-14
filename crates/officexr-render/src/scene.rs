@@ -22,7 +22,7 @@ pub struct WorldSceneData {
 }
 
 /// One room placement of a baked layout GLB.
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct BakedLayoutPlacement {
     pub gltf_path: String,
@@ -32,7 +32,7 @@ pub struct BakedLayoutPlacement {
     pub rotation_y: i32,
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct WorldObjectKind {
     pub id: String,
@@ -52,20 +52,20 @@ pub struct WorldObjectKind {
     pub local_aabb: Option<LocalAabb>,
 }
 
-#[derive(Deserialize, Clone, Copy, Debug)]
+#[derive(Deserialize, Clone, Copy, PartialEq, Debug)]
 pub struct Dimensions {
     pub width: f32,
     pub height: f32,
     pub depth: f32,
 }
 
-#[derive(Deserialize, Clone, Copy, Debug)]
+#[derive(Deserialize, Clone, Copy, PartialEq, Debug)]
 pub struct LocalAabb {
     pub min: Xyz,
     pub max: Xyz,
 }
 
-#[derive(Deserialize, Clone, Copy, Debug)]
+#[derive(Deserialize, Clone, Copy, PartialEq, Debug)]
 pub struct Xyz {
     pub x: f32,
     pub y: f32,
@@ -83,7 +83,7 @@ pub struct WorldObjects {
     pub instances: Vec<ObjectInstance>,
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectInstance {
     pub id: String,
@@ -102,7 +102,7 @@ pub enum AuxLightType {
     Point,
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct LightingConfig {
     pub sun_position: [f32; 3],
@@ -128,7 +128,7 @@ pub struct LightingConfig {
     pub ambient_fill_intensity: f32,
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct BackgroundConfig {
     #[serde(deserialize_with = "hex")]

@@ -41,8 +41,8 @@ interface BuildStackCommonOpts {
    * back to the legacy one-voxel-cube collider path. */
   instanceAABB?: import('@officexr/world').InstanceAABBLookup;
   /** Optional collider-shape override lookup. Threaded into the in-browser
-   * BotPool so compound-step staircase colliders mirror what MapColliders
-   * emits on the browser side. Studio's DebugApp passes
+   * BotPool so compound-step staircase colliders mirror what `SimCore`'s
+   * static colliders hold. Studio's DebugApp passes
    * `(id) => api.catalog.getKind(id)?.colliderShape`. */
   colliderShape?: import('@officexr/world').ColliderShapeLookup;
 }

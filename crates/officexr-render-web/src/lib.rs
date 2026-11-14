@@ -13,8 +13,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use bevy::asset::AssetMetaCheck;
 use bevy::prelude::*;
 use officexr_render::{
-    AssetBase, AvatarBound, OfficeXrRenderPlugin, PendingKinds, PendingLayouts, PlayerRender,
-    Players, SceneCamera, WorldSceneData, mugshot_player,
+    AssetBase, AvatarBound, LayoutIndex, ObjectKinds, OfficeXrRenderPlugin, PlayerRender, Players,
+    SceneCamera, WorldSceneData, mugshot_player,
 };
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
@@ -171,14 +171,14 @@ fn drain_inbox(mut commands: Commands, mut players: ResMut<Players>) {
 fn track_ready(
     mut settled: Local<u32>,
     scene: Option<Res<WorldSceneData>>,
-    kinds: Res<PendingKinds>,
-    layouts: Res<PendingLayouts>,
+    kinds: Res<ObjectKinds>,
+    layouts: Res<LayoutIndex>,
     players: Res<Players>,
     bound: Query<(), With<AvatarBound>>,
 ) {
     let loaded = scene.is_some_and(|s| !s.is_changed())
-        && kinds.is_empty()
-        && layouts.is_empty()
+        && !kinds.is_loading()
+        && !layouts.is_loading()
         && bound.iter().len() == players.players.len();
     *settled = if loaded { *settled + 1 } else { 0 };
     if *settled == SETTLE_FRAMES {

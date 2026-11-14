@@ -25,7 +25,7 @@ import {
 } from './cube-material.ts';
 // Single source of truth for the primitive-box diagnostic: the prefix
 // + 2 m size live in the geometry service so the collider it derives
-// (MapColliders → worldAABB) matches the box this file renders.
+// (`worldObjectsToColliders` → worldAABB) matches the box this file renders.
 import {
   PRIMITIVE_KIND_PREFIX,
   PRIMITIVE_BLOCK_SIZE,

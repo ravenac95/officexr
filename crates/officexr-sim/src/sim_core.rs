@@ -18,9 +18,12 @@ use crate::physics::rules::{
     GRAVITY, pick_respawn_position, respawn_threshold, should_respawn_falling,
     world_objects_to_colliders,
 };
-use crate::physics::step_up::try_step_up;
+use crate::physics::step_up::{STEP_UP_MAX_HEIGHT, try_step_up};
 use crate::proximity::{PairTracker, ProximityInput, TrackerOutput};
 use crate::world_objects::{Vec3, WorldObjects};
+
+/// Lifts the standing probe off the ground so the ground itself doesn't count as an obstacle.
+const STANDING_FLOOR_GAP: f64 = 0.05;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -250,6 +253,34 @@ impl SimCore {
     pub fn position(&self) -> Vec3 {
         let t = self.world.bodies[self.body].translation();
         Vec3::from_rapier(t)
+    }
+
+    /// Whether a standing body ball at `feet` touches no solid collider but the player's own.
+    /// The ball stands on whatever ground lies within a step of `feet`, since a chair's
+    /// footprint can start below a floor slab's top: probing from `feet` itself would
+    /// bury the ball in the floor and call every spot blocked.
+    pub fn standing_at(&self, feet: Vec3, char_radius: f64) -> bool {
+        // ponytail: an obstacle no taller than a step reads as ground, so a spot on a low table counts as free.
+        let from = Vec3 {
+            y: feet.y + STEP_UP_MAX_HEIGHT,
+            ..feet
+        };
+        let ground = self
+            .world
+            .cast_ray_toi(
+                from,
+                -Vector::y(),
+                2.0 * STEP_UP_MAX_HEIGHT,
+                Some(self.body),
+            )
+            .map_or(feet.y, |toi| from.y - toi);
+        let centre = Vec3 {
+            y: ground + char_radius + STANDING_FLOOR_GAP,
+            ..feet
+        };
+        !self
+            .world
+            .ball_intersects(centre, char_radius, Some(self.body))
     }
 
     /// Moves the player to `pos` and clears its fall and jump state.
