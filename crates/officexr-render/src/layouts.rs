@@ -7,6 +7,7 @@ use bevy::prelude::*;
 use crate::AssetBase;
 use crate::lighting::{HemisphereFill, ObjectMaterial};
 use crate::objects::{mesh_primitives, standard_material};
+use crate::picking::PickTarget;
 use crate::placement::baked_layout_transform;
 use crate::scene::{BakedLayoutPlacement, WorldSceneData};
 use crate::views::ViewScene;
@@ -98,7 +99,9 @@ fn sync_view_layouts(
             if let LayoutState::Spawned(entities) = &layout.state {
                 let root = baked_layout_transform(p);
                 for (entity, local) in entities {
-                    commands.entity(*entity).insert(root.mul_transform(*local));
+                    commands
+                        .entity(*entity)
+                        .insert((root.mul_transform(*local), pick_target(p)));
                 }
             }
             layout.placement = p.clone();
@@ -111,6 +114,13 @@ fn sync_view_layouts(
                 commands.entity(entity).despawn();
             }
         }
+    }
+}
+
+fn pick_target(p: &BakedLayoutPlacement) -> PickTarget {
+    PickTarget::Layout {
+        name: p.layout_name.clone(),
+        room_instance_id: p.room_instance_id.clone(),
     }
 }
 
@@ -157,6 +167,7 @@ pub(crate) fn spawn_loaded_layouts(
                             Mesh3d(primitive.mesh),
                             MeshMaterial3d(material),
                             root.mul_transform(node_transform),
+                            pick_target(&layout.placement),
                             ChildOf(view),
                         ))
                         .id();
