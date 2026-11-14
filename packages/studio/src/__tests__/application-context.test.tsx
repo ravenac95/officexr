@@ -23,7 +23,6 @@ import {
   createCatalogService,
   createInstanceGeometry,
   createRoomService,
-  createBakeService,
   createSceneService,
   type ApplicationApi,
 } from '@officexr/world/app';
@@ -74,10 +73,6 @@ function makeApi(kinds: WorldObjectKind[]): ApplicationApi {
     catalog,
     geometry,
     rooms: createRoomService({ geometry }),
-    bake: createBakeService({
-      catalog,
-      loadGltf: () => Promise.reject(new Error('not used in this test')),
-    }),
     scenes: createSceneService(),
   };
 }

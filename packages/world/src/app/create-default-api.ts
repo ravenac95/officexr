@@ -13,7 +13,6 @@ import { VOXEL_SIZE } from '../renderer/config.ts';
 import { createCatalogService } from './catalog-service.ts';
 import { createInstanceGeometry } from './geometry-service.ts';
 import { createRoomService } from './room-service.ts';
-import { createBakeService, type GltfLoader } from './bake-service.ts';
 import { createSceneService } from './scene-service.ts';
 import type { ApplicationApi } from './types.ts';
 
@@ -21,12 +20,6 @@ export interface CreateDefaultApiOptions {
   voxelSize?: number;
   apiPath?: string;
   fetcher?: (url: string) => Promise<Response>;
-  /** GLTF loader the BakeService uses. The UI wires drei's `useGLTF`
-   * here; Node-side tooling can wire a different loader (e.g. a JSDom
-   * wrapper around three's GLTFLoader). When omitted the BakeService
-   * will throw on use — that's intentional, you must opt in to bake
-   * functionality by providing a loader. */
-  loadGltf?: GltfLoader;
 }
 
 export function createDefaultApi(
@@ -41,17 +34,7 @@ export function createDefaultApi(
   });
   const geometry = createInstanceGeometry({ catalog, voxelSize });
   const rooms = createRoomService({ geometry });
-  const bake = createBakeService({
-    catalog,
-    loadGltf:
-      opts.loadGltf ??
-      (() => {
-        throw new Error(
-          'BakeService: no GltfLoader was provided. Pass `loadGltf` to createDefaultApi() to enable bake functionality.',
-        );
-      }),
-  });
   const scenes = createSceneService();
 
-  return { voxelSize, catalog, geometry, rooms, bake, scenes };
+  return { voxelSize, catalog, geometry, rooms, scenes };
 }

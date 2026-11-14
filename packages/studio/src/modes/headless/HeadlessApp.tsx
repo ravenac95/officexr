@@ -1,8 +1,6 @@
 import React, { useEffect } from 'react';
 import { useApplication } from '@officexr/world/react';
-import { BakeRunner } from './BakeRunner.tsx';
 import { BevyPage } from './BevyPage.tsx';
-import { BoundsScene } from './BoundsScene.tsx';
 import { RenderPage } from './RenderPage.tsx';
 
 /**
@@ -15,7 +13,7 @@ import { RenderPage } from './RenderPage.tsx';
  * ApplicationApi object. Drivers call methods on it via
  * `page.evaluate` rather than scraping the DOM.
  */
-export function HeadlessApp({ op, sceneId }: { op: string; sceneId?: string }) {
+export function HeadlessApp({ op }: { op: string }) {
   const api = useApplication();
 
   // Single Playwright bridge: expose the api itself. Drivers reach
@@ -28,12 +26,6 @@ export function HeadlessApp({ op, sceneId }: { op: string; sceneId?: string }) {
     };
   }, [api]);
 
-  if (op === 'bake') {
-    return <BakeRunner />;
-  }
-  if (op === 'bounds-scene') {
-    return <BoundsScene sceneId={sceneId ?? 'blue-and-large-a'} />;
-  }
   if (op === 'render') {
     return <RenderPage />;
   }
@@ -52,7 +44,7 @@ export function HeadlessApp({ op, sceneId }: { op: string; sceneId?: string }) {
       }}
     >
       <h1>Unknown headless op</h1>
-      <p>Got `?op={op}`. Known: bake, bounds-scene, render, bevy.</p>
+      <p>Got `?op={op}`. Known: render, bevy.</p>
     </div>
   );
 }
