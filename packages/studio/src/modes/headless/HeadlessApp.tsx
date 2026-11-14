@@ -6,8 +6,8 @@ import { RenderPage } from './RenderPage.tsx';
 /**
  * Headless test harness. Routed by App when `?op=...` is present in
  * the URL. Mounts the operation-specific component inside the same
- * ApplicationProvider the regular UI uses, so the bake / visual
- * scenes consume the SAME application api.
+ * ApplicationProvider the regular UI uses, so the operation consumes
+ * the SAME application api.
  *
  * Single bridge to Playwright: `window.officexrApi` holds the live
  * ApplicationApi object. Drivers call methods on it via
@@ -17,7 +17,7 @@ export function HeadlessApp({ op }: { op: string }) {
   const api = useApplication();
 
   // Single Playwright bridge: expose the api itself. Drivers reach
-  // every service (catalog, bake, scenes, …) through this getter.
+  // every service (catalog, geometry, rooms) through this getter.
   useEffect(() => {
     const w = window as unknown as { officexrApi?: typeof api };
     w.officexrApi = api;

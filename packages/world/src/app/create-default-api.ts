@@ -13,7 +13,6 @@ import { VOXEL_SIZE } from '../renderer/config.ts';
 import { createCatalogService } from './catalog-service.ts';
 import { createInstanceGeometry } from './geometry-service.ts';
 import { createRoomService } from './room-service.ts';
-import { createSceneService } from './scene-service.ts';
 import type { ApplicationApi } from './types.ts';
 
 export interface CreateDefaultApiOptions {
@@ -34,7 +33,6 @@ export function createDefaultApi(
   });
   const geometry = createInstanceGeometry({ catalog, voxelSize });
   const rooms = createRoomService({ geometry });
-  const scenes = createSceneService();
 
-  return { voxelSize, catalog, geometry, rooms, scenes };
+  return { voxelSize, catalog, geometry, rooms };
 }

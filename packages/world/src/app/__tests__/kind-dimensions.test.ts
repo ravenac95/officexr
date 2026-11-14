@@ -1,3 +1,4 @@
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Document, NodeIO } from '@gltf-transform/core';
@@ -5,6 +6,9 @@ import { describe, expect, it } from 'vitest';
 import { measureKindDocument } from '../kind-dimensions.ts';
 
 const MODELS = fileURLToPath(new URL('../../../../studio/public/models', import.meta.url));
+
+type Dims = { width: number; height: number; depth: number };
+type Box = ReturnType<typeof measureKindDocument>['localAABB'];
 
 function boxMesh(doc: Document, half: number) {
   const buffer = doc.getRoot().listBuffers()[0] ?? doc.createBuffer();
@@ -17,12 +21,21 @@ function boxMesh(doc: Document, half: number) {
 }
 
 describe('measureKindDocument', () => {
-  it('measures a bundled kind model', async () => {
+  it('matches the committed catalog entry for a bundled kind', async () => {
+    const catalog = JSON.parse(await fs.readFile(path.join(MODELS, '../../../world/world-object-kinds.json'), 'utf-8')) as {
+      kinds: Array<{ id: string; scale: number; dimensions: Dims; localAABB: Box }>;
+    };
+    const kind = catalog.kinds.find((k) => k.id === 'colored_block_blue')!;
     const doc = await new NodeIO().read(path.join(MODELS, 'blocks/colored_block_blue.gltf'));
-    const m = measureKindDocument(doc, 1);
-    expect(m.width).toBeCloseTo(2, 4);
-    expect(m.localAABB.min.y).toBeCloseTo(-1, 4);
-    expect(m.localAABB.max.x).toBeCloseTo(1, 4);
+    const { localAABB, ...dimensions } = measureKindDocument(doc, kind.scale);
+    for (const key of ['width', 'height', 'depth'] as const) {
+      expect(dimensions[key]).toBeCloseTo(kind.dimensions[key], 4);
+    }
+    for (const end of ['min', 'max'] as const) {
+      for (const axis of ['x', 'y', 'z'] as const) {
+        expect(localAABB[end][axis]).toBeCloseTo(kind.localAABB[end][axis], 4);
+      }
+    }
   });
 
   it('uses only the first mesh, through its world transform and the kind scale', () => {

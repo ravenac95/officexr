@@ -1,12 +1,9 @@
 export type {
   ApplicationApi,
-  CameraPose,
   CatalogService,
   InstanceGeometryService,
   MeshTransform,
-  ProgrammaticScene,
   RoomService,
-  SceneService,
   Vec3,
   VoxelFootprint,
   WorldAABB,
@@ -18,8 +15,6 @@ export type { CreateCatalogServiceOptions } from './catalog-service.ts';
 export { createInstanceGeometry, seatPoseOf } from './geometry-service.ts';
 
 export { createRoomService } from './room-service.ts';
-
-export { createSceneService } from './scene-service.ts';
 
 export { bakeLayout } from './layout-bake-service.ts';
 export { compressDocument, registerCompressionCodecs } from './glb-compression.ts';

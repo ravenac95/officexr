@@ -28,7 +28,6 @@ import {
   createCatalogService,
   createInstanceGeometry,
   createRoomService,
-  createSceneService,
   type ApplicationApi,
 } from '@officexr/world/app';
 import type {
@@ -79,7 +78,6 @@ function makeApi(): ApplicationApi {
     catalog,
     geometry,
     rooms: createRoomService({ geometry }),
-    scenes: createSceneService(),
   };
 }
 
