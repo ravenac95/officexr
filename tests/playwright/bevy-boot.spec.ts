@@ -64,7 +64,8 @@ test('op=bevy&pick=1 reports a click on the canvas centre', async ({ page }) => 
     { timeout: 170_000 },
   );
   await Promise.race([ready, pageError]);
-  const box = (await page.locator('#bevy-canvas').boundingBox())!;
+  // Read off the DOM: locator geometry waits on a compositor frame, too slow under SwiftShader.
+  const box = await page.evaluate(() => document.querySelector('#bevy-canvas')!.getBoundingClientRect().toJSON() as DOMRect);
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   const clicks = () =>
     page.evaluate(
