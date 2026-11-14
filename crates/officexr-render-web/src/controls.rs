@@ -103,11 +103,27 @@ pub fn set_camera_config(id: ViewId, config: JsValue) -> Result<(), JsError> {
     with(id, |c| c.config = config)
 }
 
-/// The point `[x, y, z]` the orbit camera turns around, moved to at once.
-#[wasm_bindgen(js_name = setOrbitTarget)]
-pub fn set_orbit_target(id: ViewId, point: JsValue) -> Result<(), JsError> {
-    let point: [f32; 3] = from_js(point)?;
-    with(id, |c| c.set_orbit_target(point.into()))
+/// Fields left out keep their current values.
+#[derive(Deserialize)]
+struct OrbitPose {
+    target: Option<[f32; 3]>,
+    azimuth: Option<f32>,
+    elevation: Option<f32>,
+    distance: Option<f32>,
+}
+
+/// Moves the orbit camera at once, within the config's limits.
+#[wasm_bindgen(js_name = setOrbit)]
+pub fn set_orbit(id: ViewId, pose: JsValue) -> Result<(), JsError> {
+    let pose: OrbitPose = from_js(pose)?;
+    with(id, |c| {
+        c.set_orbit(|orbit| {
+            orbit.target = pose.target.map_or(orbit.target, Vec3::from);
+            orbit.azimuth = pose.azimuth.unwrap_or(orbit.azimuth);
+            orbit.elevation = pose.elevation.unwrap_or(orbit.elevation);
+            orbit.distance = pose.distance.unwrap_or(orbit.distance);
+        });
+    })
 }
 
 #[derive(Deserialize)]

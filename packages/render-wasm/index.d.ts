@@ -123,8 +123,15 @@ export interface RendererModule {
   setConversationFocus(id: ViewId, point: [number, number, number] | null): void;
   /** Replaces the view's camera settings. */
   setCameraConfig(id: ViewId, config: CameraConfig): void;
-  /** The point the orbit camera turns around, moved to at once. */
-  setOrbitTarget(id: ViewId, point: [number, number, number]): void;
+  /**
+   * Moves the orbit camera at once, within the config's limits; a field left out keeps its value.
+   * The camera sits `distance` from `target` toward `azimuth` (its look yaw, radians) and
+   * `elevation` (radians, positive above the target), as the studio editors' orbit refs do.
+   */
+  setOrbit(
+    id: ViewId,
+    pose: { target?: [number, number, number]; azimuth?: number; elevation?: number; distance?: number },
+  ): void;
   /** Fits the orbit camera to the box, keeping its angles, for previews and "focus selection". */
   frameBounds(id: ViewId, aabb: { min: [number, number, number]; max: [number, number, number] }): void;
   /** Drive from `useWorldFocus` and `isTypingTarget`: off, keys and the mouse are ignored. */

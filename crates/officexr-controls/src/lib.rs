@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 
 pub use config::{CameraConfig, FixedCamera, OrbitCamera, RotateButton};
 use look::{
-    Drag, Look, MOUSE_SENSITIVITY, apply_look_delta, apply_zoom, dom_wheel_delta, drag_for,
+    Drag, Look, MOUSE_SENSITIVITY, Orbit, apply_look_delta, apply_zoom, dom_wheel_delta, drag_for,
     fixed_movement_yaw, is_look_mode, is_yaw_pitch_mode, wheel_zoom_factor,
 };
 use rig::{FlyKeys, Rig};
@@ -121,8 +121,13 @@ impl Controls {
         self.yaw
     }
 
-    pub fn set_orbit_target(&mut self, target: Vec3) {
-        self.rig.place_orbit(|orbit| orbit.target = target);
+    /// Moves the orbit camera at once, without easing, within the config's limits.
+    pub fn set_orbit(&mut self, place: impl FnOnce(&mut Orbit)) {
+        let config = &self.config.orbit;
+        self.rig.place_orbit(|orbit| {
+            place(orbit);
+            *orbit = orbit.clamped(config);
+        });
     }
 
     /// Points the orbit camera at the box from `min` to `max` and backs it
@@ -873,5 +878,35 @@ mod tests {
         app.update();
         let camera = camera(&mut app, id);
         assert!((Vec3::from(camera.look_at) - Vec3::new(10.0, 1.0, 10.0)).length() < 1e-4);
+    }
+
+    #[test]
+    fn set_orbit_places_the_editor_camera_at_once_within_the_limits() {
+        let (mut app, id) = app();
+        let (target, eye) = (Vec3::new(0.0, 0.5, 0.0), Vec3::new(2.5, 2.0, 2.5));
+        controls(&app, id, |c| {
+            c.mode = CameraMode::Orbit;
+            c.config.orbit = OrbitCamera {
+                min_distance: 1.5,
+                max_distance: 40.0,
+                damping_secs: 0.33,
+                ..OrbitCamera::default()
+            };
+            c.set_orbit(|orbit| *orbit = Orbit::from_eye(target, eye));
+        });
+        app.update();
+        let camera = camera(&mut app, id);
+        assert!((Vec3::from(camera.position) - eye).length() < 1e-4);
+        assert!((Vec3::from(camera.look_at) - target).length() < 1e-4);
+
+        let orbit = controls(&app, id, |c| {
+            c.set_orbit(|orbit| {
+                orbit.elevation = 0.7;
+                orbit.distance = 60.0;
+            });
+            c.rig.orbit
+        });
+        assert_eq!(orbit.target, target);
+        assert_eq!((orbit.elevation, orbit.distance), (0.7, 40.0));
     }
 }

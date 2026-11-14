@@ -372,6 +372,17 @@ impl Orbit {
         *self = self.clamped(config);
     }
 
+    /// The orbit that puts the camera at `eye`, looking at `target`.
+    pub fn from_eye(target: Vec3, eye: Vec3) -> Self {
+        let back = eye - target;
+        Self {
+            target,
+            azimuth: back.x.atan2(back.z),
+            elevation: back.y.atan2(Vec2::new(back.x, back.z).length()),
+            distance: back.length(),
+        }
+    }
+
     /// `t` of the way to `goal`.
     pub fn eased_toward(self, goal: Self, t: f32) -> Self {
         let lerp = |a: f32, b: f32| a + (b - a) * t;
@@ -838,5 +849,20 @@ mod tests {
         let mut orbit = start;
         orbit.fly(Vec3::new(-1.0, 1.0, 0.0), 0.5);
         close3(orbit.target, ts_right * -36.0 + Vec3::Y * 36.0);
+    }
+
+    #[test]
+    fn an_eye_and_target_round_trip_through_the_orbit() {
+        // `ObjectPreviewCanvas`'s `EditorCamera`.
+        let (target, eye) = (Vec3::new(0.0, 0.5, 0.0), Vec3::new(2.5, 2.0, 2.5));
+        let orbit = Orbit::from_eye(target, eye);
+        close3(orbit.position(), eye);
+        close(orbit.azimuth, PI / 4.0);
+        close(orbit.distance, 14.75f32.sqrt());
+        for eye in [Vec3::new(-3.0, -1.0, 0.5), Vec3::new(0.0, 4.0, -7.0)] {
+            close3(Orbit::from_eye(target, eye).position(), eye);
+        }
+        let degenerate = Orbit::from_eye(target, target);
+        assert!(degenerate.azimuth.is_finite() && degenerate.elevation.is_finite());
     }
 }
