@@ -79,7 +79,6 @@ interface SceneFrameProps {
   isAirborneRef: React.MutableRefObject<boolean>;
 }
 
-
 const ARROW_KEYS = new Set([
   'ArrowUp',
   'ArrowDown',

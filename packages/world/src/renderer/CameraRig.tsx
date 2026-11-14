@@ -122,7 +122,6 @@ export function CameraRig({
   );
   const lookSign = invertLook ? 1 : -1;
   useTouchCameraGestures(mode, lookRefs, lookSign, paused);
-  // The headset owns the camera while presenting; motion look re-baselines after.
   useMotionLook(motionLook, mode, lookRefs);
   const onMouseLook = useEffectEvent((e: MouseEvent) =>
     applyLookDelta(
