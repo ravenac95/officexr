@@ -1,6 +1,7 @@
-//! A GLB -> GLB transform that expands `EXT_meshopt_compression` buffer views
-//! and turns quantized vertex attributes into floats, so `bevy_gltf` (which
-//! reads neither extension) can load files compressed with gltf-transform.
+//! Rewrites a GLB, or a JSON `.gltf` with external buffers, into a plain GLB:
+//! it expands `EXT_meshopt_compression` buffer views and turns quantized vertex
+//! attributes into floats, so `bevy_gltf` (which reads neither extension) can
+//! load files compressed with gltf-transform.
 //!
 //! The input is untrusted network data: every malformed shape must come back
 //! as an `Err`, never a panic, because a panic takes the wasm app down.
@@ -14,6 +15,7 @@ use bevy::reflect::TypePath;
 use meshopt_rs::index::buffer::decode_index_buffer;
 use meshopt_rs::vertex::buffer::decode_vertex_buffer;
 use meshopt_rs::vertex::filter;
+use percent_encoding::percent_decode_str;
 use serde_json::{Value, json};
 
 const MESHOPT: &str = "EXT_meshopt_compression";
@@ -24,33 +26,57 @@ const BIN_CHUNK: u32 = 0x004E_4942;
 const FLOAT: u64 = 5126;
 const ARRAY_BUFFER: u64 = 34962;
 /// Caps allocations sized from untrusted JSON.
-// ponytail: a single meshopt buffer view that decodes to more than 64 MiB is rejected.
-const MAX_DECODED_VIEW_BYTES: usize = 1 << 26;
+// ponytail: a meshopt view, or the whole decoded buffer, over 64 MiB is rejected.
+const MAX_DECODED_BYTES: usize = 1 << 26;
 
 type Result<T> = std::result::Result<T, String>;
 
 /// Returns `glb` unchanged unless it is a GLB that uses meshopt or mesh quantization.
-// ponytail: a JSON `.gltf` file is never decoded, so a compressed one passes through unchanged.
 pub(crate) fn decode_compressed_glb(glb: &[u8]) -> Result<Cow<'_, [u8]>> {
     if glb.get(..4) != Some(GLB_MAGIC) {
         return Ok(Cow::Borrowed(glb));
     }
     let (json_bytes, bin) = chunks(glb)?;
-    let mut doc: Value = serde_json::from_slice(json_bytes).map_err(|e| e.to_string())?;
+    let doc = parse_root(json_bytes)?;
+    if !uses_compression(&doc) {
+        return Ok(Cow::Borrowed(glb));
+    }
+    decode_document(doc, &[bin]).map(Cow::Owned)
+}
+
+fn parse_root(json: &[u8]) -> Result<Value> {
+    let doc: Value = serde_json::from_slice(json).map_err(|e| e.to_string())?;
     if !doc.is_object() {
         return Err("glTF root is not an object".into());
     }
+    Ok(doc)
+}
+
+fn uses_compression(doc: &Value) -> bool {
     let uses = |name: &str| {
         doc["extensionsUsed"]
             .as_array()
             .is_some_and(|used| used.iter().any(|u| u == name))
     };
-    if !uses(MESHOPT) && !uses(QUANTIZATION) {
-        return Ok(Cow::Borrowed(glb));
-    }
+    uses(MESHOPT) || uses(QUANTIZATION)
+}
 
+/// Parses a JSON `.gltf`; `Some` only if it uses meshopt or mesh quantization.
+fn compressed_gltf(json: &[u8]) -> Result<Option<Value>> {
+    Ok(Some(parse_root(json)?).filter(uses_compression))
+}
+
+/// The URI of each of `doc`'s buffers, in order; `None` for a buffer with no URI.
+fn buffer_uris(doc: &Value) -> Vec<Option<&str>> {
+    let buffers = doc["buffers"].as_array().into_iter().flatten();
+    buffers.map(|b| b["uri"].as_str()).collect()
+}
+
+/// Expands `doc` into a GLB whose only buffer holds every buffer view.
+/// `buffers[i]` is the data of `doc`'s buffer `i`.
+fn decode_document(mut doc: Value, buffers: &[&[u8]]) -> Result<Vec<u8>> {
     let mut out = Vec::new();
-    rewrite_buffer_views(&mut doc, bin, &mut out)?;
+    rewrite_buffer_views(&mut doc, buffers, &mut out)?;
     dequantize_attributes(&mut doc, &mut out)?;
     let root = doc.as_object_mut().ok_or("glTF root is not an object")?;
     root.insert("buffers".into(), json!([{ "byteLength": out.len() }]));
@@ -62,7 +88,7 @@ pub(crate) fn decode_compressed_glb(glb: &[u8]) -> Result<Cow<'_, [u8]>> {
             }
         }
     }
-    Ok(Cow::Owned(write_glb(&doc, &out)?))
+    write_glb(&doc, &out)
 }
 
 fn chunks(glb: &[u8]) -> Result<(&[u8], &[u8])> {
@@ -118,11 +144,14 @@ fn write_glb(doc: &Value, bin: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Appends `data` to `out`, 4-byte aligned, and returns its offset.
-fn append(out: &mut Vec<u8>, data: &[u8]) -> usize {
-    out.resize(out.len().next_multiple_of(4), 0);
-    let offset = out.len();
+fn append(out: &mut Vec<u8>, data: &[u8]) -> Result<usize> {
+    let offset = out.len().next_multiple_of(4);
+    if offset.saturating_add(data.len()) > MAX_DECODED_BYTES {
+        return Err("decoded buffer is too large".into());
+    }
+    out.resize(offset, 0);
     out.extend_from_slice(data);
-    offset
+    Ok(offset)
 }
 
 /// A non-negative integer field; absent counts as 0 (glTF's default for offsets).
@@ -138,28 +167,34 @@ fn field(v: &Value, key: &str) -> Result<usize> {
 
 /// Moves every buffer view into `out` (the GLB's only buffer), expanding the
 /// meshopt-compressed ones.
-fn rewrite_buffer_views(doc: &mut Value, bin: &[u8], out: &mut Vec<u8>) -> Result<()> {
+fn rewrite_buffer_views(doc: &mut Value, buffers: &[&[u8]], out: &mut Vec<u8>) -> Result<()> {
+    let buffer = |owner: &Value| {
+        buffers
+            .get(field(owner, "buffer")?)
+            .copied()
+            .ok_or_else(|| "buffer view refers to a missing buffer".to_string())
+    };
     let views = doc["bufferViews"].as_array_mut().into_iter().flatten();
     for view in views {
         let data = match view["extensions"].get(MESHOPT) {
             Some(ext) => {
-                if field(ext, "buffer")? != 0 {
-                    return Err("only the GLB's own buffer is supported".into());
-                }
-                let src = slice(bin, field(ext, "byteOffset")?, field(ext, "byteLength")?)
-                    .map_err(|_| "meshopt view overruns the buffer")?;
+                let src = slice(
+                    buffer(ext)?,
+                    field(ext, "byteOffset")?,
+                    field(ext, "byteLength")?,
+                )
+                .map_err(|_| "meshopt view overruns the buffer")?;
                 decode_meshopt(ext, field(view, "byteLength")?, src)?
             }
-            None => {
-                if field(view, "buffer")? != 0 {
-                    return Err("only the GLB's own buffer is supported".into());
-                }
-                slice(bin, field(view, "byteOffset")?, field(view, "byteLength")?)
-                    .map_err(|_| "buffer view overruns the buffer")?
-                    .to_vec()
-            }
+            None => slice(
+                buffer(view)?,
+                field(view, "byteOffset")?,
+                field(view, "byteLength")?,
+            )
+            .map_err(|_| "buffer view overruns the buffer")?
+            .to_vec(),
         };
-        let offset = append(out, &data);
+        let offset = append(out, &data)?;
         let view = view.as_object_mut().ok_or("buffer view is not an object")?;
         view.remove("extensions");
         view.insert("buffer".into(), json!(0));
@@ -178,7 +213,7 @@ fn decode_meshopt(ext: &Value, view_len: usize, src: &[u8]) -> Result<Vec<u8>> {
     if decoded != view_len {
         return Err("meshopt count * byteStride does not match the buffer view length".into());
     }
-    if decoded > MAX_DECODED_VIEW_BYTES {
+    if decoded > MAX_DECODED_BYTES {
         return Err("meshopt view is too large".into());
     }
     let mode = ext["mode"].as_str().unwrap_or_default();
@@ -306,7 +341,7 @@ fn dequantize_attributes(doc: &mut Value, out: &mut Vec<u8>) -> Result<()> {
             .ok_or("missing bufferViews")?;
         let view = views.len();
         // ponytail: the quantized source bytes stay in the BIN chunk, unreferenced.
-        let offset = append(out, &bytes);
+        let offset = append(out, &bytes)?;
         views.push(json!({ "buffer": 0, "byteOffset": offset, "byteLength": bytes.len(), "target": ARRAY_BUFFER }));
         let acc = doc["accessors"]
             .get_mut(idx)
@@ -402,9 +437,44 @@ fn read_as_floats(doc: &Value, acc: &Value, out: &[u8]) -> Result<Vec<f32>> {
     Ok(floats)
 }
 
-/// Loads GLBs like `bevy_gltf`, after expanding meshopt and quantization.
-/// Registered after `GltfPlugin`, so it takes over `.gltf`/`.glb`; only GLBs
-/// are decoded (see `decode_compressed_glb`).
+/// Decodes a GLB, or a JSON `.gltf` after reading its external buffers.
+async fn decode<'a>(bytes: &'a [u8], load_context: &mut LoadContext<'_>) -> Result<Cow<'a, [u8]>> {
+    if bytes.starts_with(GLB_MAGIC) {
+        return decode_compressed_glb(bytes);
+    }
+    let Some(doc) = compressed_gltf(bytes)? else {
+        return Ok(Cow::Borrowed(bytes));
+    };
+    let mut buffers = Vec::new();
+    for uri in buffer_uris(&doc) {
+        buffers.push(match uri {
+            // ponytail: buffers embedded as `data:` URIs are not decoded.
+            Some(uri) if uri.starts_with("data:") => {
+                return Err("data: URI buffers are not supported".into());
+            }
+            Some(uri) => {
+                let uri = percent_decode_str(uri)
+                    .decode_utf8()
+                    .map_err(|e| e.to_string())?;
+                let path = load_context
+                    .path()
+                    .resolve_embed_str(&uri)
+                    .map_err(|e| e.to_string())?;
+                load_context
+                    .read_asset_bytes(path)
+                    .await
+                    .map_err(|e| e.to_string())?
+            }
+            // A buffer without a URI is a meshopt fallback or the GLB blob; it is never read.
+            None => Vec::new(),
+        });
+    }
+    let buffers: Vec<&[u8]> = buffers.iter().map(Vec::as_slice).collect();
+    decode_document(doc, &buffers).map(Cow::Owned)
+}
+
+/// Loads glTF like `bevy_gltf`, after expanding meshopt and quantization.
+/// Registered after `GltfPlugin`, so it takes over `.gltf`/`.glb`.
 #[derive(TypePath)]
 pub struct CompressedGltfLoader(GltfLoader);
 
@@ -427,7 +497,8 @@ impl AssetLoader for CompressedGltfLoader {
     ) -> std::result::Result<Gltf, GltfError> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
-        let bytes = decode_compressed_glb(&bytes)
+        let bytes = decode(&bytes, load_context)
+            .await
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         GltfLoader::load_gltf(&self.0, &bytes, load_context, settings).await
     }
@@ -439,7 +510,17 @@ impl AssetLoader for CompressedGltfLoader {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
+    use bevy::app::{App, TaskPoolPlugin};
+    use bevy::asset::io::memory::{Dir, MemoryAssetReader};
+    use bevy::asset::io::{AssetSourceBuilder, AssetSourceId};
+    use bevy::asset::{AssetApp, AssetPlugin, AssetServer, Handle, LoadState};
     use bevy::gltf::gltf::Gltf;
+    use bevy::gltf::{Gltf as GltfAsset, GltfMaterial, GltfPlugin};
+    use bevy::image::Image;
+    use bevy::mesh::MeshPlugin;
+    use bevy::world_serialization::WorldSerializationPlugin;
 
     use super::*;
 
@@ -472,10 +553,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn decodes_meshopt_and_quantized_meshes_like_gltf_transform() {
-        let decoded = decode_compressed_glb(COMPRESSED).unwrap();
-        let (got, want) = (meshes(&decoded), meshes(REFERENCE));
+    fn assert_same_meshes(decoded: &[u8], reference: &[u8]) {
+        let (got, want) = (meshes(decoded), meshes(reference));
         assert_eq!(got.len(), 1);
         assert_eq!(got.len(), want.len());
         for (g, w) in got.iter().zip(&want) {
@@ -484,6 +563,47 @@ mod tests {
             assert_close(g.2.as_flattened(), w.2.as_flattened());
             assert_close(g.3.as_flattened(), w.3.as_flattened());
         }
+    }
+
+    #[test]
+    fn decodes_meshopt_and_quantized_meshes_like_gltf_transform() {
+        assert_same_meshes(&decode_compressed_glb(COMPRESSED).unwrap(), REFERENCE);
+    }
+
+    const BLOCK_GLTF: &[u8] = include_bytes!("../tests/fixtures/colored_block_blue.gltf");
+    const BLOCK_BIN: &[u8] = include_bytes!("../tests/fixtures/colored_block_blue.bin");
+    /// The same block, decoded by gltf-transform.
+    const BLOCK_REFERENCE: &[u8] =
+        include_bytes!("../tests/fixtures/colored_block_blue_reference.glb");
+
+    fn decode_block(bin: &[u8]) -> Result<Vec<u8>> {
+        let doc = compressed_gltf(BLOCK_GLTF)?.expect("the block fixture is compressed");
+        assert_eq!(buffer_uris(&doc), [Some("colored_block_blue.bin"), None]);
+        decode_document(doc, &[bin, &[]])
+    }
+
+    #[test]
+    fn decodes_a_compressed_gltf_with_an_external_buffer_like_gltf_transform() {
+        assert_same_meshes(&decode_block(BLOCK_BIN).unwrap(), BLOCK_REFERENCE);
+    }
+
+    #[test]
+    fn rejects_a_truncated_external_buffer() {
+        let err = decode_block(&BLOCK_BIN[..BLOCK_BIN.len() / 2]).unwrap_err();
+        assert!(err.contains("overruns"), "{err}");
+    }
+
+    #[test]
+    fn rejects_an_external_buffer_that_was_not_read() {
+        let doc = compressed_gltf(BLOCK_GLTF).unwrap().unwrap();
+        let err = decode_document(doc, &[]).unwrap_err();
+        assert!(err.contains("missing buffer"), "{err}");
+    }
+
+    #[test]
+    fn leaves_plain_gltfs_alone() {
+        let plain = br#"{"asset":{"version":"2.0"},"buffers":[{"uri":"a.bin","byteLength":4}]}"#;
+        assert!(compressed_gltf(plain).unwrap().is_none());
     }
 
     #[test]
@@ -545,5 +665,58 @@ mod tests {
     fn rejects_a_meshopt_view_whose_size_disagrees_with_its_count() {
         let err = decode_compressed_glb(&meshopt_triangles(3, 2, 8)).unwrap_err();
         assert!(err.contains("does not match"), "{err}");
+    }
+
+    #[test]
+    fn loads_a_compressed_gltf_through_the_asset_server() {
+        let dir = Dir::default();
+        dir.insert_asset(Path::new("kinds/block.gltf"), BLOCK_GLTF);
+        dir.insert_asset(Path::new("kinds/colored_block_blue.bin"), BLOCK_BIN);
+        let reader = MemoryAssetReader { root: dir };
+        let mut app = App::new();
+        app.register_asset_source(
+            AssetSourceId::Default,
+            AssetSourceBuilder::new(move || Box::new(reader.clone())),
+        )
+        .add_plugins((
+            TaskPoolPlugin::default(),
+            AssetPlugin::default(),
+            WorldSerializationPlugin,
+            MeshPlugin,
+            GltfPlugin::default(),
+        ))
+        .init_asset::<Image>();
+        app.finish();
+        app.register_asset_loader(CompressedGltfLoader::new(crate::gltf_loader(&app)));
+        app.cleanup();
+
+        let server = app.world().resource::<AssetServer>().clone();
+        let handle: Handle<GltfAsset> = server.load("kinds/block.gltf");
+        for _ in 0..10_000 {
+            app.update();
+            match server.get_load_state(&handle).unwrap() {
+                LoadState::Loaded => break,
+                LoadState::Failed(err) => panic!("{err}"),
+                _ => {}
+            }
+        }
+        let gltf = app
+            .world()
+            .resource::<bevy::asset::Assets<GltfAsset>>()
+            .get(&handle)
+            .expect("the glTF loaded");
+        assert_eq!(gltf.meshes.len(), 1);
+        let material = app
+            .world()
+            .resource::<bevy::asset::Assets<GltfMaterial>>()
+            .get(&gltf.materials[0])
+            .expect("the material loaded");
+        let texture = material
+            .base_color_texture
+            .as_ref()
+            .unwrap()
+            .path()
+            .unwrap();
+        assert_eq!(texture.path(), Path::new("kinds/block_bits_texture.png"));
     }
 }

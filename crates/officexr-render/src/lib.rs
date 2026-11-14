@@ -118,24 +118,27 @@ impl Plugin for OfficeXrRenderPlugin {
     // The duplicate-loader warning that logs is expected; the last loader registered
     // for an extension wins. Settings come from the app's `GltfPlugin`, like its own `finish`.
     fn finish(&self, app: &mut App) {
-        let loader = {
-            let fallback = GltfPlugin::default();
-            let plugins = app.get_added_plugins::<GltfPlugin>();
-            let plugin = plugins.first().copied().unwrap_or(&fallback);
-            let world = app.world();
-            GltfLoader {
-                supported_compressed_formats: world
-                    .get_resource::<CompressedImageFormatSupport>()
-                    .map_or(default(), |support| support.0),
-                custom_vertex_attributes: plugin.custom_vertex_attributes.clone(),
-                default_sampler: world.resource::<DefaultGltfImageSampler>().get_internal(),
-                default_convert_coordinates: plugin.convert_coordinates,
-                extensions: world.resource::<GltfExtensionHandlers>().0.clone(),
-                default_skinned_mesh_bounds_policy: plugin.skinned_mesh_bounds_policy,
-                default_mesh_compression: plugin.mesh_compression.clone(),
-            }
-        };
+        let loader = gltf_loader(app);
         app.register_asset_loader(compressed_gltf::CompressedGltfLoader::new(loader));
+    }
+}
+
+/// A `GltfLoader` configured like the app's own `GltfPlugin::finish` builds it.
+fn gltf_loader(app: &App) -> GltfLoader {
+    let fallback = GltfPlugin::default();
+    let plugins = app.get_added_plugins::<GltfPlugin>();
+    let plugin = plugins.first().copied().unwrap_or(&fallback);
+    let world = app.world();
+    GltfLoader {
+        supported_compressed_formats: world
+            .get_resource::<CompressedImageFormatSupport>()
+            .map_or(default(), |support| support.0),
+        custom_vertex_attributes: plugin.custom_vertex_attributes.clone(),
+        default_sampler: world.resource::<DefaultGltfImageSampler>().get_internal(),
+        default_convert_coordinates: plugin.convert_coordinates,
+        extensions: world.resource::<GltfExtensionHandlers>().0.clone(),
+        default_skinned_mesh_bounds_policy: plugin.skinned_mesh_bounds_policy,
+        default_mesh_compression: plugin.mesh_compression.clone(),
     }
 }
 
