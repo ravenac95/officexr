@@ -8,11 +8,13 @@ use std::sync::OnceLock;
 
 use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
+use officexr_controls::{ControlsSystems, PointerClaimed};
 use officexr_render::SceneCamera;
 use officexr_render::picking::{
-    Modifiers, PickHub, PointerMsg, PointerMsgAction, intersect_plane as plane_hit, ray_at,
+    Modifiers, PickHub, PointerMsg, PointerMsgAction, TargetPressed, intersect_plane as plane_hit,
+    ray_at,
 };
-use officexr_render::views::ViewId;
+use officexr_render::views::{View, ViewCamera, ViewId};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -72,13 +74,31 @@ struct Subscription {
 
 thread_local! {
     static SUBSCRIPTIONS: RefCell<HashMap<ViewId, Subscription>> = RefCell::default();
-    /// Each view's last `setCamera`, for the synchronous ray queries.
+    /// Each view's camera as last drawn, or its `setCamera` since, for the
+    /// synchronous ray queries: the controls may be driving it.
     static CAMERAS: RefCell<HashMap<ViewId, SceneCamera>> = RefCell::default();
 }
 
 pub(super) fn add(app: &mut App) {
     let _ = PICKS.set(app.world().resource::<PickHub>().clone());
-    app.add_systems(Last, deliver);
+    app.add_systems(Update, claim_pointer.before(ControlsSystems))
+        .add_systems(Last, (mirror_cameras, deliver));
+}
+
+/// A primary press on a pickable target is the picker's: it takes no pointer lock.
+fn claim_pointer(mut pressed: MessageReader<TargetPressed>, mut claimed: ResMut<PointerClaimed>) {
+    if pressed.read().any(|p| p.button == PointerButton::Primary) {
+        claimed.0 = true;
+    }
+}
+
+fn mirror_cameras(cameras: Query<(&View, &ViewCamera), Changed<ViewCamera>>) {
+    CAMERAS.with(|c| {
+        let mut c = c.borrow_mut();
+        for (view, camera) in &cameras {
+            c.insert(view.id, camera.0.clone());
+        }
+    });
 }
 
 pub(super) fn set_camera(id: ViewId, camera: SceneCamera) {

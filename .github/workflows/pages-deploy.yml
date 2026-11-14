@@ -93,7 +93,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
-          BRANCH: ${{ github.head_ref || github.ref_name }}
+          # A PR deploys as `pr-<number>`, so its preview keeps one alias URL across pushes.
+          BRANCH: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref_name }}
           WRANGLER_OUTPUT_FILE_DIRECTORY: ${{ runner.temp }}/wrangler
         run: |
           # A missing project would make `pages deploy` prompt; create it as a Direct Upload project
@@ -107,16 +108,20 @@ jobs:
             exit 1
           fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
+          # The branch alias swaps the deployment's hash label for the branch name.
+          echo "alias=https://$BRANCH.${url#https://*.}" >> "$GITHUB_OUTPUT"
 
       - name: Comment the preview URL
         if: steps.config.outputs.deploy == 'true' && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         env:
+          ALIAS: ${{ steps.deploy.outputs.alias }}
           URL: ${{ steps.deploy.outputs.url }}
         with:
           script: |
             const marker = '<!-- pages-deploy -->';
-            const body = `${marker}\nPages preview: ${process.env.URL} (Rust sim: ${process.env.URL}/?sim=rust, studio: ${process.env.URL}/studio/?sim=rust#debug)`;
+            const { ALIAS: alias, URL: url } = process.env;
+            const body = `${marker}\nPages preview: ${alias} (Rust sim: ${alias}/?sim=rust, studio: ${alias}/studio/, Bevy: ${alias}/studio/?op=bevy)\nThis deploy: ${url}`;
             const { owner, repo } = context.repo;
             const issue_number = context.issue.number;
             const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });

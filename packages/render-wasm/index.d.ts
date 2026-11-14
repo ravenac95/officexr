@@ -95,6 +95,40 @@ export interface Plane {
   constant: number;
 }
 
+export type CameraMode = 'first-person' | 'third-person' | 'fixed' | 'top-down' | 'free-fly';
+
+/** A view's camera settings. A field left out takes its default (the TS defaults). */
+export interface CameraConfig {
+  fixed?: {
+    azimuthDeg?: number;
+    pitchDeg?: number;
+    height?: number;
+    maxOnScreenFrac?: number;
+    minOnScreenFrac?: number;
+    lateralFrac?: number;
+    fov?: number;
+    movementYawOffsetDeg?: number;
+    /** Pins the XZ distance to the character, with no leash. */
+    distanceM?: number | null;
+    /** A world point to orbit and look at instead of the followed player. */
+    lookAt?: [number, number, number] | null;
+  };
+  conversationDistance?: number;
+  conversationHeight?: number;
+  invertLook?: boolean;
+  charRadius?: number;
+}
+
+export interface MoveIntent {
+  /** World-space XZ direction, unit or zero, already turned by `yaw`. */
+  dir: [number, number];
+  run: boolean;
+  /** True once per Space press. */
+  jump: boolean;
+  /** The camera yaw `dir` was turned by. */
+  yaw: number;
+}
+
 /** The wasm-bindgen module of one backend, already instantiated by `loadRenderer`. */
 export interface RendererModule {
   /**
@@ -121,12 +155,34 @@ export interface RendererModule {
    * Sends `callback` the view's pick events, from pointer events on its canvas, replacing any callback
    * it had; `null` stops them. A view without a callback does no picking. A throwing callback is logged
    * with `console.error` and the frame's other events are still delivered. Throws for a destroyed view.
+   * A left press on any target but the ground doesn't take the controls' pointer lock.
    */
   onPick(id: ViewId, callback: ((event: PickEvent) => void) | null): void;
-  /** The view camera's ray through `(x, y)`, in CSS pixels from its canvas's top left, as of the last `setCamera`. */
+  /**
+   * The view camera's ray through `(x, y)`, in CSS pixels from its canvas's top left, from the pose last
+   * drawn (the controls' when they drive it) or a `setCamera` since.
+   */
   rayAtScreen(id: ViewId, x: number, y: number): { origin: Vec3; dir: Vec3 };
   /** Where that ray meets `plane` ahead of the camera, or `null`. Throws for a zero normal. */
   intersectPlane(id: ViewId, x: number, y: number, plane: Plane): Vec3 | null;
+
+  // Controls: once any of these is called on a view, its controls drive its camera, overriding
+  // `setCamera`, in every frame its mode has something to frame. Top-down and free-fly always do;
+  // first-person, third-person and fixed need a follow target (fixed, or its `lookAt`), and until
+  // then `setCamera` still applies. Keys are heard page-wide and reach every view with input
+  // enabled; pointer lock, mouse-look and the wheel reach only a view drawing into a Bevy window
+  // (with WebGL2, the primary canvas's).
+  /** The movement since the last call, to step the sim with. */
+  takeIntent(id: ViewId): MoveIntent;
+  /** The local player's body root and yaw, after stepping the sim. */
+  setFollowTarget(id: ViewId, pos: [number, number, number], yaw: number): void;
+  setCameraMode(id: ViewId, mode: CameraMode): void;
+  /** The conversation's centre, or `null` outside one. */
+  setConversationFocus(id: ViewId, point: [number, number, number] | null): void;
+  /** Replaces the view's camera settings. */
+  setCameraConfig(id: ViewId, config: CameraConfig): void;
+  /** Drive from `useWorldFocus` and `isTypingTarget`: off, keys and the mouse are ignored. */
+  setInputEnabled(id: ViewId, enabled: boolean): void;
 }
 
 export type Gpu = { requestAdapter(): Promise<unknown> };

@@ -130,6 +130,12 @@ pub struct View {
     player_ids: Vec<String>,
 }
 
+impl View {
+    pub fn target(&self) -> &RenderTarget {
+        &self.target
+    }
+}
+
 #[derive(Component, Deref)]
 pub struct ViewScene(pub WorldSceneData);
 
@@ -165,7 +171,9 @@ fn view_bundle(id: ViewId, layer: usize, kind: ViewKind, target: RenderTarget) -
     )
 }
 
-pub(crate) fn plugin(app: &mut App) {
+/// The view hub and the systems that spawn, feed and report on views, without
+/// the renderer (`OfficeXrRenderPlugin` adds both).
+pub fn plugin(app: &mut App) {
     app.init_resource::<ViewHub>()
         .add_message::<WindowOccluded>()
         .add_plugins(HierarchyPropagatePlugin::<RenderLayers>::new(PostUpdate))

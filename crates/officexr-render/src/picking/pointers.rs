@@ -74,6 +74,15 @@ pub struct PickEvent {
     pub screen: [f32; 2],
 }
 
+/// A press on a target other than [`PickTarget::Ground`], written as Bevy's
+/// picking runs in `PreUpdate`, so a host can keep the press from also
+/// steering the camera.
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub struct TargetPressed {
+    pub view: ViewId,
+    pub button: PointerButton,
+}
+
 #[derive(Default)]
 struct Queues {
     pointer: Vec<(ViewId, PointerMsg)>,
@@ -117,6 +126,7 @@ pub(crate) fn plugin(app: &mut App) {
     }
     app.add_plugins(MeshPickingPlugin)
         .init_resource::<PickHub>()
+        .add_message::<TargetPressed>()
         .add_systems(First, feed_pointers.in_set(PickingSystems::Input))
         .add_systems(
             PreUpdate,
@@ -345,6 +355,7 @@ fn forward<E>(
     pointers: Query<&ViewPointer>,
     pointer_map: Res<PointerMap>,
     hub: Res<PickHub>,
+    mut pressed: MessageWriter<TargetPressed>,
 ) where
     E: Forwarded + for<'t> Event<Trigger<'t> = PropagateEntityTrigger<true, E, PointerTraversal>>,
 {
@@ -359,8 +370,14 @@ fn forward<E>(
         return;
     };
     event.propagate(false);
-    // A `Down` on anything but `PickTarget::Ground` is where the controls'
-    // `PointerClaimed` resource would be set, so the press doesn't take pointer lock.
+    if let (PickKind::Down, Some(button)) = (E::KIND, event.button())
+        && *target != PickTarget::Ground
+    {
+        pressed.write(TargetPressed {
+            view: state.view,
+            button,
+        });
+    }
     let hit = event.hit();
     let pick = PickEvent {
         kind: E::KIND,
@@ -589,6 +606,27 @@ mod tests {
         assert!(drags[0].point.is_some(), "dragStart has the press's hit");
         assert!(drags[1..].iter().all(|p| p.point.is_none()));
         assert_eq!(drags[3].screen, (CENTRE + Vec2::new(6.0, 0.0)).to_array());
+    }
+
+    fn presses(app: &mut App) -> Vec<TargetPressed> {
+        let mut messages = app.world_mut().resource_mut::<Messages<TargetPressed>>();
+        messages.drain().collect()
+    }
+
+    #[test]
+    fn a_press_on_a_target_but_not_the_ground_is_announced() {
+        let (mut app, id) = view_of_a();
+        click_centre(&mut app, id);
+        let pressed = TargetPressed {
+            view: id,
+            button: PRIMARY,
+        };
+        assert_eq!(presses(&mut app), [pressed]);
+
+        let at = Vec3::new(10.0, 0.0, 10.0);
+        let (mut app, id) = view_of(&[("a", [0.0; 3])], Vec3::new(10.0, 5.0, 15.0), at);
+        assert_eq!(click_centre(&mut app, id)[0].target, PickTarget::Ground);
+        assert_eq!(presses(&mut app), []);
     }
 
     #[test]
