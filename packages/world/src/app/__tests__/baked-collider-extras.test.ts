@@ -151,4 +151,9 @@ describe('readGlbColliders', () => {
     expect(readGlbColliders(await glbWithExtras({}))).toBeNull();
     expect(readGlbColliders(new ArrayBuffer(64))).toBeNull();
   });
+
+  it('is null for a GLB whose JSON chunk runs past the buffer', async () => {
+    const glb = await glbWithExtras(buildColliderExtras(CUBOIDS));
+    expect(readGlbColliders(glb.slice(0, 40))).toBeNull();
+  });
 });

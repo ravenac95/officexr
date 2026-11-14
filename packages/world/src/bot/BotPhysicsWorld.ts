@@ -68,7 +68,7 @@ interface BotPhysicsWorldOpts {
    * `(id) => api.catalog.getKind(id)?.colliderShape`). When provided,
    * kinds that declare a `colliderShape` (e.g. `compound-steps`) emit
    * multiple cuboids instead of the single AABB box, mirroring what
-   * `MapColliders` emits on the browser side. */
+   * `SimCore`'s static colliders hold on the browser side. */
   colliderShape?: import('../physics/rules.ts').ColliderShapeLookup;
 }
 
@@ -129,7 +129,7 @@ export class BotPhysicsWorld {
     this.selfId = opts.selfId;
     this.instanceAABB = opts.instanceAABB;
     this.colliderShape = opts.colliderShape;
-    // Gravity vector matches the browser-side `<Physics>` so the bot
+    // Gravity vector matches `SimCore`'s world so the bot
     // and the local player fall at identical rates. Kinematic bodies
     // don't auto-apply it — see `verticalVel` integration in step().
     this.world = new RAPIER.World({ x: 0, y: GRAVITY, z: 0 });
@@ -257,7 +257,7 @@ export class BotPhysicsWorld {
    * Map Editor's authored cube field). Replaces the old perimeter-
    * wall-only behaviour: every cube is now a real surface the bot
    * can stand on, walk against, and fall off — matching the
-   * browser-side `<MapColliders>`.
+   * `SimCore`'s static colliders.
    *
    * Cheap no-op when the layout hasn't changed: the same snapshot is
    * skipped outright (this runs every tick), and a new one is

@@ -146,7 +146,7 @@ export function respawnThreshold(
 }
 
 /** Cuboid collider descriptor in world space. Engine-agnostic —
- * the Rapier adapter (browser-side `<MapColliders>` or bot-side
+ * the Rapier adapter (`SimCore`'s static colliders or bot-side
  * `BotPhysicsWorld.syncCubes`) turns this into a real collider. */
 export interface CuboidDescriptor {
   center: { x: number; y: number; z: number };
@@ -201,8 +201,8 @@ export interface ColliderShapeLookup {
  * This approximation replaces the single bounding-box cuboid with a
  * staircase topology that Rapier's kinematic character controller can
  * physically climb. The cuboid shape is a deliberate approximation —
- * the exact GLTF mesh triangles are not used because @react-three/rapier
- * does not expose TriMesh static colliders in the current version.
+ * the exact GLTF mesh triangles are not used because the original Rapier wrapper
+ * did not expose TriMesh static colliders.
  * See STAIRS-INVESTIGATION-FINDING.md §4 for the full rationale.
  */
 function compoundStepCuboids(
@@ -280,7 +280,7 @@ export function worldObjectsToCuboids(
  * Walk `worldObjects.instances` and emit world-space collider
  * descriptors — cuboids (default AABB, compound-steps, scanned) and
  * trimeshes (slope kinds). The single source of collider geometry for
- * all three consumers: `<MapColliders>` (player, unbaked rooms),
+ * all three consumers: `SimCore` static colliders (player, unbaked rooms),
  * `BotPhysicsWorld.syncCubes` (bots), and the bake's embedded extras
  * (player, baked rooms).
  */

@@ -44,6 +44,8 @@ interface SceneFrameProps {
   /** E sits through it; while seated, any movement input stands through it instead of moving. */
   seating?: SeatingSource;
   selfId: string;
+  /** False until the map, models and baked colliders are ready; the sim neither steps nor seats before. */
+  selfReady?: boolean;
   /** Each frame's proximity result, for `ProximityGlow` to render. */
   proximityOutputRef: React.MutableRefObject<TrackerOutput | null>;
   /** Builds the local player's movement simulation; called once per mount, after Rapier has loaded. Null until it can be. */
@@ -110,6 +112,7 @@ export function SceneFrame({
   autoWalk,
   seating,
   selfId,
+  selfReady,
   proximityOutputRef,
   createSim,
   bakedColliders,
@@ -298,14 +301,16 @@ export function SceneFrame({
       proximityOutputRef.current = proximity;
     }
 
-    if (self?.seat != null) {
+    // Held until the world is ready, so gravity can't drop the player through unloaded floors.
+    const held = selfReady === false;
+    if (!held && self?.seat != null) {
       if (hasMoveInput || spacePressedThisFrame || autoWalkDir !== null) {
         seating?.stand();
       }
       sim?.teleport(store.getState().players[selfId]?.pos ?? self.pos);
       isAirborneRef.current = false;
       wasMoving.current = false;
-    } else if (self && sim) {
+    } else if (!held && self && sim) {
       // Auto-warp detector. If the store's pos has been mutated to
       // somewhere far from where the sim has the player (a map-switch
       // spawn or a test-driven `store.setState`), teleport there this

@@ -116,7 +116,7 @@ describe.each(Object.entries(IMPLEMENTATIONS))('%s SimCore standingAt', (_impl, 
     sim.dispose();
   });
 
-  it('ignores the player own body', () => {
+  it("ignores the player's own body", () => {
     const sim = simOn();
     sim.teleport({ x: 0, y: 0.15, z: 0 });
     expect(sim.standingAt({ x: 0, y: 0, z: 0 }, R)).toBe(true);

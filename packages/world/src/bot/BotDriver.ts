@@ -73,7 +73,7 @@ export interface BotDriverOptions {
   /** Optional collider-shape override lookup (typically
    * `(id) => api.catalog.getKind(id)?.colliderShape`). Threads through
    * to `BotPhysicsWorld` so compound-step staircase colliders mirror
-   * what `MapColliders` emits on the browser side. */
+   * what `SimCore`'s static colliders hold on the browser side. */
   colliderShape?: import('../physics/rules.ts').ColliderShapeLookup;
 }
 

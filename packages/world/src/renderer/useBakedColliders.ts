@@ -6,14 +6,15 @@ import type { SceneBakedLayout } from './Scene.tsx';
 
 /**
  * Each baked layout's layout-local colliders, read from its GLB, by room instance id.
- * A layout appears once its GLB has loaded; a failed load is reported and leaves it absent.
+ * A layout appears once its GLB has loaded, as null when the GLB embeds no colliders (a stale bake);
+ * a failed load is reported and leaves it absent.
  * The URL carries the registry's bake version so a re-bake refetches.
  */
 export function useBakedColliders(
   layouts: readonly SceneBakedLayout[] | undefined,
   onError?: (error: Error) => void,
-): ReadonlyMap<string, readonly ColliderDescriptor[]> {
-  const [loaded, setLoaded] = useState<ReadonlyMap<string, readonly ColliderDescriptor[]>>(new Map());
+): ReadonlyMap<string, readonly ColliderDescriptor[] | null> {
+  const [loaded, setLoaded] = useState<ReadonlyMap<string, readonly ColliderDescriptor[] | null>>(new Map());
   const reportError = useEffectEvent((error: Error) => onError?.(error));
   const urls = (layouts ?? []).map((p) => {
     const version = p.layoutName ? getVersion(p.layoutName) : 0;
@@ -26,14 +27,17 @@ export function useBakedColliders(
     for (const [roomInstanceId, url] of urls) {
       fetch(url)
         .then((res) => (res.ok ? res.arrayBuffer() : Promise.reject(new Error(`${url}: HTTP ${res.status}`))))
+        // ponytail: the GLB is downloaded twice (here and by BakedLayout); Range requests for the header and JSON chunk would avoid it.
         .then((glb) => {
           const colliders = readGlbColliders(glb);
           if (!colliders) {
-            // ponytail: a pre-extras bake gets no colliders; re-saving the layout re-bakes it with them.
-            console.warn(`[useBakedColliders] "${url}" carries no embedded colliders; re-save the layout to re-bake it.`);
+            console.warn(
+              `[useBakedColliders] "${url}" carries no embedded colliders (stale bake); ` +
+                'its compiled instances collide instead. Re-save the layout to re-bake it.',
+            );
           }
           if (live) {
-            setLoaded((prev) => new Map(prev).set(roomInstanceId, colliders ?? []));
+            setLoaded((prev) => new Map(prev).set(roomInstanceId, colliders));
           }
         })
         .catch((error: Error) => {

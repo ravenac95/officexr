@@ -132,7 +132,7 @@ export function Players({
   }, [store, catalog]);
 
   // Root group per player, at its feet; peers and self alike follow the store each frame.
-  const bodyRefs = useRef<Map<string, THREE.Group>>(new Map());
+  const rootRefs = useRef<Map<string, THREE.Group>>(new Map());
   // Inner <group> per player — visual yaw + bump offset live here.
   const groupRefs = useRef<Map<string, THREE.Group>>(new Map());
   const motionState = useRef<Map<string, MotionState>>(new Map());
@@ -177,7 +177,7 @@ export function Players({
 
     for (const [id, player] of Object.entries(state.players)) {
       const grp = groupRefs.current.get(id);
-      const body = bodyRefs.current.get(id);
+      const body = rootRefs.current.get(id);
       if (!grp || !body) continue;
 
       // Extrapolate non-self players forward by their broadcast velocity to
@@ -293,9 +293,9 @@ export function Players({
             position={[spawn.x, spawn.y, spawn.z]}
             ref={(g: THREE.Group | null) => {
               if (g) {
-                bodyRefs.current.set(p.id, g);
+                rootRefs.current.set(p.id, g);
               } else {
-                bodyRefs.current.delete(p.id);
+                rootRefs.current.delete(p.id);
               }
             }}
           >

@@ -27,7 +27,7 @@ export interface UseStackSwitcherOpts {
   /** Optional collider-shape override lookup forwarded to the in-browser
    * BotPool. `DebugApp` passes
    * `(id) => api.catalog.getKind(id)?.colliderShape` so compound-step
-   * staircase colliders mirror what `MapColliders` emits. */
+   * staircase colliders mirror `SimCore`'s static colliders. */
   colliderShape?: import('@officexr/world').ColliderShapeLookup;
 }
 

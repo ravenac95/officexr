@@ -28,7 +28,7 @@ import { waitForCanvasReady } from './helpers.ts';
 
 const SELF_ID = 'local-player';
 // Voxel position [0,0,0] at cubeSize=2 → world cube center (0, 1, 0)
-// (MapColliders applies `voxelY * cubeSize + cubeSize/2`, lifting the
+// (the sim's static colliders apply `voxelY * cubeSize + cubeSize/2`, lifting the
 // y=0 row half a cube above world y=0). Cube top is therefore at
 // world y=2. Ball collider bottom = body.y + (BODY_Y - charRadius)
 // = body.y + 0.5. The controller skin is near-zero
@@ -82,8 +82,8 @@ test('Debug character stands on cube — bind-pose anchor, no float', async ({
   // Replace the loaded map with a single cube whose top is at y=1.
   // `worldObjects.instances[].position` is voxel-space; for the
   // default cubeSize=2, voxel (0,0,0) is the world cube centered at
-  // origin with top face at y=1. MapColliders subscribes to the
-  // store and rebuilds physics colliders on this change.
+  // origin with top face at y=1. `SimCore` static colliders are rebuilt
+  // from the store on this change.
   await page.evaluate(() => {
     (
       window as unknown as {
@@ -105,7 +105,7 @@ test('Debug character stands on cube — bind-pose anchor, no float', async ({
       },
     }));
   });
-  // MapColliders subscription + Rapier collider build takes a frame
+  // The collider rebuild takes a frame
   // or two.
   await page.waitForTimeout(300);
 

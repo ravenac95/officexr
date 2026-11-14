@@ -23,7 +23,7 @@
  *   v1 — `{ version: 1, cuboids }` (boxes only).
  *   v2 — `{ version: 2, cuboids, trimeshes }` (adds slope trimeshes).
  * The reader accepts both; the writer emits v2. Unknown versions parse
- * to `null` → callers fall back to legacy mesh-AABB traversal.
+ * to `null` → the layout has no embedded colliders.
  *
  * Round-trip: gltf-transform writes `scene.setExtras(...)` → glTF JSON
  * `scenes[i].extras`, which `readGlbColliders` reads back from the GLB's

@@ -214,14 +214,18 @@ export function Scene(props: SceneProps) {
   const bakedColliders = useMemo(
     (): SimBakedColliders[] =>
       (bakedLayouts ?? []).flatMap((p) => {
-        const colliders = loadedBakedColliders.get(p.roomInstanceId) ?? [];
+        const colliders = loadedBakedColliders.get(p.roomInstanceId);
+        if (colliders === null) {
+          // A stale bake embeds none: its compiled store instances collide instead.
+          return [];
+        }
         const { position, rotation } = placementTransform(p);
         return [
           {
             roomInstanceId: p.roomInstanceId,
             position: { x: position[0], y: position[1], z: position[2] },
             yawRad: rotation[1],
-            colliders,
+            colliders: colliders ?? [],
           },
         ];
       }),
@@ -433,6 +437,7 @@ export function Scene(props: SceneProps) {
           moveInputRef={props.moveInputRef}
           autoWalk={props.autoWalk}
           seating={props.seating}
+          selfReady={props.selfReady}
           createSim={createSim}
           bakedColliders={bakedColliders}
           onBakedCollidersApplied={notifyCollidersReady}
