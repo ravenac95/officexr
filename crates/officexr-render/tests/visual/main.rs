@@ -11,25 +11,23 @@
 //! fails; `OFFICEXR_UPDATE_BASELINES=1` writes them all from a run whose
 //! other checks pass. Review new baselines by eye: never widen the
 //! threshold to pass.
-//!
-//! Every camera pose keeps the shadow box centred on the first camera's
-//! `look_at`, so other poses don't exactly match a `render` of that pose.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use bevy::asset::{AssetLoadFailedEvent, RenderAssetUsages};
-use bevy::gltf::Gltf;
+use bevy::asset::RenderAssetUsages;
 use bevy::image::{CompressedImageFormats, ImageSampler, ImageType};
 use bevy::prelude::*;
+use bevy::render::RenderPlugin;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::time::TimeUpdateStrategy;
 use bevy::winit::WinitPlugin;
 use officexr_render::placement::VOXEL_SIZE;
 use officexr_render::{
-    AssetBase, AvatarBound, OffscreenTarget, PendingKinds, PendingLayouts, PlayerRender, Players,
+    AssetBase, AvatarBound, LayoutIndex, ObjectKinds, OffscreenTarget, PlayerRender, Players,
     SceneCamera, WorldSceneData, offscreen_app, scene_sim, sim_input,
 };
 use officexr_sim::SimPeer;
@@ -154,8 +152,8 @@ struct Timeline {
     ready_for: u32,
     loading_for: u32,
     done_for: u32,
-    /// Paths of models that failed to load.
-    failed: Vec<String>,
+    /// The models that failed to load, for after `App::run` takes the world.
+    failed: Arc<Mutex<Vec<String>>>,
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> T {
@@ -359,11 +357,14 @@ fn plan(scenario: &Scenario, frame_count: usize, out: &Path) -> (Vec<Step>, Vec<
     (steps, keyframes)
 }
 
-fn camera_pose(pose: &CameraPose) -> (Transform, f32) {
-    (
-        Transform::from_translation(pose.position.into()).looking_at(pose.look_at.into(), Vec3::Y),
-        pose.fov.to_radians(),
-    )
+fn scene_camera(pose: &CameraPose) -> SceneCamera {
+    SceneCamera {
+        position: pose.position,
+        look_at: pose.look_at,
+        fov_deg: pose.fov,
+        near: 0.1,
+        far: 2000.0,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -371,26 +372,25 @@ fn drive(
     mut commands: Commands,
     mut timeline: ResMut<Timeline>,
     mut players: ResMut<Players>,
-    mut camera: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
-    kinds: Res<PendingKinds>,
-    layouts: Res<PendingLayouts>,
+    mut camera: ResMut<SceneCamera>,
+    kinds: Res<ObjectKinds>,
+    layouts: Res<LayoutIndex>,
     bound: Query<(), With<AvatarBound>>,
     target: Res<OffscreenTarget>,
     mut time_step: ResMut<TimeUpdateStrategy>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let t = &mut *timeline;
-    let Ok((mut transform, mut projection)) = camera.single_mut() else {
-        return;
-    };
     if t.ready_for < READY_FRAMES {
-        let ready =
-            kinds.is_empty() && layouts.is_empty() && bound.iter().count() == players.players.len();
+        let ready = !kinds.is_loading()
+            && !layouts.is_loading()
+            && bound.iter().count() == players.players.len();
         if ready {
             t.ready_for += 1;
             // Time stands still while loading, so every clip starts at 0 on the first step.
             if t.ready_for == READY_FRAMES {
-                *time_step = TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(1.0 / 60.0));
+                *time_step =
+                    TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(1.0 / 60.0));
             }
         } else {
             t.loading_for += 1;
@@ -404,16 +404,15 @@ fn drive(
     let Some(step) = t.steps.get(t.next) else {
         t.done_for += 1;
         if t.done_for == SAVE_FRAMES {
+            let kinds = kinds.failed().map(|id| format!("kind {id}"));
+            let layouts = layouts.failed().map(|path| format!("layout {path}"));
+            *t.failed.lock().unwrap() = kinds.chain(layouts).collect();
             exit.write(AppExit::Success);
         }
         return;
     };
     players.players.clone_from(&t.frames[step.frame]);
-    let (pose, fov) = camera_pose(&t.cameras[step.camera]);
-    *transform = pose;
-    if let Projection::Perspective(p) = &mut *projection {
-        p.fov = fov;
-    }
+    *camera = scene_camera(&t.cameras[step.camera]);
     if !step.files.is_empty() {
         let mut shot = commands.spawn(Screenshot::image(target.0.clone()));
         for file in &step.files {
@@ -423,12 +422,7 @@ fn drive(
     t.next += 1;
 }
 
-fn record_failed(mut failed: MessageReader<AssetLoadFailedEvent<Gltf>>, mut timeline: ResMut<Timeline>) {
-    timeline
-        .failed
-        .extend(failed.read().map(|e| e.path.path().to_string_lossy().into_owned()));
-}
-
+/// Renders `steps`; fails for each model that didn't load.
 fn render(
     scenario: &Scenario,
     scene_json: &str,
@@ -437,48 +431,42 @@ fn render(
     steps: Vec<Step>,
 ) -> Vec<String> {
     let scene: WorldSceneData = serde_json::from_str(scene_json).expect("scene JSON");
-    let first = &scenario.cameras[0];
     let base = AssetBase::parse(format!("{ROOT}/packages/studio/public"));
     // Winit is in `DefaultPlugins` here only through the viewer example's dev-dependency.
-    let plugins = DefaultPlugins.build().disable::<WinitPlugin>();
+    let plugins = DefaultPlugins
+        .build()
+        .disable::<WinitPlugin>()
+        // An async compile skips draws for however long it takes, which varies by run.
+        .set(RenderPlugin {
+            synchronous_pipeline_compilation: true,
+            ..default()
+        });
     let [w, h] = scenario.size;
+    let failed: Arc<Mutex<Vec<String>>> = Arc::default();
     let mut app = offscreen_app(base, plugins, w, h);
     app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO))
-    .insert_resource(scene.clone())
-    .insert_resource(SceneCamera {
-        position: first.position,
-        look_at: first.look_at,
-        fov_deg: first.fov,
-        near: 0.1,
-        far: 2000.0,
-    })
-    .insert_resource(Players {
-        players: frames[0].clone(),
-        ..players
-    })
-    .insert_resource(Timeline {
-        frames,
-        steps,
-        cameras: scenario.cameras.clone(),
-        next: 0,
-        ready_for: 0,
-        loading_for: 0,
-        done_for: 0,
-        failed: vec![],
-    })
-    .add_systems(PreUpdate, (record_failed, drive));
+        .insert_resource(scene)
+        .insert_resource(scene_camera(&scenario.cameras[0]))
+        .insert_resource(Players {
+            players: frames[0].clone(),
+            ..players
+        })
+        .insert_resource(Timeline {
+            frames,
+            steps,
+            cameras: scenario.cameras.clone(),
+            next: 0,
+            ready_for: 0,
+            loading_for: 0,
+            done_for: 0,
+            failed: failed.clone(),
+        })
+        .add_systems(PreUpdate, drive);
     app.run();
-    let failed = &app.world().resource::<Timeline>().failed;
+    let failed = failed.lock().unwrap();
     failed
         .iter()
-        .map(|path| {
-            let kind = scene
-                .kinds
-                .iter()
-                .find(|k| path.ends_with(k.gltf_path.trim_start_matches('/')))
-                .map_or("a model", |k| k.id.as_str());
-            format!("{kind} ({path}) failed to load: run `pnpm asset-packs:install`")
-        })
+        .map(|what| format!("{what} failed to load: run `pnpm asset-packs:install`"))
         .collect()
 }
 

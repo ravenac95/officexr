@@ -71,7 +71,9 @@ so a collider that doesn't match its visible mesh makes the character
 float or fall through:
 
 - `stone` is pinned to exactly 2.0 m in `world-object-kinds.json` (the
-  raw GLB bakes to 2.02, which floated the character 2 cm).
+  raw GLB bakes to 2.02, which floated the character 2 cm). The pin is
+  enforced by its `dimensionsPinned` flag: `bake:dimensions` skips the
+  kind and reports the drift instead.
 - `__primitive_*` magic kinds get their 2 m collider from
   `geometry-service.ts` (`PRIMITIVE_BLOCK_SIZE`), matching the box
   `ObjectInstances` renders — otherwise they fall back to a 0.5 m

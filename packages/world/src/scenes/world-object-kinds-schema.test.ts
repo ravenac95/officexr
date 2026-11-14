@@ -233,6 +233,17 @@ describe('normalizeKind — seat and isDesk', () => {
   });
 });
 
+describe('normalizeKind — dimensionsPinned', () => {
+  it('keeps the flag and omits it when absent', () => {
+    expect(normalizeKind(minimalRaw('block', { dimensionsPinned: true }), 0).dimensionsPinned).toBe(true);
+    expect(JSON.parse(JSON.stringify(normalizeKind(minimalRaw('block'), 0)))).not.toHaveProperty('dimensionsPinned');
+  });
+
+  it('rejects a non-boolean flag', () => {
+    expect(() => normalizeKind(minimalRaw('block', { dimensionsPinned: 'yes' }), 3)).toThrow(/kinds\[3\]\.dimensionsPinned/);
+  });
+});
+
 describe('isYawAllowed', () => {
   it('defaults to 90° steps', () => {
     expect(isYawAllowed(undefined, 270)).toBe(true);

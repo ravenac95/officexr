@@ -68,6 +68,7 @@ jobs:
 
   rust:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
@@ -111,6 +112,7 @@ jobs:
           name: visual-tests
           path: target/tmp/visual-tests/
           if-no-files-found: ignore
+          retention-days: 7
 
       - name: Build client (Linux)
         run: cargo build -p officexr-client
