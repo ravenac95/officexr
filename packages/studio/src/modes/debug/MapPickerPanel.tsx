@@ -10,6 +10,8 @@ import type { MapPickerState } from './useMapPicker.ts';
 
 interface MapPickerPanelProps {
   picker: MapPickerState;
+  /** More sections, below the map's. */
+  children?: React.ReactNode;
 }
 
 /**
@@ -21,7 +23,7 @@ interface MapPickerPanelProps {
  *   - `Reload list`: re-fetch /api/maps for fresh entries.
  *   - `Reset & respawn`: re-apply the current map and warp bots.
  */
-export function MapPickerPanel({ picker }: MapPickerPanelProps) {
+export function MapPickerPanel({ picker, children }: MapPickerPanelProps) {
   return (
     <Panel>
       <Section title="Map">
@@ -40,6 +42,7 @@ export function MapPickerPanel({ picker }: MapPickerPanelProps) {
           </Button>
         </div>
       </Section>
+      {children}
     </Panel>
   );
 }

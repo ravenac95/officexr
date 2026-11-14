@@ -215,6 +215,7 @@ describe('Minimap', () => {
     const focus = screen.getByRole('status', { name: 'world focus' });
     const press = (name: string) => {
       const button = screen.getByRole('button', { name });
+      fireEvent(button, new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
       fireEvent.mouseDown(button);
       expect(focus.textContent).toBe('false');
       fireEvent.click(button);

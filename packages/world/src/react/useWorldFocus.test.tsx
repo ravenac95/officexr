@@ -23,7 +23,7 @@ describe('useWorldFocus', () => {
     expect(result.current).toBe(true);
   });
 
-  it('releases focus when mousedown lands inside [data-studio-panel]', () => {
+  it('releases focus when pointerdown lands inside [data-studio-panel]', () => {
     const { result } = renderHook(() => useWorldFocus());
 
     // Mount a fake panel + target element inside it.
@@ -36,13 +36,13 @@ describe('useWorldFocus', () => {
 
     act(() => {
       btn.dispatchEvent(
-        new MouseEvent('mousedown', { bubbles: true, button: 0 }),
+        new MouseEvent('pointerdown', { bubbles: true, button: 0 }),
       );
     });
     expect(result.current).toBe(false);
   });
 
-  it('reclaims focus when mousedown lands outside any panel', () => {
+  it('reclaims focus when pointerdown lands outside any panel', () => {
     const { result } = renderHook(() => useWorldFocus());
 
     const { container } = render(
@@ -57,14 +57,14 @@ describe('useWorldFocus', () => {
     act(() => {
       container
         .querySelector('#panel-btn')!
-        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+        .dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
     });
     expect(result.current).toBe(false);
 
     act(() => {
       container
         .querySelector('#world')!
-        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+        .dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
     });
     expect(result.current).toBe(true);
   });
@@ -80,7 +80,7 @@ describe('useWorldFocus', () => {
 
     act(() => {
       container.querySelector('#panel-btn')!.dispatchEvent(
-        new MouseEvent('mousedown', { bubbles: true, button: 2 }),
+        new MouseEvent('pointerdown', { bubbles: true, button: 2 }),
       );
     });
     // Right-click should NOT release focus — the user is opening
@@ -108,7 +108,7 @@ describe('useWorldFocus', () => {
   it('focusin OUTSIDE any panel does NOT re-focus the world', () => {
     // The hook's contract is: refocusing the world requires an
     // explicit click (Tab away to the body shouldn't undo a
-    // previous panel mousedown). This pins that asymmetry.
+    // previous panel pointerdown). This pins that asymmetry.
     const { result } = renderHook(() => useWorldFocus());
 
     const { container } = render(
@@ -122,7 +122,7 @@ describe('useWorldFocus', () => {
 
     act(() => {
       container.querySelector('#panel-btn')!.dispatchEvent(
-        new MouseEvent('mousedown', { bubbles: true, button: 0 }),
+        new MouseEvent('pointerdown', { bubbles: true, button: 0 }),
       );
     });
     expect(result.current).toBe(false);
@@ -135,7 +135,7 @@ describe('useWorldFocus', () => {
     expect(result.current).toBe(false);
   });
 
-  it('focusWorld() reclaims focus after a panel mousedown', () => {
+  it('focusWorld() reclaims focus after a panel pointerdown', () => {
     const { result } = renderHook(() => useWorldFocus());
     const { container } = render(
       <aside data-studio-panel="true">
@@ -144,7 +144,7 @@ describe('useWorldFocus', () => {
     );
     act(() => {
       container.querySelector('#panel-btn')!.dispatchEvent(
-        new MouseEvent('mousedown', { bubbles: true, button: 0 }),
+        new MouseEvent('pointerdown', { bubbles: true, button: 0 }),
       );
     });
     expect(result.current).toBe(false);

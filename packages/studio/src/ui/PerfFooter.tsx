@@ -53,8 +53,8 @@ export function PerfFooter() {
           <Metric label="frame" value={`${stats.frameMs.toFixed(1)} ms`} />
           <Metric label="draws" value={fmt(stats.drawCalls)} />
           <Metric label="tris" value={fmt(stats.triangles)} />
-          <Metric label="geom" value={fmt(stats.geometries)} />
-          <Metric label="tex" value={fmt(stats.textures)} />
+          {stats.geometries !== undefined && <Metric label="geom" value={fmt(stats.geometries)} />}
+          {stats.textures !== undefined && <Metric label="tex" value={fmt(stats.textures)} />}
         </>
       )}
     </footer>

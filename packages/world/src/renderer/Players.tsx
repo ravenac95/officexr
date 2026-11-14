@@ -1,12 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import type { Bus, OfficeState, PlayerId, Store } from '@officexr/sdk';
+import type { Bus, OfficeState, Store } from '@officexr/sdk';
 import { Adventurer, ANIMATION_URLS, type MotionState } from './Adventurer.tsx';
 import { assertNever } from './assertNever.ts';
 import type { CameraMode } from './config.ts';
-import { PlayerNameTag } from './PlayerNameTag.tsx';
-import { PlayerPingBell, shouldShowPingBell } from './PlayerPingBell.tsx';
 import { pickCharacterForPlayer, resolvePlayerModel, type CatalogCharacters, type PlayerModel } from '../characters/registry.ts';
 import { useCatalogCharacters } from '../react/application-context.tsx';
 import { ModelWithFallback } from './ModelWithFallback.tsx';
@@ -27,14 +25,11 @@ interface PlayersProps {
    * timeScale updates). Used by the Mugshot mode to produce a
    * deterministic frame for snapshot testing. */
   paused?: boolean;
-  /** When false, the self player is not rendered. Default true. */
-  selfReady?: boolean;
   /** Ref mutated each frame by SceneFrame to reflect local player airborne
    * state. Used to override motion to 'jumping' for the self avatar without
    * a React re-render. Ref is created in Scene.tsx and threaded to both
    * SceneFrame and Players. */
   isAirborneRef: React.MutableRefObject<boolean>;
-  onPingPlayer?: (id: PlayerId) => void;
 }
 
 interface BumpState {
@@ -90,8 +85,6 @@ export function Players({
   selfPosRef,
   paused,
   isAirborneRef,
-  selfReady = true,
-  onPingPlayer,
 }: PlayersProps) {
   const [worldSettings, setWorldSettings] = useState(
     () => store.getState().worldSettings,
@@ -280,7 +273,7 @@ export function Players({
 
   return (
     <>
-      {players.filter((p) => selfReady || p.id !== selfId).map((p) => {
+      {players.map((p) => {
         const isSelf = p.id === selfId;
         // Seeded at the current position so the avatar isn't drawn at the origin before the first frame.
         const spawn = store.getState().players[p.id]?.pos ?? { x: 0, y: 0, z: 0 };
@@ -325,15 +318,6 @@ export function Players({
                   />
                 )}
               />
-              <PlayerNameTag
-                store={store}
-                playerId={p.id}
-                isSelf={isSelf}
-                paused={paused ?? false}
-              />
-              {onPingPlayer && shouldShowPingBell(onPingPlayer, isSelf, cameraMode, paused ?? false) && (
-                <PlayerPingBell store={store} playerId={p.id} radius={charRadius} onPing={onPingPlayer} />
-              )}
             </group>
           </group>
         );

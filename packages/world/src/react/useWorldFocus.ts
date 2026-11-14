@@ -32,8 +32,9 @@ export function isTypingTarget(target: EventTarget | null): boolean {
  *     canvas (anywhere outside `[data-studio-panel]`) to refocus.
  *
  * Transitions:
- *   - mousedown inside a `[data-studio-panel]` ancestor → `false`.
- *   - mousedown anywhere else → `true`.
+ *   - pointerdown inside a `[data-studio-panel]` ancestor → `false`.
+ *   - pointerdown anywhere else → `true`. Not mousedown: Bevy's canvas
+ *     cancels pointerdown, which suppresses the compatibility mousedown.
  *   - focusin (Tab key navigation) into a panel input → `false`.
  *
  * Pass the result to `<Scene worldFocused>` and `<FocusIndicator>`.
@@ -45,7 +46,7 @@ export function useWorldFocus(): boolean {
     const isInsidePanel = (el: EventTarget | null): boolean =>
       el instanceof Element && !!el.closest('[data-studio-panel]');
 
-    const onMouseDown = (e: MouseEvent) => {
+    const onPointerDown = (e: MouseEvent) => {
       // Only left/middle clicks register as a focus change. Right-
       // click typically opens a context menu — don't let it steal
       // world focus by accident.
@@ -61,13 +62,13 @@ export function useWorldFocus(): boolean {
       if (isInsidePanel(e.target)) setFocused(false);
     };
 
-    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('focusin', onFocusIn);
     const onFocusWorld = () => setFocused(true);
     window.addEventListener(FOCUS_WORLD_EVENT, onFocusWorld);
     return () => {
       window.removeEventListener(FOCUS_WORLD_EVENT, onFocusWorld);
-      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('focusin', onFocusIn);
     };
   }, []);

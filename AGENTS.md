@@ -84,8 +84,10 @@ officexr/
 - **Database.** The backend (`packages/server/src/db.ts`) reads and
   writes Postgres via `pg` using `SUPABASE_DB_URL`; the browser never talks to the
   database. Offices and per-office character choices live there.
-- **World.** A room renders the office's studio map through `@officexr/world`
-  (`<Scene>`, physics, characters). The headless state and protocol live in
+- **World.** A room renders the office's studio map through `@officexr/world`:
+  `<PlayView>` mounts `<BevyScene>`, which draws through the Bevy renderer
+  (`@officexr/render-wasm`) and steps the local player's `SimCore` in a
+  `requestAnimationFrame` loop (`react/frameLoop.ts`, `react/roomFrame.ts`). The headless state and protocol live in
   `@officexr/sdk`; `@officexr/core-refactor`'s `createStack` builds the channel +
   voice adapter for a session.
 - **Realtime.** Presence, position and chat sync go over a `WsChannel` to the
@@ -103,7 +105,8 @@ officexr/
 ## Commands
 
 ```bash
-pnpm dev          # Start web dev server (Vite, http://localhost:5173) with the backend in-process
+pnpm dev          # Start web dev server (Vite, http://localhost:5173) with the backend in-process; its 3D view needs the render-wasm build (below) or VITE_RENDER_WASM_BASE_URL
+pnpm --filter @officexr/render-wasm build   # The Bevy renderer behind the web 3D view and studio debug mode (slow LTO build)
 pnpm build        # Build the web SPA (outputs to packages/web/dist/)
 pnpm preview      # Preview the SPA build (static only: no API)
 pnpm --filter @officexr/server start   # Production backend on :4173, admin on :8787

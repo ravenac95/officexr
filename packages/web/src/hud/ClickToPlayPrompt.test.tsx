@@ -16,7 +16,7 @@ it('shows on focus loss and hides when the world is refocused', () => {
     </>,
   );
   expect(screen.queryByText('Click to play')).toBeNull();
-  fireEvent.mouseDown(screen.getByText('in panel'));
+  fireEvent(screen.getByText('in panel'), new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
   expect(screen.getByText('Click to play')).toBeTruthy();
   act(() => focusWorld());
   expect(screen.queryByText('Click to play')).toBeNull();

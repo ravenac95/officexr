@@ -1,4 +1,4 @@
-import React, { useEffect, useEffectEvent, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import type {
@@ -18,10 +18,9 @@ import { useApplication } from '../react/application-context.tsx';
 import type { CameraMode } from './config.ts';
 import { resolveCharacterTunables } from '../characters/resolve.ts';
 import { fixedMovementYaw, yawFromDirection, type ViewOffsets } from './lookControls.ts';
-import { moveIntent, type AutoWalkSource, type MoveInput } from './moveIntent.ts';
-import { sitOnPress, type SeatingSource } from './seated.ts';
+import { moveIntent } from './moveIntent.ts';
 import { useStoreWorldObjects } from './useStoreWorldObjects.ts';
-import type { SimBakedColliders, SimCore, SimPeer } from '../sim/SimCore.ts';
+import type { SimCore, SimPeer } from '../sim/SimCore.ts';
 
 interface SceneFrameProps {
   store: Store;
@@ -37,23 +36,11 @@ interface SceneFrameProps {
   fixedMovementYawOffsetDeg: number;
   yawRef: React.MutableRefObject<number>;
   viewOffsetsRef: React.MutableRefObject<ViewOffsets>;
-  /** Analog walking input (e.g. an on-screen joystick); keys win when held. Not gated by `worldFocused`. */
-  moveInputRef?: React.MutableRefObject<MoveInput>;
-  /** Steers at walk speed while there is no key or stick input; such input cancels it. Not gated by `worldFocused`. */
-  autoWalk?: AutoWalkSource;
-  /** E sits through it; while seated, any movement input stands through it instead of moving. */
-  seating?: SeatingSource;
   selfId: string;
-  /** False until the map, models and baked colliders are ready; the sim neither steps nor seats before. */
-  selfReady?: boolean;
   /** Each frame's proximity result, for `ProximityGlow` to render. */
   proximityOutputRef: React.MutableRefObject<TrackerOutput | null>;
   /** Builds the local player's movement simulation; called once per mount, after Rapier has loaded. Null until it can be. */
   createSim: ((charRadius: number) => SimCore) | null;
-  /** Loaded baked layouts' colliders; their rooms' instances collide through these instead. */
-  bakedColliders: readonly SimBakedColliders[];
-  /** Called each time `bakedColliders` is applied to the sim, with all their room instance ids. */
-  onBakedCollidersApplied?: (roomInstanceIds: readonly string[]) => void;
   /** When false, keyboard input is released from the in-world
    * character: keydown is ignored, and any held keys are cleared
    * so the character stops mid-stride. Toggled by the studio's
@@ -84,6 +71,7 @@ const ARROW_KEYS = new Set([
   'ArrowRight',
 ]);
 
+// ponytail(OSO-7950): only the Mugshot mode's Scene mounts this now; it goes with Scene.
 /**
  * Owns the per-frame loop: input into the local player's `SimCore`
  * step, world tick, rule evaluation, sync flushing, bot updates.
@@ -104,15 +92,9 @@ export function SceneFrame({
   fixedMovementYawOffsetDeg,
   yawRef,
   viewOffsetsRef,
-  moveInputRef,
-  autoWalk,
-  seating,
   selfId,
-  selfReady,
   proximityOutputRef,
   createSim,
-  bakedColliders,
-  onBakedCollidersApplied,
   worldFocused,
   spawnPoints,
   isAirborneRef,
@@ -159,29 +141,17 @@ export function SceneFrame({
       sim.dispose();
     };
   }, [createSim, store, selfId]);
-  useEffect(
-    () =>
-      seating?.setStandingCheck((feet) => {
-        const sim = simRef.current;
-        return !sim || sim.standingAt(feet, store.getState().worldSettings.charRadius);
-      }),
-    [seating, store],
-  );
-
   const { catalog, voxelSize } = useApplication();
   const worldObjects = useStoreWorldObjects(store);
-  const notifyBakedApplied = useEffectEvent((ids: readonly string[]) => onBakedCollidersApplied?.(ids));
   useEffect(() => {
     const sim = simRef.current;
     if (!sim) {
       return;
     }
-    sim.setStaticColliders(worldObjects, { voxelSize, kinds: catalog.listKinds() }, bakedColliders);
-    notifyBakedApplied(bakedColliders.map((b) => b.roomInstanceId));
-  }, [createSim, worldObjects, voxelSize, catalog, bakedColliders]);
+    sim.setStaticColliders(worldObjects, { voxelSize, kinds: catalog.listKinds() }, []);
+  }, [createSim, worldObjects, voxelSize, catalog]);
 
   const spaceWasDownRef = useRef(false);  // edge-trigger: was Space held last frame?
-  const eWasDownRef = useRef(false);
   useEffect(() => {
     (window as unknown as {
       __OFFICE_GRAVITY__?: { setEnabled: (v: boolean) => void };
@@ -238,17 +208,8 @@ export function SceneFrame({
     const keys = keysDown.current;
     const sim = simRef.current;
 
-    eWasDownRef.current = sitOnPress(keys, eWasDownRef.current, seating);
-    const { fwd, strafe, isRunning, speedScale } = moveIntent(keys, moveInputRef?.current);
+    const { fwd, strafe, isRunning, speedScale } = moveIntent(keys, undefined);
     const hasMoveInput = fwd !== 0 || strafe !== 0;
-    if (hasMoveInput) {
-      autoWalk?.cancel();
-    }
-    const selfBeforeWalk = store.getState().players[selfId];
-    const autoWalkDir =
-      !hasMoveInput && selfBeforeWalk ? (autoWalk?.intent(selfBeforeWalk.pos) ?? null) : null;
-
-    // Read after E and auto-walk, which can seat the player, so this frame's movement doesn't overwrite the seated pose.
     const stateSnapshot = store.getState();
     const self = stateSnapshot.players[selfId];
     const { worldSettings } = stateSnapshot;
@@ -262,9 +223,7 @@ export function SceneFrame({
         worldSettings,
         stateSnapshot.characterConfigs,
       );
-    const playerSpeed = autoWalkDir
-      ? baseSpeed
-      : (isRunning ? baseSpeed * runSpeedMultiplier : baseSpeed) * speedScale;
+    const playerSpeed = (isRunning ? baseSpeed * runSpeedMultiplier : baseSpeed) * speedScale;
 
     // Space key edge-trigger for jump: only fire on the frame the
     // key transitions from up to down. Holding Space does not repeat.
@@ -296,16 +255,7 @@ export function SceneFrame({
       proximityOutputRef.current = proximity;
     }
 
-    // Held until the world is ready, so gravity can't drop the player through unloaded floors.
-    const held = selfReady === false;
-    if (!held && self?.seat != null) {
-      if (hasMoveInput || spacePressedThisFrame || autoWalkDir !== null) {
-        seating?.stand();
-      }
-      sim?.teleport(store.getState().players[selfId]?.pos ?? self.pos);
-      isAirborneRef.current = false;
-      wasMoving.current = false;
-    } else if (!held && self && sim) {
+    if (self && sim) {
       // Auto-warp detector. If the store's pos has been mutated to
       // somewhere far from where the sim has the player (a map-switch
       // spawn or a test-driven `store.setState`), teleport there this
@@ -338,9 +288,7 @@ export function SceneFrame({
         // doesn't fire spuriously after a teleport.
         wasMoving.current = false;
       } else {
-        // Horizontal intent: camera-relative from keys or the stick, else
-        // world-space from auto-walk. Zero when neither steers; the sim
-        // still steps so gravity can apply.
+        // Camera-relative horizontal intent; zero still steps, so gravity can apply.
         let dx = 0;
         let dz = 0;
         if (hasMoveInput) {
@@ -358,9 +306,6 @@ export function SceneFrame({
           const rightZ = -Math.sin(cameraYaw);
           dx = forwardX * fwd + rightX * strafe;
           dz = forwardZ * fwd + rightZ * strafe;
-        } else if (autoWalkDir) {
-          dx = autoWalkDir.x;
-          dz = autoWalkDir.z;
         }
         const len = Math.hypot(dx, dz);
         const dir = len > 0 ? { x: dx / len, z: dz / len } : { x: 0, z: 0 };
@@ -370,7 +315,7 @@ export function SceneFrame({
           nowMs: now,
           dir,
           speed: playerSpeed,
-          running: isRunning && !autoWalkDir,
+          running: isRunning,
           yaw: len > 0 ? yawFromDirection(dir) : self.yaw,
           jump: spacePressedThisFrame,
           settings: worldSettings,
