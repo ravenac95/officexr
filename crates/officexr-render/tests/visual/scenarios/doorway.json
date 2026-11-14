@@ -1,0 +1,99 @@
+{
+  "size": [
+    640,
+    360
+  ],
+  "layout": "scenario-doorway",
+  "characters": [
+    {
+      "character": "Barbarian",
+      "spawn": [
+        6,
+        1,
+        2
+      ],
+      "moves": [
+        {
+          "frames": 30
+        },
+        {
+          "frames": 120,
+          "dir": [
+            0,
+            1
+          ]
+        }
+      ]
+    },
+    {
+      "character": "Knight",
+      "spawn": [
+        2,
+        1,
+        2
+      ],
+      "moves": [
+        {
+          "frames": 30
+        },
+        {
+          "frames": 120,
+          "dir": [
+            0,
+            1
+          ]
+        }
+      ]
+    }
+  ],
+  "cameras": [
+    {
+      "name": "above",
+      "position": [
+        6,
+        14,
+        -4
+      ],
+      "lookAt": [
+        6,
+        0,
+        6
+      ],
+      "fov": 45
+    }
+  ],
+  "captures": [
+    29,
+    90,
+    149
+  ],
+  "assert": [
+    {
+      "type": "feetOn",
+      "frame": 29,
+      "surfaceY": 0.5
+    },
+    {
+      "type": "near",
+      "frame": 149,
+      "character": 0,
+      "position": [
+        6,
+        0,
+        8
+      ],
+      "tolerance": 0.3
+    },
+    {
+      "type": "near",
+      "frame": 149,
+      "character": 1,
+      "position": [
+        2,
+        0,
+        5.6
+      ],
+      "tolerance": 0.15
+    }
+  ]
+}

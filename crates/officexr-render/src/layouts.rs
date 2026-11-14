@@ -37,6 +37,14 @@ impl LayoutIndex {
             .filter(|l| matches!(l.state, LayoutState::Loading))
             .count()
     }
+
+    /// The GLB paths of the layouts that failed to load.
+    pub fn failed(&self) -> impl Iterator<Item = &str> {
+        self.0
+            .iter()
+            .filter(|l| matches!(l.state, LayoutState::Failed))
+            .map(|l| l.placement.gltf_path.as_str())
+    }
 }
 
 /// Keeps the layouts the scene still lists as they are, re-poses the moved

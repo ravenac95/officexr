@@ -18,6 +18,7 @@
     "@officexr/realtime-server": "workspace:*",
     "@officexr/render-wasm": "workspace:*",
     "@officexr/sdk": "workspace:*",
+    "@officexr/server": "workspace:*",
     "@officexr/studio-mcp": "workspace:*",
     "@officexr/world": "workspace:*",
     "@radix-ui/react-checkbox": "^1.1.5",

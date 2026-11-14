@@ -11,15 +11,11 @@
 
 use std::time::Duration;
 
-use bevy::app::ScheduleRunnerPlugin;
-use bevy::camera::RenderTarget;
 use bevy::prelude::*;
-use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
-use bevy::window::ExitCondition;
 use officexr_render::{
-    AssetBase, LayoutIndex, ObjectKinds, OfficeXrRenderPlugin, SceneCamera, WorldSceneData,
-    mugshot_player,
+    AssetBase, LayoutIndex, ObjectKinds, OffscreenTarget, SceneCamera, WorldSceneData,
+    mugshot_player, offscreen_app,
 };
 
 // ponytail: fixed frame budgets, not a load signal; too short if models take longer to arrive.
@@ -28,10 +24,7 @@ const CAPTURE_AT: u32 = 300;
 const EXIT_AT: u32 = 320;
 
 #[derive(Resource)]
-struct Output {
-    image: Handle<Image>,
-    path: String,
-}
+struct OutputPath(String);
 
 fn parse_vec3(s: &str) -> [f32; 3] {
     let v: Vec<f32> = s
@@ -67,26 +60,7 @@ fn main() {
         concat!(env!("CARGO_MANIFEST_DIR"), "/../../packages/studio/public").into()
     }));
 
-    let mut app = App::new();
-    app.add_plugins((
-        base,
-        DefaultPlugins.set(WindowPlugin {
-            primary_window: None,
-            exit_condition: ExitCondition::DontExit,
-            ..default()
-        }),
-        ScheduleRunnerPlugin::run_loop(Duration::ZERO),
-        OfficeXrRenderPlugin,
-    ));
-    let image = app
-        .world_mut()
-        .resource_mut::<Assets<Image>>()
-        .add(Image::new_target_texture(
-            w,
-            h,
-            TextureFormat::Rgba8UnormSrgb,
-            None,
-        ));
+    let mut app = offscreen_app(base, DefaultPlugins, w, h);
     app.insert_resource(scene)
         .insert_resource(SceneCamera {
             position: parse_vec3(&args[3]),
@@ -95,11 +69,8 @@ fn main() {
             near: args[6].parse().expect("near"),
             far: args[7].parse().expect("far"),
         })
-        .insert_resource(Output {
-            image,
-            path: args[1].clone(),
-        })
-        .add_systems(Update, (target_image, capture_and_exit));
+        .insert_resource(OutputPath(args[1].clone()))
+        .add_systems(Update, capture_and_exit);
     if let Some(character) = mugshot {
         let players = mugshot_player(&scene_json, character);
         println!("settled_y={}", players.players[0].pos.y);
@@ -108,25 +79,14 @@ fn main() {
     app.run();
 }
 
-fn target_image(
-    mut commands: Commands,
-    cameras: Query<Entity, Added<Camera3d>>,
-    output: Res<Output>,
-) {
-    for camera in &cameras {
-        commands
-            .entity(camera)
-            .insert(RenderTarget::Image(output.image.clone().into()));
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn capture_and_exit(
     mut commands: Commands,
     mut frame: Local<u32>,
     mut measured: Local<Duration>,
     time: Res<Time<Real>>,
-    output: Res<Output>,
+    target: Res<OffscreenTarget>,
+    output: Res<OutputPath>,
     views: Query<(&ObjectKinds, &LayoutIndex)>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -141,8 +101,8 @@ fn capture_and_exit(
         }
         println!("frame_ms={:.2}", mean.as_secs_f64() * 1e3);
         commands
-            .spawn(Screenshot::image(output.image.clone()))
-            .observe(save_to_disk(output.path.clone()));
+            .spawn(Screenshot::image(target.0.clone()))
+            .observe(save_to_disk(output.0.clone()));
     } else if *frame == EXIT_AT {
         exit.write(AppExit::Success);
     }

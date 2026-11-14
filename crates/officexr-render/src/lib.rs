@@ -14,6 +14,7 @@ mod lighting;
 #[cfg(feature = "mugshot")]
 mod mugshot;
 mod objects;
+mod offscreen;
 pub mod placement;
 pub mod scene;
 mod sky;
@@ -35,8 +36,9 @@ pub use avatars::{Bound as AvatarBound, Motion, PlayerRender, Players, next_moti
 pub use layouts::LayoutIndex;
 pub use lighting::{HemisphereFill, ObjectMaterial, snap_to_shadow_texel};
 #[cfg(feature = "mugshot")]
-pub use mugshot::mugshot_player;
+pub use mugshot::{mugshot_player, scene_sim, sim_input};
 pub use objects::{ObjectIndex, ObjectKinds, apply_overrides};
+pub use offscreen::{OffscreenTarget, offscreen_app};
 pub use scene::*;
 pub use sky::{SkyMaterial, sun_sky_params};
 use views::{View, ViewCamera, ViewScene};
