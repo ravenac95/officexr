@@ -32,8 +32,8 @@ use serde::{Deserialize, Serialize};
 
 pub use config::{CameraConfig, FixedCamera, OrbitCamera, RotateButton};
 use look::{
-    Drag, Look, MOUSE_SENSITIVITY, Orbit, apply_look_delta, apply_zoom, dom_wheel_delta, drag_for,
-    fixed_movement_yaw, is_look_mode, is_yaw_pitch_mode, wheel_zoom_factor,
+    Drag, Look, MOUSE_SENSITIVITY, Modifiers, Orbit, apply_look_delta, apply_zoom, dom_wheel_delta,
+    drag_for, fixed_movement_yaw, is_look_mode, is_yaw_pitch_mode, wheel_zoom_factor,
 };
 use rig::{FlyKeys, Rig};
 
@@ -121,17 +121,14 @@ impl Controls {
         self.yaw
     }
 
-    /// Moves the orbit camera at once, without easing, within the config's limits.
+    /// Moves the orbit camera at once, without easing. Each frame clamps it
+    /// to the config's limits.
     pub fn set_orbit(&mut self, place: impl FnOnce(&mut Orbit)) {
-        let config = &self.config.orbit;
-        self.rig.place_orbit(|orbit| {
-            place(orbit);
-            *orbit = orbit.clamped(config);
-        });
+        self.rig.place_orbit(place);
     }
 
     /// Points the orbit camera at the box from `min` to `max` and backs it
-    /// off until the box fits, within the distance limits.
+    /// off until the box fits.
     pub fn frame_bounds(&mut self, min: Vec3, max: Vec3) {
         let config = &self.config.orbit;
         self.rig.place_orbit(|orbit| orbit.frame(min, max, config));
@@ -163,7 +160,8 @@ impl ControlsHub {
 
 /// Set by a picking layer when this frame's mouse press landed on a pickable
 /// target (e.g. a ping bell), so the press neither takes pointer lock nor
-/// starts a drag. Set it in `PreUpdate` (as Bevy's picking observers
+/// starts a drag. Claim only primary-button presses: the right and middle
+/// buttons drive the orbit camera wherever they land. Set it in `PreUpdate` (as Bevy's picking observers
 /// run) or before [`ControlsSystems`]; the plugin clears it every frame.
 #[derive(Resource, Default)]
 pub struct PointerClaimed(pub bool);
@@ -405,11 +403,15 @@ fn steer(
             .and_then(|w| inputs.0.get(&w))
             .unwrap_or(&empty);
         if controls.input_enabled {
-            mouse(controls, window, keys.any(&SHIFT));
+            let held = Modifiers {
+                shift: keys.any(&SHIFT),
+                ctrl: keys.any(&CTRL),
+            };
+            mouse(controls, window, held);
             match controls.mode {
                 CameraMode::FreeFly => controls.rig.free_fly.fly(fly_keys(&keys), dt),
                 CameraMode::Orbit if controls.config.orbit.move_keys => {
-                    controls.rig.orbit_goal.fly(fly_keys(&keys).axes, dt);
+                    controls.rig.orbit_goal.fly(orbit_keys(&keys), dt);
                 }
                 _ => {}
             }
@@ -425,7 +427,10 @@ fn steer(
             CameraMode::Orbit => controls.rig.orbit_goal.azimuth,
             _ => controls.look.yaw,
         };
-        controls.intent = if controls.input_enabled {
+        // The orbit's move keys are WASD too: moving the player as well would move both.
+        let keys_move_player =
+            !(controls.mode == CameraMode::Orbit && controls.config.orbit.move_keys);
+        controls.intent = if controls.input_enabled && keys_move_player {
             let untaken_jump = controls.intent.jump;
             let mut intent = intent(&keys, controls.yaw);
             intent.jump |= untaken_jump;
@@ -456,7 +461,7 @@ fn steer(
 }
 
 /// Applies a window's mouse input to a view on it.
-fn mouse(controls: &mut Controls, input: &WindowInput, shift: bool) {
+fn mouse(controls: &mut Controls, input: &WindowInput, held: Modifiers) {
     let mode = controls.mode;
     if input.locked && is_yaw_pitch_mode(mode) {
         let d = input.motion * controls.look_sign() * MOUSE_SENSITIVITY;
@@ -470,19 +475,22 @@ fn mouse(controls: &mut Controls, input: &WindowInput, shift: bool) {
             input
                 .pressed
                 .iter()
-                .find_map(|&b| drag_for(mode, b, shift, orbit).map(|drag| (b, drag)))
+                .find_map(|&b| drag_for(mode, b, held, orbit).map(|drag| (b, drag)))
         })
         .filter(|(button, _)| input.held.contains(button));
     match (mode, controls.drag.map(|(_, drag)| drag)) {
         (CameraMode::FreeFly, Some(Drag::Turn)) => rig.free_fly.drag(input.motion),
         (CameraMode::Orbit, Some(Drag::Rotate)) => rig.orbit_goal.rotate(input.motion, orbit),
         (CameraMode::Orbit, Some(Drag::Pan)) => rig.orbit_goal.pan(input.motion),
+        (CameraMode::Orbit, Some(Drag::Dolly)) => {
+            rig.zoom_orbit(|o| o.dolly(input.motion.y, orbit));
+        }
         _ => {}
     }
     for &(delta, factor) in &input.wheel {
         match mode {
             CameraMode::FreeFly => rig.free_fly.dolly(delta),
-            CameraMode::Orbit => rig.orbit_goal.zoom(factor, orbit),
+            CameraMode::Orbit => rig.zoom_orbit(|o| o.zoom(factor, orbit)),
             _ if is_look_mode(mode) => apply_zoom(factor, &mut controls.look.offsets),
             _ => {}
         }
@@ -490,6 +498,13 @@ fn mouse(controls: &mut Controls, input: &WindowInput, shift: bool) {
 }
 
 const SHIFT: [KeyCode; 2] = [KeyCode::ShiftLeft, KeyCode::ShiftRight];
+/// Ctrl, or cmd on macOS.
+const CTRL: [KeyCode; 4] = [
+    KeyCode::ControlLeft,
+    KeyCode::ControlRight,
+    KeyCode::SuperLeft,
+    KeyCode::SuperRight,
+];
 
 /// WASD or the arrows, turned by `yaw`; shift runs and space jumps.
 fn intent(keys: &MovementKeys, yaw: f32) -> MoveIntent {
@@ -509,6 +524,16 @@ fn intent(keys: &MovementKeys, yaw: f32) -> MoveIntent {
         run: keys.any(&SHIFT),
         jump: keys.just_pressed(KeyCode::Space),
     }
+}
+
+/// The map editor's: WASD across the ground, Q/E up and down, and nothing
+/// else, so ctrl held for a shortcut doesn't sink the target.
+fn orbit_keys(keys: &MovementKeys) -> Vec3 {
+    Vec3::new(
+        keys.axis(&[KeyCode::KeyD], &[KeyCode::KeyA]),
+        keys.axis(&[KeyCode::KeyE], &[KeyCode::KeyQ]),
+        keys.axis(&[KeyCode::KeyW], &[KeyCode::KeyS]),
+    )
 }
 
 fn fly_keys(keys: &MovementKeys) -> FlyKeys {
@@ -899,14 +924,75 @@ mod tests {
         assert!((Vec3::from(camera.position) - eye).length() < 1e-4);
         assert!((Vec3::from(camera.look_at) - target).length() < 1e-4);
 
-        let orbit = controls(&app, id, |c| {
+        let orbit = |app: &App| controls(app, id, |c| c.rig.orbit);
+        controls(&app, id, |c| {
             c.set_orbit(|orbit| {
                 orbit.elevation = 0.7;
                 orbit.distance = 60.0;
             });
-            c.rig.orbit
         });
-        assert_eq!(orbit.target, target);
-        assert_eq!((orbit.elevation, orbit.distance), (0.7, 40.0));
+        app.update();
+        assert_eq!(orbit(&app).target, target);
+        assert_eq!((orbit(&app).elevation, orbit(&app).distance), (0.7, 40.0));
+
+        // The map editor's pose, set before its limits: the frame clamps to
+        // the limits in force by then.
+        controls(&app, id, |c| {
+            c.set_orbit(|orbit| orbit.distance = 60.0);
+            c.config.orbit = OrbitCamera {
+                min_distance: 4.0,
+                max_distance: 500.0,
+                ..OrbitCamera::default()
+            };
+        });
+        app.update();
+        assert_eq!(orbit(&app).distance, 60.0);
+    }
+
+    #[test]
+    fn orbit_move_keys_ignore_ctrl_and_space_and_leave_the_player_still() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| {
+            c.mode = CameraMode::Orbit;
+            c.config.orbit.move_keys = true;
+        });
+        let target = |app: &App| controls(app, id, |c| c.rig.orbit_goal.target);
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.press(KeyCode::ControlLeft);
+        keys.press(KeyCode::Space);
+        app.update();
+        assert_eq!(target(&app), look::Orbit::default().target);
+
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.press(KeyCode::KeyW);
+        keys.press(KeyCode::KeyE);
+        app.update();
+        let moved = target(&app) - look::Orbit::default().target;
+        assert!(moved.y > 0.0 && Vec2::new(moved.x, moved.z).length() > 0.0);
+        assert_eq!(
+            controls(&app, id, Controls::take_intent),
+            MoveIntent::default()
+        );
+    }
+
+    #[test]
+    fn orbit_zoom_skips_the_damping_as_drei_does() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| {
+            c.mode = CameraMode::Orbit;
+            c.config.orbit.damping_secs = 0.33;
+        });
+        let window = window(&mut app);
+        app.world_mut().write_message(MouseWheel {
+            unit: MouseScrollUnit::Pixel,
+            x: 0.0,
+            y: -200.0,
+            window,
+            phase: TouchPhase::Moved,
+        });
+        app.update();
+        let (shown, goal) = controls(&app, id, |c| (c.rig.orbit, c.rig.orbit_goal));
+        assert_eq!(shown.distance, goal.distance);
+        assert_ne!(goal.distance, 16.0);
     }
 }

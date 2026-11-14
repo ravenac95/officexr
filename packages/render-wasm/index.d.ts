@@ -61,12 +61,16 @@ export interface CameraConfig {
     /** Positive looks down on the target from above. */
     minElevationDeg?: number;
     maxElevationDeg?: number;
-    /** Drags with it rotate; shift-drags with it, and middle-drags, pan. `left` also pans on a right-drag. */
+    /**
+     * `right`, the scene editor's: right-drags rotate, shift+right- and middle-drags pan, and left is
+     * the editor's. `left`, drei `OrbitControls`': left-drags rotate, right-drags pan, ctrl, cmd or shift
+     * swaps the two, and middle-drags zoom.
+     */
     rotateButton?: 'left' | 'right';
     pan?: boolean;
-    /** Time constant (s) the camera eases toward where input puts it; 0 snaps. */
+    /** Time constant (s) the camera eases toward where input puts it; 0 snaps. Zoom never eases, as in drei. */
     dampingSecs?: number;
-    /** WASD moves the target across the ground and Q/E up and down. */
+    /** WASD moves the target across the ground and Q/E up and down; `takeIntent` then stays still. */
     moveKeys?: boolean;
   };
   conversationDistance?: number;
@@ -124,7 +128,8 @@ export interface RendererModule {
   /** Replaces the view's camera settings. */
   setCameraConfig(id: ViewId, config: CameraConfig): void;
   /**
-   * Moves the orbit camera at once, within the config's limits; a field left out keeps its value.
+   * Moves the orbit camera at once; a field left out keeps its value. Each frame clamps it to the
+   * limits in force then, so it can come before or after `setCameraConfig`. Numbers must be finite.
    * The camera sits `distance` from `target` toward `azimuth` (its look yaw, radians) and
    * `elevation` (radians, positive above the target), as the studio editors' orbit refs do.
    */

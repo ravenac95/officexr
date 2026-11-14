@@ -80,7 +80,7 @@ pub struct OrbitCamera {
     /// Positive looks down on the target from above.
     pub min_elevation_deg: f32,
     pub max_elevation_deg: f32,
-    /// Drags with this button rotate; shift-drags with it, and middle-drags, pan.
+    /// Right is the scene editor's layout and left drei `OrbitControls`'.
     pub rotate_button: RotateButton,
     pub pan: bool,
     /// Time constant (s) the camera eases toward its goal with; 0 snaps.
@@ -93,8 +93,7 @@ pub struct OrbitCamera {
 
 impl Default for OrbitCamera {
     fn default() -> Self {
-        // Just short of the poles, where the look-at up vector degenerates.
-        let pole = 90.0 - 0.05f32.to_degrees();
+        let pole = crate::look::ORBIT_POLE.to_degrees();
         Self {
             fov: 45.0,
             min_distance: 2.0,
@@ -109,8 +108,16 @@ impl Default for OrbitCamera {
     }
 }
 
-/// Right leaves the left button to the editor's tools. Left is drei
-/// `OrbitControls`' layout, where a right-drag pans too.
+impl OrbitCamera {
+    /// The field of view, kept to one a camera can have.
+    pub fn fov(&self) -> f32 {
+        self.fov.clamp(1.0, 179.0)
+    }
+}
+
+/// Right: right-drags rotate, shift+right- and middle-drags pan, and the left
+/// button is left to the editor's tools. Left, drei `OrbitControls`': left-drags
+/// rotate, right-drags pan, ctrl, cmd or shift swaps the two, and middle-drags zoom.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RotateButton {

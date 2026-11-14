@@ -174,16 +174,23 @@ impl Rig {
                 let orbit = &config.orbit;
                 self.orbit_goal = self.orbit_goal.clamped(orbit);
                 let t = ease(orbit.damping_secs, dt);
-                self.orbit = self.orbit.eased_toward(self.orbit_goal, t);
-                Some(pose(self.orbit.position(), self.orbit.target, orbit.fov))
+                self.orbit = self.orbit.clamped(orbit).eased_toward(self.orbit_goal, t);
+                Some(pose(self.orbit.position(), self.orbit.target, orbit.fov()))
             }
         }
     }
 
-    /// Moves the orbit camera at once, without easing.
+    /// Moves the orbit camera at once, without easing. The next step clamps
+    /// it to the config in force then.
     pub fn place_orbit(&mut self, place: impl FnOnce(&mut Orbit)) {
         place(&mut self.orbit_goal);
         self.orbit = self.orbit_goal;
+    }
+
+    /// Zooms without easing, as drei does even with damping on.
+    pub fn zoom_orbit(&mut self, zoom: impl FnOnce(&mut Orbit)) {
+        zoom(&mut self.orbit_goal);
+        self.orbit.distance = self.orbit_goal.distance;
     }
 
     /// Blends a first- or third-person pose toward an elevated view of the

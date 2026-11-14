@@ -41,6 +41,15 @@ pub(super) fn forget(id: ViewId) {
     }
 }
 
+/// NaN or infinity would stick in the camera's pose for good.
+fn finite(numbers: impl IntoIterator<Item = f32>) -> Result<(), JsError> {
+    if numbers.into_iter().all(f32::is_finite) {
+        Ok(())
+    } else {
+        Err(js_err("numbers must be finite"))
+    }
+}
+
 fn from_js<T: serde::de::DeserializeOwned>(value: JsValue) -> Result<T, JsError> {
     serde_wasm_bindgen::from_value(value).map_err(js_err)
 }
@@ -95,6 +104,7 @@ pub fn set_conversation_focus(id: ViewId, point: JsValue) -> Result<(), JsError>
 pub fn set_camera_config(id: ViewId, config: JsValue) -> Result<(), JsError> {
     // Through JSON, which drops `undefined` fields: serde-wasm-bindgen hands
     // them to the field's type, and never reports a field it wasn't asked for.
+    // JSON also turns NaN and infinities into `null`, which a number field rejects.
     let json = stringify(&config)
         .ok()
         .and_then(|json| json.as_string())
@@ -116,6 +126,13 @@ struct OrbitPose {
 #[wasm_bindgen(js_name = setOrbit)]
 pub fn set_orbit(id: ViewId, pose: JsValue) -> Result<(), JsError> {
     let pose: OrbitPose = from_js(pose)?;
+    let numbers = [pose.azimuth, pose.elevation, pose.distance];
+    finite(
+        pose.target
+            .into_iter()
+            .flatten()
+            .chain(numbers.into_iter().flatten()),
+    )?;
     with(id, |c| {
         c.set_orbit(|orbit| {
             orbit.target = pose.target.map_or(orbit.target, Vec3::from);
@@ -136,6 +153,7 @@ struct Aabb {
 #[wasm_bindgen(js_name = frameBounds)]
 pub fn frame_bounds(id: ViewId, aabb: JsValue) -> Result<(), JsError> {
     let Aabb { min, max } = from_js(aabb)?;
+    finite(min.into_iter().chain(max))?;
     with(id, |c| c.frame_bounds(min.into(), max.into()))
 }
 
