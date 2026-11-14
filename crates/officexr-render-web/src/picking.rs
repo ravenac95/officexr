@@ -9,7 +9,9 @@ use std::sync::OnceLock;
 use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
 use officexr_render::SceneCamera;
-use officexr_render::picking::{Modifiers, PickHub, PointerMsg, PointerMsgAction, ray_at};
+use officexr_render::picking::{
+    Modifiers, PickHub, PointerMsg, PointerMsgAction, intersect_plane as plane_hit, ray_at,
+};
 use officexr_render::views::ViewId;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -27,6 +29,8 @@ extern "C" {
     fn offset_y(this: &PointerEvent) -> f64;
     #[wasm_bindgen(method, getter)]
     fn button(this: &PointerEvent) -> i16;
+    #[wasm_bindgen(method, getter)]
+    fn buttons(this: &PointerEvent) -> u16;
     #[wasm_bindgen(method, getter, js_name = pointerId)]
     fn pointer_id(this: &PointerEvent) -> i32;
     #[wasm_bindgen(method, getter, js_name = shiftKey)]
@@ -50,8 +54,12 @@ extern "C" {
     fn set_pointer_capture(this: &Canvas, id: i32);
 
     type PickCallback;
-    #[wasm_bindgen(method, js_name = call)]
-    fn call(this: &PickCallback, this_arg: &JsValue, event: &JsValue);
+    /// Caught: a throw unwinding through Bevy's schedule would wedge the app.
+    #[wasm_bindgen(method, catch, js_name = call)]
+    fn call(this: &PickCallback, this_arg: &JsValue, event: &JsValue) -> Result<JsValue, JsValue>;
+
+    #[wasm_bindgen(js_namespace = console, js_name = error)]
+    fn console_error(message: &str, error: &JsValue);
 }
 
 type Listener = Closure<dyn FnMut(PointerEvent)>;
@@ -147,6 +155,13 @@ pub fn on_pick(id: ViewId, callback: JsValue) -> Result<(), JsError> {
             listener(|e| button(e).map(PointerMsgAction::Release)),
         ),
         ("pointerleave", listener(|_| Some(PointerMsgAction::Leave))),
+        // The browser took the pointer (a touch turned into a scroll, say).
+        ("pointercancel", listener(|_| Some(PointerMsgAction::Leave))),
+        // Capture also ends after every release; only a loss mid-press ends the press.
+        (
+            "lostpointercapture",
+            listener(|e| (e.buttons() != 0).then_some(PointerMsgAction::Leave)),
+        ),
     ];
     for (kind, listener) in &listeners {
         canvas.add_event_listener(kind, listener);
@@ -199,8 +214,10 @@ fn deliver(picks: Res<PickHub>) {
         }) else {
             continue;
         };
-        if let Ok(event) = pick.serialize(&serializer) {
-            callback.call(&JsValue::NULL, &event);
+        if let Ok(event) = pick.serialize(&serializer)
+            && let Err(error) = callback.call(&JsValue::NULL, &event)
+        {
+            console_error("onPick callback threw:", &error);
         }
     }
 }
@@ -245,12 +262,10 @@ pub fn ray_at_screen(id: ViewId, x: f32, y: f32) -> Result<JsValue, JsError> {
 pub fn intersect_plane(id: ViewId, x: f32, y: f32, plane: JsValue) -> Result<JsValue, JsError> {
     let plane: PlaneInput = serde_wasm_bindgen::from_value(plane).map_err(js_err)?;
     let normal = Vec3::from(plane.normal);
-    let origin = -plane.constant * normal / normal.length_squared();
-    let normal = Dir3::new(normal).map_err(js_err)?;
-    let ray = view_ray(id, x, y)?;
-    let point = ray
-        .intersect_plane(origin, InfinitePlane3d { normal })
-        .map(|t| ray.get_point(t).to_array());
+    if !normal.is_finite() || normal.length_squared() == 0.0 {
+        return Err(js_err("the plane's normal must be non-zero"));
+    }
+    let point = plane_hit(view_ray(id, x, y)?, normal, plane.constant).map(<[f32; 3]>::from);
     point
         .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
         .map_err(js_err)

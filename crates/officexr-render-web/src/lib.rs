@@ -49,6 +49,8 @@ extern "C" {
     fn set_attribute(this: &Canvas, name: &str, value: &str);
     #[wasm_bindgen(method, js_name = hasAttribute)]
     fn has_attribute(this: &Canvas, name: &str) -> bool;
+    #[wasm_bindgen(method, js_name = removeAttribute)]
+    fn remove_attribute(this: &Canvas, name: &str);
     #[wasm_bindgen(js_namespace = document, js_name = querySelector)]
     fn query_selector(selector: &str) -> JsValue;
 }
@@ -232,6 +234,12 @@ pub fn destroy_view(id: ViewId) -> Result<(), JsError> {
     #[cfg(feature = "webgl2")]
     image_views::unregister(id);
     picking::forget(id);
+    // So the id finds no canvas: `onPick` and the ray queries on it then fail.
+    if let Ok(canvas) =
+        query_selector(&format!("canvas[data-officexr-view=\"{id}\"]")).dyn_into::<Canvas>()
+    {
+        canvas.remove_attribute("data-officexr-view");
+    }
     Ok(())
 }
 

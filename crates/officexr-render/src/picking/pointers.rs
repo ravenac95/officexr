@@ -8,7 +8,7 @@ use bevy::picking::backend::ray::{RayId, RayMap};
 use bevy::picking::backend::{HitData, PointerHits};
 use bevy::picking::events::*;
 use bevy::picking::pointer::{
-    Location, PointerAction, PointerButton, PointerId, PointerInput, PointerLocation, PointerMap,
+    Location, PointerAction, PointerButton, PointerId, PointerInput, PointerMap,
 };
 use bevy::picking::prelude::MeshPickingPlugin;
 use bevy::picking::{InteractionPlugin, PickingPlugin};
@@ -31,7 +31,8 @@ pub enum PointerMsgAction {
     Move,
     Press(PointerButton),
     Release(PointerButton),
-    /// The pointer left the view: it hovers nothing until it moves back.
+    /// The pointer left the view, or the browser took it: it hovers nothing,
+    /// and any press or drag ends without a release, until it moves back.
     Leave,
 }
 
@@ -51,6 +52,7 @@ pub struct PointerMsg {
 pub enum PickKind {
     Over,
     Out,
+    Move,
     Down,
     Up,
     Click,
@@ -63,7 +65,7 @@ pub enum PickKind {
 pub struct PickEvent {
     pub kind: PickKind,
     pub target: PickTarget,
-    /// Where the pointer hit, in world space; drags after their start have none.
+    /// Where the pointer hit, in world space; `drag` and `dragEnd` have none.
     pub point: Option<[f32; 3]>,
     pub normal: Option<[f32; 3]>,
     /// As DOM `MouseEvent.button`: 0 primary, 1 middle, 2 secondary.
@@ -121,12 +123,14 @@ pub(crate) fn plugin(app: &mut App) {
             (
                 cast_rays
                     .in_set(PickingSystems::ProcessInput)
-                    .after(RayMap::repopulate),
+                    .after(RayMap::repopulate)
+                    .after(crate::views::drain_hub),
                 hit_ground.in_set(PickingSystems::Backend),
             ),
         )
         .add_observer(forward::<PointerOver>)
         .add_observer(forward::<PointerOut>)
+        .add_observer(forward::<PointerMove>)
         .add_observer(forward::<PointerPress>)
         .add_observer(forward::<PointerRelease>)
         .add_observer(forward::<PointerClick>)
@@ -157,6 +161,7 @@ fn feed_pointers(world: &mut World) {
         let pointer = pointer_id(id);
         let entity = match world.resource::<PointerMap>().get_entity(pointer) {
             Some(entity) => entity,
+            None if msg.action == PointerMsgAction::Leave => continue,
             None => {
                 let ground = world.spawn((PickTarget::Ground, ChildOf(view))).id();
                 let state = ViewPointer {
@@ -180,10 +185,9 @@ fn feed_pointers(world: &mut World) {
             },
             PointerMsgAction::Press(button) => PointerAction::Press(button),
             PointerMsgAction::Release(button) => PointerAction::Release(button),
-            PointerMsgAction::Leave => {
-                world.get_mut::<PointerLocation>(entity).unwrap().location = None;
-                continue;
-            }
+            // Bevy's own leave: it drops the pointer's hits this frame, so its
+            // hover empties and `out` fires. The location stays, as `out` needs it.
+            PointerMsgAction::Leave => PointerAction::Cancel,
         };
         let location = Location {
             // Matches no camera's target, so Bevy builds the pointer no ray of its own.
@@ -191,7 +195,10 @@ fn feed_pointers(world: &mut World) {
                 width: msg.size.x as u32,
                 height: msg.size.y as u32,
             },
-            position: msg.screen,
+            position: match msg.action {
+                PointerMsgAction::Leave => last.unwrap_or(msg.screen),
+                _ => msg.screen,
+            },
         };
         world.write_message(PointerInput::new(pointer, location, action));
     }
@@ -267,6 +274,13 @@ impl Forwarded for PointerOut {
     }
 }
 
+impl Forwarded for PointerMove {
+    const KIND: PickKind = PickKind::Move;
+    fn hit(&self) -> Option<&HitData> {
+        Some(&self.hit)
+    }
+}
+
 impl Forwarded for PointerPress {
     const KIND: PickKind = PickKind::Down;
     fn button(&self) -> Option<PointerButton> {
@@ -321,7 +335,9 @@ impl Forwarded for PointerDragEnd {
     }
 }
 
-/// Reports an event at the first [`PickTarget`] it bubbles up to, and stops it there.
+/// Reports an event at the first [`PickTarget`] it bubbles up to, and stops
+/// it there. Only views' pointers report, and they only get input while JS
+/// listens, so `move` costs nothing for a view without an `onPick` callback.
 // ponytail: a target made of several meshes (an avatar, a layout) reports `out` then `over` when the pointer crosses between them.
 fn forward<E>(
     mut event: On<E>,
@@ -332,17 +348,19 @@ fn forward<E>(
 ) where
     E: Forwarded + for<'t> Event<Trigger<'t> = PropagateEntityTrigger<true, E, PointerTraversal>>,
 {
-    let Ok(target) = targets.get(event.event_target()) else {
-        return;
-    };
-    event.propagate(false);
-    let pointer = event.pointer();
+    let pointer = event.pointer().clone();
     let Some(state) = pointer_map
         .get_entity(pointer.id)
         .and_then(|e| pointers.get(e).ok())
     else {
         return;
     };
+    let Ok(target) = targets.get(event.event_target()) else {
+        return;
+    };
+    event.propagate(false);
+    // A `Down` on anything but `PickTarget::Ground` is where the controls'
+    // `PointerClaimed` resource would be set, so the press doesn't take pointer lock.
     let hit = event.hit();
     let pick = PickEvent {
         kind: E::KIND,
@@ -370,12 +388,18 @@ mod tests {
     use crate::{SceneCamera, WorldDiff};
 
     const SIZE: Vec2 = Vec2::new(64.0, 48.0);
+    const CENTRE: Vec2 = Vec2::new(32.0, 24.0);
+    const PRIMARY: PointerButton = PointerButton::Primary;
 
-    /// A view of the objects, a 2 m primitive cube each, seen from `from`.
-    fn view_of(objects: &[(&str, [f32; 3])], from: Vec3, at: Vec3) -> (App, ViewId) {
+    fn app() -> App {
         let mut app = bare_app();
         app.add_plugins((TransformPlugin, CameraPlugin, plugin))
             .init_asset::<bevy::mesh::skinning::SkinnedMeshInverseBindposes>();
+        app
+    }
+
+    /// A view of the objects, a 2 m primitive cube each, seen from `from`.
+    fn add_view(app: &mut App, objects: &[(&str, [f32; 3])], from: Vec3, at: Vec3) -> ViewId {
         let hub = app.world().resource::<ViewHub>().clone();
         let id = hub.create(ViewKind::World, |_| ViewTarget::Image(SIZE.as_uvec2()));
         let json = include_str!("../../examples/booper.scene.json");
@@ -396,45 +420,66 @@ mod tests {
         for _ in 0..3 {
             app.update();
         }
+        id
+    }
+
+    fn view_of(objects: &[(&str, [f32; 3])], from: Vec3, at: Vec3) -> (App, ViewId) {
+        let mut app = app();
+        let id = add_view(&mut app, objects, from, at);
         (app, id)
     }
 
-    fn click_centre(app: &mut App, id: ViewId) -> Vec<PickEvent> {
+    /// Object "a" at voxel 0 fills [0, 2]³; this view sees it at its centre.
+    fn view_of_a() -> (App, ViewId) {
+        view_of(&[("a", [0.0; 3])], Vec3::new(1.0, 6.0, 7.0), Vec3::ONE)
+    }
+
+    fn send(app: &App, id: ViewId, action: PointerMsgAction, screen: Vec2) {
+        let msg = PointerMsg {
+            action,
+            screen,
+            size: SIZE,
+            modifiers: Modifiers::default(),
+        };
+        app.world().resource::<PickHub>().pointer(id, msg);
+    }
+
+    /// The view's pick events over the next two frames.
+    fn picks(app: &mut App, id: ViewId) -> Vec<PickEvent> {
+        app.update();
+        app.update();
         let hub = app.world().resource::<PickHub>().clone();
-        for action in [
-            PointerMsgAction::Move,
-            PointerMsgAction::Press(PointerButton::Primary),
-            PointerMsgAction::Release(PointerButton::Primary),
-        ] {
-            let modifiers = Modifiers::default();
-            let (screen, size) = (SIZE / 2.0, SIZE);
-            hub.pointer(
-                id,
-                PointerMsg {
-                    action,
-                    screen,
-                    size,
-                    modifiers,
-                },
-            );
-        }
-        app.update();
-        app.update();
         hub.take_picks()
             .into_iter()
-            .filter(|(view, pick)| *view == id && pick.kind == PickKind::Click)
+            .filter(|(view, _)| *view == id)
             .map(|(_, pick)| pick)
             .collect()
     }
 
+    fn kinds(picks: &[PickEvent]) -> Vec<PickKind> {
+        picks.iter().map(|p| p.kind).collect()
+    }
+
+    fn click_centre(app: &mut App, id: ViewId) -> Vec<PickEvent> {
+        send(app, id, PointerMsgAction::Move, CENTRE);
+        send(app, id, PointerMsgAction::Press(PRIMARY), CENTRE);
+        send(app, id, PointerMsgAction::Release(PRIMARY), CENTRE);
+        let mut picks = picks(app, id);
+        picks.retain(|p| p.kind == PickKind::Click);
+        picks
+    }
+
+    fn a() -> PickTarget {
+        PickTarget::Object { id: "a".into() }
+    }
+
     #[test]
     fn clicking_an_object_picks_it_at_a_point_on_its_surface() {
-        // Object "a" at voxel 0 fills [0, 2]³.
-        let (mut app, id) = view_of(&[("a", [0.0; 3])], Vec3::new(1.0, 6.0, 7.0), Vec3::ONE);
+        let (mut app, id) = view_of_a();
         let clicks = click_centre(&mut app, id);
         assert_eq!(clicks.len(), 1, "{clicks:?}");
         let click = &clicks[0];
-        assert_eq!(click.target, PickTarget::Object { id: "a".into() });
+        assert_eq!(click.target, a());
         assert_eq!(click.button, Some(0));
         let point = Vec3::from(click.point.unwrap());
         let from_faces = (point - Vec3::ONE).abs() - Vec3::ONE;
@@ -461,8 +506,112 @@ mod tests {
 
     #[test]
     fn a_view_without_pointer_input_casts_no_rays() {
-        let (mut app, _) = view_of(&[("a", [0.0; 3])], Vec3::new(1.0, 6.0, 7.0), Vec3::ONE);
+        let (mut app, _) = view_of_a();
         app.update();
         assert!(app.world().resource::<RayMap>().map.is_empty());
+    }
+
+    #[test]
+    fn hovering_reports_over_and_moves_then_out_when_the_pointer_leaves() {
+        let (mut app, id) = view_of_a();
+        send(&app, id, PointerMsgAction::Move, CENTRE);
+        let entered = picks(&mut app, id);
+        let over = entered.iter().find(|p| p.kind == PickKind::Over);
+        assert_eq!(over.map(|p| &p.target), Some(&a()), "{entered:?}");
+
+        // Moving across the object reports each new hit, ground excluded.
+        send(
+            &app,
+            id,
+            PointerMsgAction::Move,
+            CENTRE + Vec2::new(2.0, 1.0),
+        );
+        let moved = picks(&mut app, id);
+        assert_eq!(kinds(&moved), [PickKind::Move], "{moved:?}");
+        assert_eq!(moved[0].target, a());
+        assert!(moved[0].point.is_some() && moved[0].normal.is_some());
+
+        // No move follows the leave: `out` must come from the leave alone.
+        send(&app, id, PointerMsgAction::Leave, Vec2::ZERO);
+        let left = picks(&mut app, id);
+        assert_eq!(kinds(&left), [PickKind::Out], "{left:?}");
+        assert_eq!(left[0].target, a());
+        assert!(picks(&mut app, id).is_empty(), "hover stuck after leaving");
+
+        send(&app, id, PointerMsgAction::Move, CENTRE);
+        assert!(kinds(&picks(&mut app, id)).contains(&PickKind::Over));
+    }
+
+    #[test]
+    fn dragging_an_object_reports_start_drags_and_end_on_it() {
+        let (mut app, id) = view_of_a();
+        send(&app, id, PointerMsgAction::Move, CENTRE);
+        send(&app, id, PointerMsgAction::Press(PRIMARY), CENTRE);
+        let mut all = picks(&mut app, id);
+        for dx in [3.0, 6.0] {
+            send(
+                &app,
+                id,
+                PointerMsgAction::Move,
+                CENTRE + Vec2::new(dx, 0.0),
+            );
+            all.extend(picks(&mut app, id));
+        }
+        send(
+            &app,
+            id,
+            PointerMsgAction::Release(PRIMARY),
+            CENTRE + Vec2::new(6.0, 0.0),
+        );
+        all.extend(picks(&mut app, id));
+
+        let drags: Vec<_> = all
+            .iter()
+            .filter(|p| {
+                matches!(
+                    p.kind,
+                    PickKind::DragStart | PickKind::Drag | PickKind::DragEnd
+                )
+            })
+            .collect();
+        let drag_kinds: Vec<_> = drags.iter().map(|p| p.kind).collect();
+        assert_eq!(
+            drag_kinds,
+            [
+                PickKind::DragStart,
+                PickKind::Drag,
+                PickKind::Drag,
+                PickKind::DragEnd
+            ],
+            "{all:?}"
+        );
+        assert!(drags.iter().all(|p| p.target == a() && p.button == Some(0)));
+        assert!(drags[0].point.is_some(), "dragStart has the press's hit");
+        assert!(drags[1..].iter().all(|p| p.point.is_none()));
+        assert_eq!(drags[3].screen, (CENTRE + Vec2::new(6.0, 0.0)).to_array());
+    }
+
+    #[test]
+    fn a_view_picks_only_its_own_scene() {
+        let mut app = app();
+        // A looks at where B's object is, but its own is far off.
+        let a_view = add_view(
+            &mut app,
+            &[("a", [20.0, 0.0, 0.0])],
+            Vec3::new(1.0, 6.0, 7.0),
+            Vec3::ONE,
+        );
+        let b_view = add_view(
+            &mut app,
+            &[("b", [0.0; 3])],
+            Vec3::new(1.0, 6.0, 7.0),
+            Vec3::ONE,
+        );
+        let in_a = click_centre(&mut app, a_view);
+        assert_eq!(in_a.len(), 1, "{in_a:?}");
+        assert_eq!(in_a[0].target, PickTarget::Ground);
+        let in_b = click_centre(&mut app, b_view);
+        assert_eq!(in_b.len(), 1, "{in_b:?}");
+        assert_eq!(in_b[0].target, PickTarget::Object { id: "b".into() });
     }
 }

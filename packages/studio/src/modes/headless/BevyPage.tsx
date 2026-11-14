@@ -198,8 +198,11 @@ function MugshotFeed({ id, character, primary = false }: { id: string; character
   );
 }
 
-/** Logs a pick event and keeps it in `window.__officexrBevyPicks`. */
+/** Logs a pick event and keeps it in `window.__officexrBevyPicks`; `move`s would drown the rest. */
 function logPick(event: PickEvent) {
+  if (event.kind === 'move') {
+    return;
+  }
   console.debug('[bevy pick]', event.kind, event.target, event.point);
   (sentinels().__officexrBevyPicks ??= []).push(event);
 }

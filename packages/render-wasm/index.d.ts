@@ -53,15 +53,36 @@ export type PickTarget =
   /** The infinite floor plane at y = 0. */
   | { type: 'ground' };
 
-export type PickKind = 'over' | 'out' | 'down' | 'up' | 'click' | 'dragStart' | 'drag' | 'dragEnd';
+/**
+ * - `over` / `out`: the pointer starts or stops hovering a target, including when it leaves the canvas.
+ *   A target that is despawned while hovered gets no `out`.
+ * - `move`: the pointer moved over a target, with this move's hit, so it follows faces and the ground.
+ * - `click`: a press and release on the same target. It still fires after a drag on that target, so
+ *   consumers that drag skip the `click` that follows a `dragEnd` themselves.
+ * - `dragStart` / `drag` / `dragEnd`: a pressed pointer moving; all go to the target the press was on.
+ *   A leave or `pointercancel` mid-press ends it without `up`, `click` or `dragEnd`.
+ */
+export type PickKind =
+  | 'over'
+  | 'out'
+  | 'move'
+  | 'down'
+  | 'up'
+  | 'click'
+  | 'dragStart'
+  | 'drag'
+  | 'dragEnd';
 
 export interface PickEvent {
   kind: PickKind;
   target: PickTarget;
-  /** World-space hit; `null` on `drag` and `dragEnd`, which follow the pointer off their target. */
+  /**
+   * World-space hit; `null` on `drag` and `dragEnd`, which follow the pointer off their target. To drag
+   * along a surface, use `intersectPlane` with the event's `screen`.
+   */
   point: Vec3 | null;
   normal: Vec3 | null;
-  /** As `MouseEvent.button`; `null` on `over` and `out`. */
+  /** As `MouseEvent.button`; `null` on `over`, `out` and `move`. */
   button: 0 | 1 | 2 | null;
   modifiers: { shift: boolean; ctrl: boolean; alt: boolean; meta: boolean };
   /** CSS pixels from the canvas's top left. */
@@ -98,12 +119,13 @@ export interface RendererModule {
   frameStats(id: ViewId): { drawCalls: number; triangles: number };
   /**
    * Sends `callback` the view's pick events, from pointer events on its canvas, replacing any callback
-   * it had; `null` stops them. A view without a callback does no picking.
+   * it had; `null` stops them. A view without a callback does no picking. A throwing callback is logged
+   * with `console.error` and the frame's other events are still delivered. Throws for a destroyed view.
    */
   onPick(id: ViewId, callback: ((event: PickEvent) => void) | null): void;
   /** The view camera's ray through `(x, y)`, in CSS pixels from its canvas's top left, as of the last `setCamera`. */
   rayAtScreen(id: ViewId, x: number, y: number): { origin: Vec3; dir: Vec3 };
-  /** Where that ray meets `plane` ahead of the camera, or `null`. */
+  /** Where that ray meets `plane` ahead of the camera, or `null`. Throws for a zero normal. */
   intersectPlane(id: ViewId, x: number, y: number, plane: Plane): Vec3 | null;
 }
 

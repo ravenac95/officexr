@@ -213,7 +213,7 @@ pub(crate) fn find_view(world: &mut World, id: ViewId) -> Option<Entity> {
         .find_map(|(entity, view)| (view.id == id).then_some(entity))
 }
 
-fn drain_hub(world: &mut World) {
+pub(crate) fn drain_hub(world: &mut World) {
     let inbox = std::mem::take(&mut world.resource::<ViewHub>().lock().inbox);
     for (id, msg) in inbox {
         let view = find_view(world, id);
