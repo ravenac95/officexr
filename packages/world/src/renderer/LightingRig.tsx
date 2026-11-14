@@ -13,7 +13,7 @@ export type LightingSettings = LightingViewConfig;
 /**
  * Editor-friendly lighting defaults. Mounts the shared LightingRig
  * with shadows off (editors set `shadows={false}` on their Canvas
- * anyway), no sun disc (editors draw no `SkyDome`), no aux light. Hemisphere is at 0 so the
+ * anyway), no sun disc (the editors that use these defaults draw no `SkyDome`), no aux light. Hemisphere is at 0 so the
  * `ambientFillIntensity` term acts as a flat ambient — matching the
  * look editors had before unification.
  *

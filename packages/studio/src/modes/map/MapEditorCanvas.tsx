@@ -45,6 +45,7 @@ import {
  */
 const ROOM_SNAP_THRESHOLD_VOXELS = 2;
 
+// ponytail: shows the default world lighting, not the saved world settings
 const { lighting, background } = DEFAULT_WORLD_CONSTANTS;
 
 interface MapEditorCanvasProps {
@@ -89,12 +90,16 @@ export function MapEditorCanvas(props: MapEditorCanvasProps) {
         topColor={background.topColor}
         horizonColor={background.horizonColor}
         bottomColor={background.bottomColor}
-        sun={{
-          position: lighting.sunPosition,
-          color: lighting.sunColor,
-          discRadius: lighting.sunDiscRadius,
-          glow: lighting.sunDiscIntensity,
-        }}
+        sun={
+          lighting.showSunDisc
+            ? {
+                position: lighting.sunPosition,
+                color: lighting.sunColor,
+                discRadius: lighting.sunDiscRadius,
+                glow: lighting.sunDiscIntensity,
+              }
+            : null
+        }
       />
       <EndlessGrid />
       <FloorPicker

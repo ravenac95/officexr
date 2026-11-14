@@ -172,7 +172,7 @@ restructured into five purpose-built modes, each a separate App under
 
 | Mode      | Hash      | Purpose                                                  |
 |-----------|-----------|----------------------------------------------------------|
-| Map       | `#map`    | Compose Rooms into a world — placement, rotation, spawn points, environment (sun/sky/stars/HDRI) |
+| Map       | `#map`    | Compose Rooms into a world — placement, rotation, spawn points |
 | Room      | `#room`   | Author a single Room: Select / Add / Delete / Tile tools, multi-select + groups, point-and-click cube placement |
 | Object    | `#object` | Tune every cube kind: label, swatch, walkable, scale, tint, opacity, roughness, metalness, emissive; "Upload models" panel uploads model packs and finalizes them into kinds |
 | Character | `#character` | Character previewer + per-model tuning                |
