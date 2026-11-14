@@ -20,6 +20,7 @@ use std::cell::Cell;
 use std::sync::OnceLock;
 
 use bevy::asset::AssetMetaCheck;
+use bevy::picking::input::PointerInputPlugin;
 use bevy::prelude::*;
 use bevy::window::ExitCondition;
 use officexr_render::views::{ViewHub, ViewId, ViewKind, ViewMsg, ViewStatus, ViewTarget};
@@ -28,6 +29,8 @@ use officexr_render::{
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
+
+mod picking;
 
 static HUB: OnceLock<ViewHub> = OnceLock::new();
 
@@ -157,9 +160,12 @@ pub fn init(origin: String, primary_canvas: JsValue) -> Result<(), JsError> {
             .set(AssetPlugin {
                 meta_check: AssetMetaCheck::Never,
                 ..default()
-            }),
+            })
+            // `onPick` feeds each view's pointer from its canvas; the window's would double it.
+            .disable::<PointerInputPlugin>(),
         OfficeXrRenderPlugin,
     ));
+    picking::add(&mut app);
     #[cfg(feature = "webgl2")]
     image_views::add(&mut app);
     let _ = HUB.set(app.world().resource::<ViewHub>().clone());
@@ -225,6 +231,7 @@ pub fn destroy_view(id: ViewId) -> Result<(), JsError> {
     }
     #[cfg(feature = "webgl2")]
     image_views::unregister(id);
+    picking::forget(id);
     Ok(())
 }
 
@@ -251,16 +258,16 @@ pub fn set_world(
 #[wasm_bindgen(js_name = setCamera)]
 pub fn set_camera(id: ViewId, camera: JsValue) -> Result<(), JsError> {
     let camera: CameraInput = serde_wasm_bindgen::from_value(camera).map_err(js_err)?;
-    send(
-        id,
-        ViewMsg::Camera(SceneCamera {
-            position: camera.position,
-            look_at: camera.look_at,
-            fov_deg: camera.fov_deg,
-            near: camera.near,
-            far: camera.far,
-        }),
-    )
+    let camera = SceneCamera {
+        position: camera.position,
+        look_at: camera.look_at,
+        fov_deg: camera.fov_deg,
+        near: camera.near,
+        far: camera.far,
+    };
+    send(id, ViewMsg::Camera(camera.clone()))?;
+    picking::set_camera(id, camera);
+    Ok(())
 }
 
 #[wasm_bindgen(js_name = setPlayers)]

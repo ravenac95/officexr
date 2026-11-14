@@ -1,6 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPersistentLocalState } from '@officexr/core-refactor';
-import { loadRenderer, type CameraPose, type RendererModule, type ViewId, type ViewKind } from '@officexr/render-wasm';
+import {
+  loadRenderer,
+  type CameraPose,
+  type PickEvent,
+  type RendererModule,
+  type ViewId,
+  type ViewKind,
+} from '@officexr/render-wasm';
 import type { OfficeState } from '@officexr/sdk';
 import { modelUrl } from '@officexr/world/app';
 import { pickCharacterForPlayer } from '@officexr/world/characters';
@@ -21,6 +28,8 @@ interface BevySentinels {
   __officexrBevyReady?: boolean;
   /** Where the mugshot character's feet settled, in metres. */
   __officexrBevyMugshotFeetY?: number;
+  /** With `&pick=1`, the world view's pick events so far. */
+  __officexrBevyPicks?: PickEvent[];
 }
 
 const sentinels = () => window as unknown as BevySentinels;
@@ -106,6 +115,7 @@ function useReadySentinel() {
       delete sentinels().__officexrBevyViews;
       delete sentinels().__officexrBevyReady;
       delete sentinels().__officexrBevyMugshotFeetY;
+      delete sentinels().__officexrBevyPicks;
     };
   }, []);
 }
@@ -115,14 +125,15 @@ function useReadySentinel() {
  * wasm, fed from the SDK store. `&mugshot=<character>` draws the Mugshot
  * mode's scene instead; `&views=2` draws both, side by side, from one Bevy
  * app. `window.__officexrBevyReady` turns true once every model has loaded.
+ * `&pick=1` logs the map view's pick events.
  */
-export function BevyPage({ mugshot, views }: { mugshot: string | null; views: number }) {
+export function BevyPage({ mugshot, views, pick }: { mugshot: string | null; views: number; pick: boolean }) {
   useReadySentinel();
   if (views === 2) {
     return (
       <div style={{ position: 'absolute', inset: 0, display: 'flex', background: '#000' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <StoreFeed id="bevy-canvas" />
+          <StoreFeed id="bevy-canvas" pick={pick} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <MugshotFeed id="bevy-canvas-2" character={PREVIEW_CHARACTER} />
@@ -139,7 +150,7 @@ export function BevyPage({ mugshot, views }: { mugshot: string | null; views: nu
             : { position: 'absolute', inset: 0 }
         }
       >
-        {mugshot ? <MugshotFeed id="bevy-canvas" character={mugshot} primary /> : <StoreFeed id="bevy-canvas" />}
+        {mugshot ? <MugshotFeed id="bevy-canvas" character={mugshot} primary /> : <StoreFeed id="bevy-canvas" pick={pick} />}
       </div>
     </div>
   );
@@ -187,7 +198,13 @@ function MugshotFeed({ id, character, primary = false }: { id: string; character
   );
 }
 
-function StoreFeed({ id }: { id: string }) {
+/** Logs a pick event and keeps it in `window.__officexrBevyPicks`. */
+function logPick(event: PickEvent) {
+  console.debug('[bevy pick]', event.kind, event.target, event.point);
+  (sentinels().__officexrBevyPicks ??= []).push(event);
+}
+
+function StoreFeed({ id, pick }: { id: string; pick: boolean }) {
   const { catalog } = useApplication();
   const [local] = useState(() => createPersistentLocalState({ selfId: SELF_ID, officeId: 'bevy' }));
   const storages = useMemo(createStorages, []);
@@ -252,7 +269,17 @@ function StoreFeed({ id }: { id: string }) {
 
   return (
     <>
-      <BevyCanvas id={id} kind="world" primary onView={(wasm, view) => setBevy({ wasm, view })} />
+      <BevyCanvas
+        id={id}
+        kind="world"
+        primary
+        onView={(wasm, view) => {
+          setBevy({ wasm, view });
+          if (pick) {
+            wasm.onPick(view, logPick);
+          }
+        }}
+      />
       {session.error && (
         <p role="alert" style={{ position: 'absolute', top: 8, left: 8, margin: 0, color: '#fff', font: '13px sans-serif' }}>
           {session.error}
@@ -266,6 +293,8 @@ const layoutPlacement = (p: BakedLayout) => ({
   gltfPath: `${window.location.origin}/api/baked-layouts/${p.layoutName}.glb`,
   position: p.position,
   rotationY: p.rotationY,
+  layoutName: p.layoutName,
+  roomInstanceId: p.roomInstanceId,
 });
 
 // ponytail: a fixed camera over the origin, where the bot spawns; no follow camera or orbit controls.

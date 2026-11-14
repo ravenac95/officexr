@@ -30,9 +30,48 @@ export interface WorldDiff {
   remove?: string[];
   lighting?: unknown;
   background?: unknown;
-  bakedLayouts?: { gltfPath: string; position: [number, number, number]; rotationY: number }[];
+  bakedLayouts?: {
+    gltfPath: string;
+    position: [number, number, number];
+    rotationY: number;
+    /** What picks on the layout report. */
+    layoutName?: string;
+    roomInstanceId?: string;
+  }[];
   /** A flat background instead of the sky; `null` brings the sky back. */
   clearColor?: string | null;
+}
+
+export type Vec3 = [number, number, number];
+
+/** What a pick hit; events bubble from a mesh up to the nearest target. */
+export type PickTarget =
+  | { type: 'object'; id: string }
+  | { type: 'layout'; name: string; roomInstanceId: string }
+  | { type: 'player'; id: string }
+  | { type: 'overlay'; tag: string }
+  /** The infinite floor plane at y = 0. */
+  | { type: 'ground' };
+
+export type PickKind = 'over' | 'out' | 'down' | 'up' | 'click' | 'dragStart' | 'drag' | 'dragEnd';
+
+export interface PickEvent {
+  kind: PickKind;
+  target: PickTarget;
+  /** World-space hit; `null` on `drag` and `dragEnd`, which follow the pointer off their target. */
+  point: Vec3 | null;
+  normal: Vec3 | null;
+  /** As `MouseEvent.button`; `null` on `over` and `out`. */
+  button: 0 | 1 | 2 | null;
+  modifiers: { shift: boolean; ctrl: boolean; alt: boolean; meta: boolean };
+  /** CSS pixels from the canvas's top left. */
+  screen: [number, number];
+}
+
+/** `normal · p + constant = 0`, as three.js's `Plane`. */
+export interface Plane {
+  normal: Vec3;
+  constant: number;
 }
 
 /** The wasm-bindgen module of one backend, already instantiated by `loadRenderer`. */
@@ -57,6 +96,15 @@ export interface RendererModule {
   /** `ready` once every model has loaded and settled; `pending` counts the models still loading. */
   isReady(id: ViewId): { ready: boolean; pending: number };
   frameStats(id: ViewId): { drawCalls: number; triangles: number };
+  /**
+   * Sends `callback` the view's pick events, from pointer events on its canvas, replacing any callback
+   * it had; `null` stops them. A view without a callback does no picking.
+   */
+  onPick(id: ViewId, callback: ((event: PickEvent) => void) | null): void;
+  /** The view camera's ray through `(x, y)`, in CSS pixels from its canvas's top left, as of the last `setCamera`. */
+  rayAtScreen(id: ViewId, x: number, y: number): { origin: Vec3; dir: Vec3 };
+  /** Where that ray meets `plane` ahead of the camera, or `null`. */
+  intersectPlane(id: ViewId, x: number, y: number, plane: Plane): Vec3 | null;
 }
 
 export type Gpu = { requestAdapter(): Promise<unknown> };

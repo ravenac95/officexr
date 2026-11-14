@@ -38,6 +38,8 @@ bevy = { version = "=0.20.1", default-features = false, features = ["multi_threa
 [features]
 # The `render` binary settles the mugshot character with the sim.
 mugshot = ["dep:officexr-sim"]
+# Mesh picking on views, fed pointer input through `picking::PickHub`.
+picking = ["bevy/mesh_picking"]
 # The scenario harness in `tests/visual/`; needs a GPU or Mesa lavapipe.
 visual-tests = ["mugshot"]
 

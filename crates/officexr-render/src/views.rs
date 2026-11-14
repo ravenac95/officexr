@@ -206,7 +206,7 @@ pub(crate) fn mirror_resources(
     }
 }
 
-fn find_view(world: &mut World, id: ViewId) -> Option<Entity> {
+pub(crate) fn find_view(world: &mut World, id: ViewId) -> Option<Entity> {
     world
         .query::<(Entity, &View)>()
         .iter(world)

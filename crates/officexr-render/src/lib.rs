@@ -15,6 +15,7 @@ mod lighting;
 mod mugshot;
 mod objects;
 mod offscreen;
+pub mod picking;
 pub mod placement;
 pub mod scene;
 mod sky;
@@ -111,6 +112,8 @@ impl Plugin for OfficeXrRenderPlugin {
             lighting::plugin,
             avatars::plugin,
             scene_systems,
+            #[cfg(feature = "picking")]
+            picking::plugin,
         ))
         .insert_resource(GlobalAmbientLight::NONE);
     }

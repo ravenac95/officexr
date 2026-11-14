@@ -11,6 +11,7 @@ use bevy::prelude::*;
 
 use crate::AssetBase;
 use crate::lighting::{HemisphereFill, ObjectMaterial};
+use crate::picking::PickTarget;
 use crate::views::{View, ViewKind, ViewPlayers, ViewScene};
 
 const RIGS: [&str; 4] = [
@@ -316,6 +317,7 @@ fn sync_view_avatars(
                 tag,
                 rig: None,
             },
+            PickTarget::Player { id: p.id.clone() },
             transform,
             Visibility::default(),
             WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(path))),
