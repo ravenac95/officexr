@@ -18,7 +18,7 @@ use crate::physics::rules::{
     GRAVITY, pick_respawn_position, respawn_threshold, should_respawn_falling,
     world_objects_to_colliders,
 };
-use crate::physics::step_up::{STEP_UP_MAX_HEIGHT, try_step_up};
+use crate::physics::step_up::{STEP_UP_MAX_HEIGHT, StepUpHold, try_step_up};
 use crate::proximity::{PairTracker, ProximityInput, TrackerOutput};
 use crate::world_objects::{Vec3, WorldObjects};
 
@@ -140,6 +140,7 @@ pub struct SimCore {
     world_objects: WorldObjects,
     gravity_enabled: bool,
     vertical_vel: f64,
+    step_up_hold: StepUpHold,
     /// Set by a jump and cleared once the landing ease finishes; not inferred from jumps left.
     airborne: bool,
     /// Refilled to `max_jumps` on the ground; starts empty until the first grounded step.
@@ -184,6 +185,7 @@ impl SimCore {
             },
             gravity_enabled: true,
             vertical_vel: 0.0,
+            step_up_hold: StepUpHold::default(),
             airborne: false,
             jumps_remaining: 0,
             max_jumps: 0,
@@ -293,6 +295,7 @@ impl SimCore {
     /// Grounded with a fresh set of jumps and no fall, carry or landing ease left.
     fn land(&mut self) {
         self.vertical_vel = 0.0;
+        self.step_up_hold = StepUpHold::default();
         self.airborne = false;
         self.jumps_remaining = self.max_jumps;
         self.air_vel = (0.0, 0.0);
@@ -329,7 +332,7 @@ impl SimCore {
         let intends_move = dir.x != 0.0 || dir.z != 0.0;
         let intent_vel = (dir.x * speed, dir.z * speed);
 
-        self.vertical_vel = if self.gravity_enabled {
+        self.vertical_vel = if self.gravity_enabled && !self.step_up_hold.active() {
             self.vertical_vel + GRAVITY * dt_sec
         } else {
             0.0
@@ -376,6 +379,11 @@ impl SimCore {
         };
 
         let corrected = self.sweep(move_x, move_z, dt_sec);
+        self.step_up_hold.update(
+            corrected.x.hypot(corrected.z),
+            self.controller.computed_grounded(),
+            intends_move,
+        );
 
         // Lifted over a ledge rather than falling. Only a falling speed
         // resets: a jump's ascent also moves up and must survive.
@@ -409,6 +417,7 @@ impl SimCore {
                 delta = hop;
                 horiz_blocked = false;
                 self.vertical_vel = 0.0;
+                self.step_up_hold.begin();
             }
             // The probe sweeps overwrote the controller state the next step's grounded check reads.
             self.sweep(move_x, move_z, dt_sec);
@@ -494,6 +503,7 @@ impl SimCore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world_objects::ObjectInstance;
 
     fn input(char_radius: f64) -> SimInput {
         SimInput {
@@ -531,5 +541,94 @@ mod tests {
         assert_eq!(radius(&sim), 0.4_f32);
         sim.step(&input(0.5));
         assert_eq!(radius(&sim), 0.5_f32);
+    }
+
+    /// A real-Rapier climb of 8 risers: one hop per riser, never sagging back.
+    fn climb_stairs(speed: f64) -> (usize, usize, f64, f64) {
+        let kind = |id: &str, shape: Option<ColliderShapeSpec>, size: [f64; 3]| SimKind {
+            id: id.into(),
+            local_aabb: Some(LocalAabb {
+                min: Vec3::default(),
+                max: Vec3 {
+                    x: size[0],
+                    y: size[1],
+                    z: size[2],
+                },
+            }),
+            dimensions: None,
+            collider_shape: shape,
+        };
+        let kinds = SimKinds {
+            voxel_size: 0.5,
+            kinds: vec![
+                kind("floor", None, [20.0, 1.0, 20.0]),
+                kind("landing", None, [4.0, 4.0, 4.0]),
+                kind(
+                    "stairs",
+                    Some(ColliderShapeSpec::CompoundSteps {
+                        step_count: 8,
+                        step_rise: 0.5,
+                        step_run: 0.5,
+                        step_depth: 4.0,
+                    }),
+                    [4.0, 4.0, 4.0],
+                ),
+            ],
+        };
+        let place = |id: &str, min: [f64; 3]| ObjectInstance {
+            id: id.into(),
+            kind_id: id.into(),
+            position: min.map(|m| m / 0.5),
+            yaw_deg: None,
+        };
+        let objects = WorldObjects {
+            cube_size: 0.5,
+            instances: vec![
+                place("floor", [-5.0, -1.0, -5.0]),
+                place("landing", [0.0, 0.0, 0.0]),
+                place("stairs", [4.0, 0.0, 0.0]),
+            ],
+        };
+        let mut sim = SimCore::new(0.4);
+        sim.set_static_colliders(&objects, &kinds, &[]).unwrap();
+        sim.teleport(Vec3 {
+            x: 10.0,
+            y: -0.5,
+            z: 2.0,
+        });
+        let mut walk = input(0.4);
+        walk.dir = XZ { x: -1.0, z: 0.0 };
+        walk.speed = speed;
+        walk.settings.movement_block_threshold = 0.9;
+        let (mut hops, mut sags, mut max_step_x) = (0, 0, 0.0_f64);
+        let mut prev = sim.position();
+        for _ in 0..4000 {
+            if prev.x <= 1.0 {
+                break;
+            }
+            let now = sim.step(&walk).new_pos;
+            if now.y - prev.y > 0.3 {
+                hops += 1;
+                max_step_x = max_step_x.max((now.x - prev.x).abs());
+            } else if now.y - prev.y < -0.02 {
+                sags += 1;
+            }
+            prev = now;
+        }
+        (hops, sags, max_step_x, prev.y)
+    }
+
+    #[test]
+    fn climbs_eight_risers_in_eight_hops_at_any_walking_speed() {
+        for speed in [0.5, 1.0, 3.0] {
+            let (hops, sags, max_step_x, end_y) = climb_stairs(speed);
+            assert_eq!(hops, 8, "hops at {speed} m/s");
+            assert_eq!(sags, 0, "sags at {speed} m/s");
+            assert!(
+                max_step_x <= speed / 60.0 + 0.01,
+                "hop advance at {speed} m/s"
+            );
+            assert!((end_y - 3.5).abs() < 0.1, "end y {end_y} at {speed} m/s");
+        }
     }
 }

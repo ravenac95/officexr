@@ -17,7 +17,7 @@ import {
   shouldRespawnFalling,
   worldObjectsToColliders,
 } from '../physics/rules.ts';
-import { STEP_UP_MAX_HEIGHT, tryStepUp, type StepUpProbe } from '../physics/step-up.ts';
+import { STEP_UP_MAX_HEIGHT, StepUpHold, tryStepUp, type StepUpProbe } from '../physics/step-up.ts';
 import { extrapolatePos, type Extrapolatable } from './extrapolate.ts';
 import type {
   SimBakedColliders,
@@ -51,6 +51,7 @@ export class TsSimCore implements SimCore {
   private gravityEnabled = true;
   /** m/s, negative falling; reset when grounded. */
   private verticalVel = 0;
+  private stepUpHold = new StepUpHold();
   /** Set by a jump and cleared once the landing ease finishes; not inferred from jumps left. */
   private airborne = false;
   /** Refilled to `maxJumps` on the ground; starts empty until the first grounded step. */
@@ -153,6 +154,7 @@ export class TsSimCore implements SimCore {
   /** Grounded with a fresh set of jumps and no fall, carry or landing ease left. */
   private land(): void {
     this.verticalVel = 0;
+    this.stepUpHold = new StepUpHold();
     this.airborne = false;
     this.jumpsRemaining = this.maxJumps;
     this.airVel = { x: 0, z: 0 };
@@ -180,7 +182,7 @@ export class TsSimCore implements SimCore {
     const isAirborne = this.airborne;
     const intendsMove = dir.x !== 0 || dir.z !== 0;
 
-    this.verticalVel = this.gravityEnabled ? this.verticalVel + GRAVITY * dtSec : 0;
+    this.verticalVel = this.gravityEnabled && !this.stepUpHold.active ? this.verticalVel + GRAVITY * dtSec : 0;
 
     // Reads the previous step's sweep, so it runs before the jump: a
     // freshly landed step that also jumps gets its jump back.
@@ -220,6 +222,7 @@ export class TsSimCore implements SimCore {
     const moveZ = isAirborne ? this.airVel.z * dtSec : dir.z * speed * dtSec;
 
     const corrected = this.sweep(moveX, moveZ, dtSec);
+    this.stepUpHold.update(Math.hypot(corrected.x, corrected.z), this.controller.computedGrounded(), intendsMove);
 
     // Lifted over a ledge rather than falling. Unlike bots, only a falling
     // speed resets: a jump's ascent also moves up and must survive.
@@ -241,6 +244,7 @@ export class TsSimCore implements SimCore {
         delta = hop;
         horizBlocked = false;
         this.verticalVel = 0;
+        this.stepUpHold.begin();
       }
       // The probe sweeps overwrote the controller state the next step's grounded check reads.
       this.sweep(moveX, moveZ, dtSec);

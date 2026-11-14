@@ -44,10 +44,8 @@
 
 import type { Vec3 } from '@officexr/sdk';
 
-/** Horizontal distance the assist carries the character past the
- * ledge edge — at least the ball radius (0.4) plus a margin so the
- * contact foot lands ON the tread instead of teetering on its corner.
- * It is only a probe distance; the applied hop advances the walk distance. */
+/** How far the forward probe reaches: the ball radius (0.4) plus a
+ * margin, so the contact foot lands ON the tread. Never applied as movement. */
 export const STEP_UP_FORWARD_CLEARANCE = 0.45;
 
 /** Tallest ledge the assist will climb. The REAL KayKit staircase
@@ -114,7 +112,7 @@ export function tryStepUp(
     z: start.z + up.z,
   });
 
-  // 2. FORWARD: carry the contact foot past the ledge edge.
+  // 2. FORWARD: probe that the contact foot clears the ledge edge.
   const dist = Math.max(len, STEP_UP_FORWARD_CLEARANCE);
   const fwd = probe.compute({
     x: (dx / len) * dist,
@@ -145,7 +143,32 @@ export function tryStepUp(
     return null;
   }
 
-  // Vertical hop plus the normal walk: the forward probe only verifies the
-  // landing and must not leak into the applied advance.
-  return { x: dx, y: landedRise, z: dz };
+  // Vertical hop plus the swept advance, capped at the walk length.
+  const swept = Math.hypot(fwd.x, fwd.z);
+  const scale = Math.min(1, len / swept);
+  return { x: fwd.x * scale, y: landedRise, z: fwd.z * scale };
+}
+
+/**
+ * Keeps gravity off after a hop until the ball rests on the tread. The hop
+ * only advances the walk distance, so the ball sits at tread height short of
+ * the edge; gravity would slide it back down the riser at slow speeds.
+ * The hold ends on grounding, on stopping, or once the ball has walked the
+ * probe reach.
+ */
+export class StepUpHold {
+  private remaining = 0;
+
+  begin(): void {
+    this.remaining = STEP_UP_FORWARD_CLEARANCE;
+  }
+
+  get active(): boolean {
+    return this.remaining > 0;
+  }
+
+  /** Call after each sweep with the horizontal distance it moved. */
+  update(walked: number, grounded: boolean, intendsMove: boolean): void {
+    this.remaining = grounded || !intendsMove ? 0 : Math.max(0, this.remaining - walked);
+  }
 }

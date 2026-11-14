@@ -246,3 +246,62 @@ describe('TsSimCore movement traces', () => {
     });
   }
 });
+
+describe('TsSimCore stair climb', () => {
+  const STAIRS_KINDS: SimKinds = {
+    voxelSize: VOXEL,
+    kinds: [
+      box('floor', { x: 40, y: 1, z: 40 }),
+      box('landing', { x: 4, y: 4, z: 4 }),
+      {
+        ...box('stairs', { x: 4, y: 4, z: 4 }),
+        colliderShape: { kind: 'compound-steps', stepCount: 8, stepRise: 0.5, stepRun: 0.5, stepDepth: 4 },
+      },
+    ],
+  };
+
+  /** 8 risers of 0.5 m ascending toward -X onto a 4 m high landing; returns the hop and sag counts. */
+  function climb(speed: number) {
+    const sim = new TsSimCore(BASE.settings.charRadius);
+    sim.setStaticColliders(
+      {
+        cubeSize: VOXEL,
+        instances: [
+          place('floor', { x: -5, y: -1, z: -5 }),
+          place('landing', { x: 0, y: 0, z: 0 }),
+          place('stairs', { x: 4, y: 0, z: 0 }),
+        ],
+      },
+      STAIRS_KINDS,
+      [],
+    );
+    sim.teleport({ x: 10, y: -0.5, z: 2 });
+    let prev = sim.position();
+    let hops = 0;
+    let sags = 0;
+    let maxStepX = 0;
+    for (let i = 0; i < 4000 && prev.x > 1; i++) {
+      const { newPos } = sim.step({ ...BASE, dir: { x: -1, z: 0 }, speed });
+      if (newPos.y - prev.y > 0.3) {
+        hops++;
+        maxStepX = Math.max(maxStepX, Math.abs(newPos.x - prev.x));
+      } else if (newPos.y - prev.y < -0.02) {
+        sags++;
+      }
+      prev = newPos;
+    }
+    const end = prev;
+    sim.dispose();
+    return { hops, sags, maxStepX, end };
+  }
+
+  for (const speed of [0.5, 1, 3]) {
+    it(`climbs 8 risers in 8 hops without sagging back at ${speed} m/s`, () => {
+      const { hops, sags, maxStepX, end } = climb(speed);
+      expect(hops).toBe(8);
+      expect(sags).toBe(0);
+      expect(maxStepX).toBeLessThanOrEqual((speed / 60) + 0.01);
+      expect(end.y).toBeCloseTo(3.5, 1);
+    });
+  }
+});

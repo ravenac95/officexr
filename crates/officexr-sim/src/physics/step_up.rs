@@ -5,7 +5,8 @@
 
 use crate::world_objects::Vec3;
 
-/// At least the ball radius plus a margin, so the contact foot lands on the tread.
+/// How far the forward probe reaches: the ball radius plus a margin, so the
+/// contact foot lands on the tread. Never applied as movement.
 pub const STEP_UP_FORWARD_CLEARANCE: f64 = 0.45;
 /// Above the 0.5 m staircase risers, below a 2 m block.
 pub const STEP_UP_MAX_HEIGHT: f64 = 0.6;
@@ -84,11 +85,42 @@ pub fn try_step_up(probe: &mut impl StepUpProbe, dx: f64, dz: f64) -> Option<Vec
     if !down.grounded || landed_on_character || landed_rise < MIN_LANDED_RISE {
         return None;
     }
+    // Vertical hop plus the swept advance, capped at the walk length.
+    let scale = (len / fwd.x.hypot(fwd.z)).min(1.0);
     Some(Vec3 {
-        x: dx,
+        x: fwd.x * scale,
         y: landed_rise,
-        z: dz,
+        z: fwd.z * scale,
     })
+}
+
+/// Keeps gravity off after a hop until the ball rests on the tread. The hop
+/// only advances the walk distance, so the ball sits at tread height short of
+/// the edge; gravity would slide it back down the riser at slow speeds.
+/// The hold ends on grounding, on stopping, or once the ball has walked the
+/// probe reach.
+#[derive(Debug, Default)]
+pub struct StepUpHold {
+    remaining: f64,
+}
+
+impl StepUpHold {
+    pub fn begin(&mut self) {
+        self.remaining = STEP_UP_FORWARD_CLEARANCE;
+    }
+
+    pub fn active(&self) -> bool {
+        self.remaining > 0.0
+    }
+
+    /// Call after each sweep with the horizontal distance it moved.
+    pub fn update(&mut self, walked: f64, grounded: bool, intends_move: bool) {
+        self.remaining = if grounded || !intends_move {
+            0.0
+        } else {
+            (self.remaining - walked).max(0.0)
+        };
+    }
 }
 
 #[cfg(test)]
