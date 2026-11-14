@@ -1,14 +1,16 @@
 /**
  * Unit tests for the baked-collider extras schema — the writer
  * (`buildColliderExtras`, used by `bakeLayout`) and the defensive
- * reader (`parseEmbeddedColliders`, used by `BakedLayoutColliders`).
+ * reader (`parseEmbeddedColliders`, `readGlbColliders`).
  * Covers the v2 (cuboids + trimeshes) format and v1 back-compat.
  */
+import { Document, WebIO } from '@gltf-transform/core';
 import { describe, it, expect } from 'vitest';
 import {
   BAKED_COLLIDERS_VERSION,
   buildColliderExtras,
   parseEmbeddedColliders,
+  readGlbColliders,
 } from '../baked-collider-extras.ts';
 import type { ColliderDescriptor } from '../../physics/rules.ts';
 
@@ -130,5 +132,23 @@ describe('baked-collider extras (v2)', () => {
 
   it('accepts an empty collider list (a bake with no colliders is valid)', () => {
     expect(parseEmbeddedColliders(buildColliderExtras([]))).toEqual([]);
+  });
+});
+
+describe('readGlbColliders', () => {
+  const glbWithExtras = async (extras: Record<string, unknown>): Promise<ArrayBuffer> => {
+    const doc = new Document();
+    doc.createScene().setExtras(extras);
+    return (await new WebIO().writeBinary(doc)).slice().buffer;
+  };
+
+  it('reads the colliders out of a GLB scene without a glTF loader', async () => {
+    const glb = await glbWithExtras(buildColliderExtras([...CUBOIDS, TRIMESH]));
+    expect(readGlbColliders(glb)).toEqual([...CUBOIDS, TRIMESH]);
+  });
+
+  it('is null for a GLB without colliders and for bytes that are not a GLB', async () => {
+    expect(readGlbColliders(await glbWithExtras({}))).toBeNull();
+    expect(readGlbColliders(new ArrayBuffer(64))).toBeNull();
   });
 });

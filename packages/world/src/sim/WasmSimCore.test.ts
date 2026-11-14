@@ -88,3 +88,38 @@ describe.each(Object.entries(IMPLEMENTATIONS))('%s SimCore replays the committed
     sim.dispose();
   });
 });
+
+describe.each(Object.entries(IMPLEMENTATIONS))('%s SimCore standingAt', (_impl, create) => {
+  const R = 0.4;
+  const VOXEL = 1;
+  const box = (id: string, size: Vec3) => ({ id, localAABB: { min: { x: 0, y: 0, z: 0 }, max: size } });
+  const kinds = { voxelSize: VOXEL, kinds: [box('slab', { x: 20, y: 0.15, z: 20 }), box('crate', { x: 1, y: 1, z: 1 })] };
+  const at = (kindId: string, position: [number, number, number]) => ({ id: kindId, sourceCommandId: 't', kindId, position });
+
+  /** A floor slab whose top sits 0.15 m above y = 0, the way a placed floor tile does. */
+  function simOn(...extra: ReturnType<typeof at>[]): SimCore {
+    const sim = create(R);
+    sim.setStaticColliders({ cubeSize: VOXEL, instances: [at('slab', [-10, 0, -10]), ...extra] }, kinds, []);
+    return sim;
+  }
+
+  it('stands the probe on a floor slab that starts above the chair footprint', () => {
+    const sim = simOn();
+    expect(sim.standingAt({ x: 0, y: 0, z: 0 }, R)).toBe(true);
+    sim.dispose();
+  });
+
+  it('still sees an obstacle standing on the slab', () => {
+    const sim = simOn(at('crate', [0, 0.15, 0]));
+    expect(sim.standingAt({ x: 0.5, y: 0, z: 0 }, R)).toBe(false);
+    expect(sim.standingAt({ x: 3, y: 0, z: 0 }, R)).toBe(true);
+    sim.dispose();
+  });
+
+  it('ignores the player own body', () => {
+    const sim = simOn();
+    sim.teleport({ x: 0, y: 0.15, z: 0 });
+    expect(sim.standingAt({ x: 0, y: 0, z: 0 }, R)).toBe(true);
+    sim.dispose();
+  });
+});

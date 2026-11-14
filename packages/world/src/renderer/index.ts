@@ -12,9 +12,7 @@ export {
 export { Players } from './Players.tsx';
 export { PlayerNameTag } from './PlayerNameTag.tsx';
 export { CharacterPreviewCanvas } from './CharacterPreviewCanvas.tsx';
-export { MapColliders } from './MapColliders.tsx';
 export { BakedLayout, BakedLayoutErrorBoundary, type BakedLayoutProps } from './BakedLayout.tsx';
-export { BakedLayoutColliders, type BakedLayoutCollidersProps } from './BakedLayoutColliders.tsx';
 export { SkyDome, resolveHorizonColor, type SkySun } from './SkyDome.tsx';
 export { ProximityGlow } from './ProximityGlow.tsx';
 export { CameraRig } from './CameraRig.tsx';

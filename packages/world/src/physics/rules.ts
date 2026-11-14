@@ -111,10 +111,10 @@ export function shouldRespawnFalling(
  *
  * Two floor sources, combined by min:
  *  - Cube bottom face = `inst.position[1] * cubeSize` (matches the
- *    collider placement in `<MapColliders>` and `worldObjectsToCuboids`).
+ *    collider placement in `SimCore` and `worldObjectsToCuboids`).
  *  - Spawn point y. Baked-layout maps (e.g. `booper`) put the floor
  *    geometry inside a baked GLB rendered/collided by `<BakedLayout>`
- *    + `<BakedLayoutColliders>`, NOT inside `worldObjects.instances`
+ *    + `useBakedColliders`, NOT inside `worldObjects.instances`
  *    (the referenced room is empty). Without the spawn-derived floor,
  *    the backstop threshold would collapse to `-Infinity` for those
  *    maps and the backstop check `newPos.y < threshold` would never
