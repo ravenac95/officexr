@@ -261,7 +261,7 @@ fn sync_view_avatars(
     assets: &AssetServer,
     avatars: &mut Query<(Entity, &Avatar, &mut Transform, &ChildOf)>,
 ) {
-    for (entity, avatar, _, _) in avatars.iter().filter(|a| a.3.parent() == view) {
+    for (entity, avatar, _, _) in avatars.iter().filter(|(.., v)| v.parent() == view) {
         let kept = players
             .players
             .iter()

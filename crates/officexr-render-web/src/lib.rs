@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 use bevy::asset::AssetMetaCheck;
 use bevy::prelude::*;
 use bevy::window::ExitCondition;
-use officexr_render::views::{ViewHub, ViewId, ViewKind, ViewMsg, ViewTarget};
+use officexr_render::views::{ViewHub, ViewId, ViewKind, ViewMsg, ViewStatus, ViewTarget};
 use officexr_render::{
     AssetBase, OfficeXrRenderPlugin, PlayerRender, Players, SceneCamera, WorldDiff, mugshot_player,
 };
@@ -89,12 +89,19 @@ fn hub() -> Result<&'static ViewHub, JsError> {
     HUB.get().ok_or_else(|| js_err("call init first"))
 }
 
+fn no_view(id: ViewId) -> JsError {
+    js_err(format!("no view {id}"))
+}
+
 fn send(id: ViewId, msg: ViewMsg) -> Result<(), JsError> {
-    if hub()?.send(id, msg) {
-        Ok(())
-    } else {
-        Err(js_err(format!("no view {id}")))
-    }
+    hub()?
+        .send(id, msg)
+        .then_some(())
+        .ok_or_else(|| no_view(id))
+}
+
+fn status(id: ViewId) -> Result<ViewStatus, JsError> {
+    hub()?.status(id).ok_or_else(|| no_view(id))
 }
 
 /// Boots Bevy once; `origin` serves `/models/...`.
@@ -237,9 +244,7 @@ pub fn set_players(id: ViewId, players: JsValue) -> Result<(), JsError> {
 /// counts the models and avatars still loading.
 #[wasm_bindgen(js_name = isReady)]
 pub fn is_ready(id: ViewId) -> Result<JsValue, JsError> {
-    let status = hub()?
-        .status(id)
-        .ok_or_else(|| js_err(format!("no view {id}")))?;
+    let status = status(id)?;
     serde_wasm_bindgen::to_value(&Readiness {
         ready: status.ready,
         pending: status.pending,
@@ -249,9 +254,7 @@ pub fn is_ready(id: ViewId) -> Result<JsValue, JsError> {
 
 #[wasm_bindgen(js_name = frameStats)]
 pub fn frame_stats(id: ViewId) -> Result<JsValue, JsError> {
-    let status = hub()?
-        .status(id)
-        .ok_or_else(|| js_err(format!("no view {id}")))?;
+    let status = status(id)?;
     serde_wasm_bindgen::to_value(&FrameStats {
         draw_calls: status.draw_calls,
         triangles: status.triangles,

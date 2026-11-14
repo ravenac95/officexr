@@ -116,7 +116,7 @@ pub struct View {
     settled: u32,
 }
 
-#[derive(Component, Deref, DerefMut)]
+#[derive(Component, Deref)]
 pub struct ViewScene(pub WorldSceneData);
 
 #[derive(Component, Deref)]
