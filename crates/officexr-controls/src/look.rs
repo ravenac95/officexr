@@ -1,12 +1,13 @@
-//! The camera maths of `packages/world/src/renderer/lookControls.ts`.
+//! The camera maths of `packages/world/src/renderer/lookControls.ts`, and of
+//! the studio editors' orbit cameras.
 
 use std::f32::consts::PI;
 
-use bevy::input::mouse::MouseScrollUnit;
+use bevy::input::mouse::{MouseButton, MouseScrollUnit};
 use bevy::math::{Vec2, Vec3};
 use officexr_sim::physics::rules::BODY_Y;
 
-use crate::{CameraMode, FixedCamera};
+use crate::{CameraMode, FixedCamera, OrbitCamera, RotateButton};
 
 pub const PITCH_MIN: f32 = -1.3;
 pub const PITCH_MAX: f32 = 1.3;
@@ -241,6 +242,184 @@ pub fn forward(yaw: f32, pitch: f32) -> Vec3 {
     Vec3::new(-yaw.sin() * cos_p, pitch.sin(), -yaw.cos() * cos_p)
 }
 
+/// Drag px → radians, for the orbit camera and free-fly's turn.
+pub const DRAG_ROTATE: f32 = 0.005;
+/// Drag px → metres of pan, per metre of orbit distance.
+const ORBIT_PAN: f32 = 0.0015;
+/// Just short of the poles, where the look-at up vector degenerates.
+pub const ORBIT_POLE: f32 = std::f32::consts::FRAC_PI_2 - 0.05;
+/// drei's zoom scale for one dolly step.
+const DOLLY_STEP: f32 = 0.95;
+/// Metres per second the move keys carry the orbit target, per metre of distance.
+const ORBIT_MOVE: f32 = 1.2;
+
+/// What a mouse drag does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Drag {
+    /// Free-fly's turn in place.
+    Turn,
+    Rotate,
+    Pan,
+    /// drei's middle-drag zoom.
+    Dolly,
+}
+
+/// Modifier keys held as a drag starts.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Modifiers {
+    pub shift: bool,
+    /// Ctrl, or cmd on macOS.
+    pub ctrl: bool,
+}
+
+/// The drag a press of `button` starts in `mode`, if any.
+pub fn drag_for(
+    mode: CameraMode,
+    button: MouseButton,
+    held: Modifiers,
+    orbit: &OrbitCamera,
+) -> Option<Drag> {
+    let pan = orbit.pan.then_some(Drag::Pan);
+    match (mode, orbit.rotate_button, button) {
+        (CameraMode::FreeFly, _, MouseButton::Left) => Some(Drag::Turn),
+        // The scene editor's; with panning off, as in the character editor, shift is ignored.
+        (CameraMode::Orbit, RotateButton::Right, MouseButton::Right) => Some(if held.shift {
+            pan.unwrap_or(Drag::Rotate)
+        } else {
+            Drag::Rotate
+        }),
+        (CameraMode::Orbit, RotateButton::Right, MouseButton::Middle) => pan,
+        // drei `OrbitControls`': a modifier swaps the left and right buttons' rotate and pan.
+        (CameraMode::Orbit, RotateButton::Left, MouseButton::Left | MouseButton::Right) => {
+            let swapped = held.shift || held.ctrl;
+            if (button == MouseButton::Left) != swapped {
+                Some(Drag::Rotate)
+            } else {
+                pan
+            }
+        }
+        (CameraMode::Orbit, RotateButton::Left, MouseButton::Middle) => Some(Drag::Dolly),
+        _ => None,
+    }
+}
+
+/// An orbit camera, at `distance` from `target` toward `azimuth` (its look
+/// yaw) and `elevation` (positive is above the target).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Orbit {
+    pub target: Vec3,
+    pub azimuth: f32,
+    pub elevation: f32,
+    pub distance: f32,
+}
+
+impl Default for Orbit {
+    fn default() -> Self {
+        Self {
+            target: Vec3::Y,
+            azimuth: -0.55,
+            elevation: 0.45,
+            distance: 16.0,
+        }
+    }
+}
+
+impl Orbit {
+    pub fn position(&self) -> Vec3 {
+        orbit_position(self.target, self.azimuth, -self.elevation, self.distance)
+    }
+
+    /// Within the config's limits, and short of the poles whatever they say.
+    /// `max`/`min` rather than `clamp`, which panics on a config whose
+    /// minimum passes its maximum.
+    pub fn clamped(mut self, config: &OrbitCamera) -> Self {
+        self.elevation = self
+            .elevation
+            .max(config.min_elevation_deg.to_radians().max(-ORBIT_POLE))
+            .min(config.max_elevation_deg.to_radians().min(ORBIT_POLE));
+        self.distance = self
+            .distance
+            .max(config.min_distance)
+            .min(config.max_distance);
+        self
+    }
+
+    /// A drag of `delta` CSS px swings the camera around the target.
+    // ponytail: drei turns 2π per canvas height and zooms 5% a wheel notch; every orbit here uses the scene editor's per-px rates.
+    pub fn rotate(&mut self, delta: Vec2, config: &OrbitCamera) {
+        self.azimuth -= delta.x * DRAG_ROTATE;
+        self.elevation -= delta.y * DRAG_ROTATE;
+        *self = self.clamped(config);
+    }
+
+    /// A drag of `delta` CSS px slides the target across the view, faster
+    /// the further out the camera is.
+    pub fn pan(&mut self, delta: Vec2) {
+        let speed = self.distance * ORBIT_PAN;
+        let back = orbit_position(Vec3::ZERO, self.azimuth, -self.elevation, 1.0);
+        let right = Vec3::Y.cross(back).normalize();
+        let up = back.cross(right);
+        self.target += (right * -delta.x + up * delta.y) * speed;
+    }
+
+    /// Divides the distance by a [`wheel_zoom_factor`].
+    pub fn zoom(&mut self, factor: f32, config: &OrbitCamera) {
+        self.distance /= factor;
+        *self = self.clamped(config);
+    }
+
+    /// drei's middle-drag: 5% further out or in for a drag down or up.
+    // ponytail: one step a frame where drei steps per pointermove; browsers send about one pointermove a frame.
+    pub fn dolly(&mut self, delta_y: f32, config: &OrbitCamera) {
+        if delta_y != 0.0 {
+            self.zoom(DOLLY_STEP.powf(delta_y.signum()), config);
+        }
+    }
+
+    /// Carries the target along held move-key `axes` (`x` right, `y` up, `z`
+    /// forward) for `dt` seconds, level with the ground whatever the elevation.
+    pub fn fly(&mut self, axes: Vec3, dt: f32) {
+        let (sin, cos) = self.azimuth.sin_cos();
+        let forward = Vec3::new(-sin, 0.0, -cos);
+        let right = Vec3::new(cos, 0.0, -sin);
+        self.target += (forward * axes.z + right * axes.x + Vec3::Y * axes.y)
+            * self.distance
+            * ORBIT_MOVE
+            * dt;
+    }
+
+    /// Aims at the box's centre from far enough out that its bounding sphere
+    /// fits the vertical field of view, keeping the angles.
+    // ponytail: a view narrower than it is tall can still crop the box at the sides; the rig doesn't know the aspect.
+    pub fn frame(&mut self, min: Vec3, max: Vec3, config: &OrbitCamera) {
+        self.target = (min + max) / 2.0;
+        self.distance = min.distance(max) / 2.0 / (config.fov().to_radians() / 2.0).sin();
+    }
+
+    /// The orbit that puts the camera at `eye`, looking at `target`.
+    pub fn from_eye(target: Vec3, eye: Vec3) -> Self {
+        let back = eye - target;
+        Self {
+            target,
+            azimuth: back.x.atan2(back.z),
+            elevation: back.y.atan2(Vec2::new(back.x, back.z).length()),
+            distance: back.length(),
+        }
+    }
+
+    /// `t` of the way to `goal`. Azimuth winds up rather than wrapping, so a
+    /// plain lerp never takes the long way round.
+    pub fn eased_toward(self, goal: Self, t: f32) -> Self {
+        let lerp = |a: f32, b: f32| a + (b - a) * t;
+        Self {
+            target: self.target.lerp(goal.target, t),
+            azimuth: lerp(self.azimuth, goal.azimuth),
+            elevation: lerp(self.elevation, goal.elevation),
+            distance: lerp(self.distance, goal.distance),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,8 +472,8 @@ mod tests {
     }
 
     #[test]
-    fn look_delta_ignores_top_down_and_free_fly() {
-        for mode in [CameraMode::TopDown, CameraMode::FreeFly] {
+    fn look_delta_ignores_top_down_free_fly_and_orbit() {
+        for mode in [CameraMode::TopDown, CameraMode::FreeFly, CameraMode::Orbit] {
             let mut look = Look::default();
             apply_look_delta(mode, 1.0, 1.0, &mut look);
             assert_eq!(look, Look::default());
@@ -496,5 +675,269 @@ mod tests {
             orbit_position(Vec3::ZERO, 0.0, 0.4, 5.0).y,
             -5.0 * 0.4f32.sin(),
         );
+    }
+
+    fn close3(a: Vec3, b: Vec3) {
+        assert!(a.distance(b) < 1e-3, "{a} != {b}");
+    }
+
+    /// `SceneEditorCanvas`'s `OrbitCamera`'s `useFrame` placement.
+    fn scene_editor_position(o: &Orbit) -> Vec3 {
+        let (az, el, d) = (o.azimuth, o.elevation, o.distance);
+        o.target
+            + Vec3::new(
+                d * el.cos() * az.sin(),
+                d * el.sin(),
+                d * el.cos() * az.cos(),
+            )
+    }
+
+    #[test]
+    fn orbit_sits_where_the_scene_editor_puts_its_camera() {
+        let orbit = Orbit::default();
+        assert_eq!(
+            (orbit.azimuth, orbit.elevation, orbit.distance),
+            (-0.55, 0.45, 16.0)
+        );
+        close3(orbit.position(), scene_editor_position(&orbit));
+        let swung = Orbit {
+            target: Vec3::new(3.0, -2.0, 5.0),
+            azimuth: 2.4,
+            elevation: -0.9,
+            distance: 7.5,
+        };
+        close3(swung.position(), scene_editor_position(&swung));
+    }
+
+    #[test]
+    fn orbit_rotates_half_a_centiradian_per_px_short_of_the_poles() {
+        let config = OrbitCamera::default();
+        let mut orbit = Orbit::default();
+        orbit.rotate(Vec2::new(100.0, 40.0), &config);
+        close(orbit.azimuth, -1.05);
+        close(orbit.elevation, 0.25);
+        orbit.rotate(Vec2::new(0.0, -1000.0), &config);
+        close(orbit.elevation, PI / 2.0 - 0.05);
+        orbit.rotate(Vec2::new(0.0, 1000.0), &config);
+        close(orbit.elevation, -PI / 2.0 + 0.05);
+
+        // The character editor's limits.
+        let character = OrbitCamera {
+            min_elevation_deg: (-0.4f32).to_degrees(),
+            ..OrbitCamera::default()
+        };
+        orbit.rotate(Vec2::ZERO, &character);
+        close(orbit.elevation, -0.4);
+    }
+
+    #[test]
+    fn orbit_pans_the_target_across_the_view_by_distance() {
+        let mut orbit = Orbit::default();
+        let back = (orbit.position() - orbit.target).normalize();
+        orbit.pan(Vec2::new(100.0, 0.0));
+        // 100 px × 16 m × 0.0015, to the left along the level right axis.
+        let moved = orbit.target - Orbit::default().target;
+        close(moved.length(), 2.4);
+        close(moved.y, 0.0);
+        close(moved.dot(back), 0.0);
+        let right = Vec3::new(orbit.azimuth.cos(), 0.0, -orbit.azimuth.sin());
+        close3(moved, right * -2.4);
+
+        let mut orbit = Orbit::default();
+        orbit.pan(Vec2::new(0.0, 100.0));
+        let moved = orbit.target - Orbit::default().target;
+        close(moved.length(), 2.4);
+        close(moved.dot(back), 0.0);
+        assert!(moved.y > 0.0, "a drag down raises the target");
+    }
+
+    #[test]
+    fn orbit_zooms_by_the_wheel_within_its_distance_limits() {
+        let config = OrbitCamera::default();
+        let mut orbit = Orbit::default();
+        // A 100 px wheel down is the scene editor's `exp(deltaY * 0.001)`.
+        orbit.zoom(wheel_zoom_factor(100.0, MouseScrollUnit::Pixel), &config);
+        close(orbit.distance, 16.0 * 0.1f32.exp());
+        orbit.zoom(
+            wheel_zoom_factor(-10_000.0, MouseScrollUnit::Pixel),
+            &config,
+        );
+        close(orbit.distance, 2.0);
+        orbit.zoom(wheel_zoom_factor(10_000.0, MouseScrollUnit::Pixel), &config);
+        close(orbit.distance, 200.0);
+
+        // `EditorCamera`'s limits.
+        let preview = OrbitCamera {
+            min_distance: 1.5,
+            max_distance: 40.0,
+            ..OrbitCamera::default()
+        };
+        orbit.zoom(1.0, &preview);
+        close(orbit.distance, 40.0);
+    }
+
+    #[test]
+    fn a_config_with_crossed_limits_does_not_panic() {
+        let crossed = OrbitCamera {
+            min_distance: 10.0,
+            max_distance: 5.0,
+            min_elevation_deg: 30.0,
+            max_elevation_deg: -30.0,
+            ..OrbitCamera::default()
+        };
+        let orbit = Orbit::default().clamped(&crossed);
+        assert!(orbit.distance.is_finite() && orbit.elevation.is_finite());
+    }
+
+    #[test]
+    fn frame_bounds_fits_the_box_in_the_fov_and_keeps_the_angles() {
+        let config = OrbitCamera::default();
+        let mut orbit = Orbit::default();
+        let (min, max) = (Vec3::new(-1.0, 0.0, -1.0), Vec3::new(1.0, 2.0, 1.0));
+        orbit.frame(min, max, &config);
+        close3(orbit.target, Vec3::Y);
+        assert_eq!((orbit.azimuth, orbit.elevation), (-0.55, 0.45));
+        // The bounding sphere (radius √3) touches the edge of the 45° view.
+        close((3f32.sqrt() / orbit.distance).asin(), 22.5f32.to_radians());
+
+        orbit.frame(Vec3::splat(-500.0), Vec3::splat(500.0), &config);
+        close(orbit.clamped(&config).distance, 200.0);
+        orbit.frame(Vec3::ONE, Vec3::ONE, &config);
+        close(orbit.clamped(&config).distance, 2.0);
+
+        let zero_fov = OrbitCamera {
+            fov: 0.0,
+            ..OrbitCamera::default()
+        };
+        orbit.frame(min, max, &zero_fov);
+        assert!(orbit.distance.is_finite());
+    }
+
+    #[test]
+    fn orbit_drag_buttons() {
+        let scene = OrbitCamera::default();
+        let character = OrbitCamera {
+            pan: false,
+            ..OrbitCamera::default()
+        };
+        let drei = OrbitCamera {
+            rotate_button: RotateButton::Left,
+            ..OrbitCamera::default()
+        };
+        let preview = OrbitCamera {
+            pan: false,
+            ..drei.clone()
+        };
+        use MouseButton::{Left, Middle, Right};
+        let none = Modifiers::default();
+        let shift = Modifiers {
+            shift: true,
+            ..none
+        };
+        let ctrl = Modifiers { ctrl: true, ..none };
+        let cases = [
+            // The scene editor: right rotates, middle or shift+right pans, left is the tools'.
+            (&scene, Right, none, Some(Drag::Rotate)),
+            (&scene, Right, shift, Some(Drag::Pan)),
+            (&scene, Middle, none, Some(Drag::Pan)),
+            (&scene, Left, none, None),
+            (&scene, Left, shift, None),
+            // The character editor: right rotates, shift or not.
+            (&character, Right, shift, Some(Drag::Rotate)),
+            (&character, Middle, none, None),
+            // drei: left rotates, right pans, a modifier swaps them, middle dollies.
+            (&drei, Left, none, Some(Drag::Rotate)),
+            (&drei, Left, shift, Some(Drag::Pan)),
+            (&drei, Left, ctrl, Some(Drag::Pan)),
+            (&drei, Right, none, Some(Drag::Pan)),
+            (&drei, Right, ctrl, Some(Drag::Rotate)),
+            (&drei, Middle, none, Some(Drag::Dolly)),
+            (&preview, Left, none, Some(Drag::Rotate)),
+            (&preview, Right, none, None),
+            (&preview, Right, shift, Some(Drag::Rotate)),
+            (&preview, Left, shift, None),
+            (&preview, Middle, none, Some(Drag::Dolly)),
+        ];
+        for (config, button, held, expected) in cases {
+            assert_eq!(
+                drag_for(CameraMode::Orbit, button, held, config),
+                expected,
+                "{button:?} {held:?} {:?} pan {}",
+                config.rotate_button,
+                config.pan,
+            );
+        }
+        assert_eq!(
+            drag_for(CameraMode::FreeFly, Left, none, &scene),
+            Some(Drag::Turn)
+        );
+        assert_eq!(drag_for(CameraMode::FreeFly, Right, none, &scene), None);
+        assert_eq!(drag_for(CameraMode::Fixed, Left, none, &scene), None);
+    }
+
+    #[test]
+    fn a_middle_drag_dollies_five_percent_a_frame_like_drei() {
+        let config = OrbitCamera::default();
+        let mut orbit = Orbit::default();
+        orbit.dolly(3.0, &config);
+        close(orbit.distance, 16.0 / 0.95);
+        orbit.dolly(0.0, &config);
+        close(orbit.distance, 16.0 / 0.95);
+        orbit.dolly(-40.0, &config);
+        close(orbit.distance, 16.0);
+    }
+
+    #[test]
+    fn elevation_stays_short_of_the_poles_whatever_the_limits() {
+        let past_the_poles = OrbitCamera {
+            min_elevation_deg: -120.0,
+            max_elevation_deg: 95.0,
+            ..OrbitCamera::default()
+        };
+        let mut orbit = Orbit::default();
+        orbit.rotate(Vec2::new(0.0, -10_000.0), &past_the_poles);
+        close(orbit.elevation, ORBIT_POLE);
+        orbit.rotate(Vec2::new(0.0, 10_000.0), &past_the_poles);
+        close(orbit.elevation, -ORBIT_POLE);
+    }
+
+    /// The map editor's `FlyCamera`: WASD moves the target level with the
+    /// ground and Q/E up and down, at distance × 1.2 m/s, around an orbit
+    /// that starts at azimuth -0.55, elevation 0.7 and 60 m.
+    #[test]
+    fn orbit_move_keys_match_the_map_editors_fly_camera() {
+        let start = Orbit {
+            target: Vec3::ZERO,
+            azimuth: -0.55,
+            elevation: 0.7,
+            distance: 60.0,
+        };
+        // `FlyCamera`'s forward: target − camera, flattened.
+        let mut ts_forward = start.target - scene_editor_position(&start);
+        ts_forward.y = 0.0;
+        let ts_forward = ts_forward.normalize();
+        let ts_right = ts_forward.cross(Vec3::Y).normalize();
+
+        let mut orbit = start;
+        orbit.fly(Vec3::Z, 0.5);
+        close3(orbit.target, ts_forward * 36.0);
+        let mut orbit = start;
+        orbit.fly(Vec3::new(-1.0, 1.0, 0.0), 0.5);
+        close3(orbit.target, ts_right * -36.0 + Vec3::Y * 36.0);
+    }
+
+    #[test]
+    fn an_eye_and_target_round_trip_through_the_orbit() {
+        // `ObjectPreviewCanvas`'s `EditorCamera`.
+        let (target, eye) = (Vec3::new(0.0, 0.5, 0.0), Vec3::new(2.5, 2.0, 2.5));
+        let orbit = Orbit::from_eye(target, eye);
+        close3(orbit.position(), eye);
+        close(orbit.azimuth, PI / 4.0);
+        close(orbit.distance, 14.75f32.sqrt());
+        for eye in [Vec3::new(-3.0, -1.0, 0.5), Vec3::new(0.0, 4.0, -7.0)] {
+            close3(Orbit::from_eye(target, eye).position(), eye);
+        }
+        let degenerate = Orbit::from_eye(target, target);
+        assert!(degenerate.azimuth.is_finite() && degenerate.elevation.is_finite());
     }
 }
