@@ -8,8 +8,8 @@ use officexr_render::SceneCamera;
 use crate::CameraMode;
 use crate::config::CameraConfig;
 use crate::look::{
-    self, CHAR_HEIGHT_M, Look, PITCH_MAX, PITCH_MIN, eye_position, fixed_leash, orbit_position,
-    zoomed_fov,
+    self, CHAR_HEIGHT_M, DRAG_ROTATE, Look, Orbit, PITCH_MAX, PITCH_MIN, eye_position, fixed_leash,
+    orbit_position, zoomed_fov,
 };
 
 const GAMEPLAY_FOV: f32 = 75.0;
@@ -26,8 +26,6 @@ const FREE_FLY_FOV: f32 = 60.0;
 /// Metres per second; shift multiplies.
 const FREE_FLY_SPEED: f32 = 12.0;
 const FREE_FLY_SHIFT: f32 = 3.0;
-/// Drag px → radians.
-const FREE_FLY_ROTATE: f32 = 0.005;
 /// World units per wheel notch.
 const FREE_FLY_DOLLY: f32 = 1.5;
 
@@ -68,8 +66,8 @@ impl FreeFly {
     /// A drag of `delta` CSS px turns the view in place.
     // ponytail: no orbit around the object under the cursor, as the three.js free-fly drag does; that needs picking.
     pub fn drag(&mut self, delta: Vec2) {
-        self.yaw -= delta.x * FREE_FLY_ROTATE;
-        self.pitch = (self.pitch - delta.y * FREE_FLY_ROTATE).clamp(PITCH_MIN, PITCH_MAX);
+        self.yaw -= delta.x * DRAG_ROTATE;
+        self.pitch = (self.pitch - delta.y * DRAG_ROTATE).clamp(PITCH_MIN, PITCH_MAX);
     }
 
     /// Dollies along the view for a DOM wheel delta (positive = out).
@@ -96,10 +94,22 @@ pub struct Rig {
     /// `None` until fixed mode places it, and again whenever another mode is active.
     fixed: Option<FixedPose>,
     pub free_fly: FreeFly,
+    /// Where input has put the orbit camera; `orbit` eases toward it.
+    pub orbit_goal: Orbit,
+    pub orbit: Orbit,
 }
 
 fn damp(from: f32, to: f32, lambda: f32, dt: f32) -> f32 {
     from + (to - from) * (1.0 - (-lambda * dt).exp())
+}
+
+/// The share of the way to a goal a damper with time constant `secs` covers in `dt`.
+fn ease(secs: f32, dt: f32) -> f32 {
+    if secs > 0.0 {
+        1.0 - (-dt / secs).exp()
+    } else {
+        1.0
+    }
 }
 
 fn pose(position: Vec3, look_at: Vec3, fov_deg: f32) -> SceneCamera {
@@ -160,7 +170,27 @@ impl Rig {
                 let reference = config.fixed.look_at.map(Vec3::from).or(target)?;
                 Some(self.fixed(reference, config, look))
             }
+            CameraMode::Orbit => {
+                let orbit = &config.orbit;
+                self.orbit_goal = self.orbit_goal.clamped(orbit);
+                let t = ease(orbit.damping_secs, dt);
+                self.orbit = self.orbit.clamped(orbit).eased_toward(self.orbit_goal, t);
+                Some(pose(self.orbit.position(), self.orbit.target, orbit.fov()))
+            }
         }
+    }
+
+    /// Moves the orbit camera at once, without easing. The next step clamps
+    /// it to the config in force then.
+    pub fn place_orbit(&mut self, place: impl FnOnce(&mut Orbit)) {
+        place(&mut self.orbit_goal);
+        self.orbit = self.orbit_goal;
+    }
+
+    /// Zooms without easing, as drei does even with damping on.
+    pub fn zoom_orbit(&mut self, zoom: impl FnOnce(&mut Orbit)) {
+        zoom(&mut self.orbit_goal);
+        self.orbit.distance = self.orbit_goal.distance;
     }
 
     /// Blends a first- or third-person pose toward an elevated view of the
@@ -261,6 +291,7 @@ impl Rig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::OrbitCamera;
     use crate::look::{ViewOffsets, forward};
 
     const EPS: f32 = 1e-3;
@@ -343,7 +374,7 @@ mod tests {
                     .is_none()
             );
         }
-        for mode in [CameraMode::TopDown, CameraMode::FreeFly] {
+        for mode in [CameraMode::TopDown, CameraMode::FreeFly, CameraMode::Orbit] {
             assert!(
                 Rig::default()
                     .step(mode, &config, &mut look, None, None, 0.0)
@@ -524,5 +555,52 @@ mod tests {
         let forward = Vec3::new(-az.sin(), 0.0, az.cos());
         close(camera.position, focus - forward * 7.0 + Vec3::Y * 5.0);
         close(camera.look_at, focus + Vec3::Y * 0.9);
+    }
+
+    #[test]
+    fn orbit_looks_at_its_target_and_eases_toward_its_goal() {
+        let mut rig = Rig::default();
+        let camera = step(&mut rig, CameraMode::Orbit, &mut Look::default(), None);
+        close(camera.position, Orbit::default().position());
+        close(camera.look_at, Vec3::Y);
+        assert_eq!(camera.fov_deg, 45.0);
+
+        let config = CameraConfig {
+            orbit: OrbitCamera {
+                damping_secs: 0.33,
+                ..OrbitCamera::default()
+            },
+            ..CameraConfig::default()
+        };
+        rig.orbit_goal.target = Vec3::new(5.0, 1.0, 0.0);
+        rig.orbit_goal.distance = 500.0;
+        let camera = rig
+            .step(
+                CameraMode::Orbit,
+                &config,
+                &mut Look::default(),
+                None,
+                None,
+                0.33,
+            )
+            .unwrap();
+        // One time constant in, toward the goal clamped to the 200 m limit.
+        let mix = 1.0 - (-1.0f32).exp();
+        close(camera.look_at, Vec3::Y.lerp(rig.orbit_goal.target, mix));
+        assert!((rig.orbit.distance - (16.0 + (200.0 - 16.0) * mix)).abs() < EPS);
+        assert_eq!(rig.orbit_goal.distance, 200.0);
+
+        rig.place_orbit(|o| o.target = Vec3::new(-4.0, 0.0, 2.0));
+        let camera = rig
+            .step(
+                CameraMode::Orbit,
+                &config,
+                &mut Look::default(),
+                None,
+                None,
+                0.0,
+            )
+            .unwrap();
+        close(camera.look_at, Vec3::new(-4.0, 0.0, 2.0));
     }
 }

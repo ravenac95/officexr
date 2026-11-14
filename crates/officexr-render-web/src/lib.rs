@@ -109,7 +109,8 @@ fn js_err(e: impl std::fmt::Display) -> JsError {
 
 /// `value` as JSON, for serde_json to read: JSON drops `undefined` fields, which
 /// serde-wasm-bindgen hands to the field's type, and serde-wasm-bindgen never
-/// reports a field it wasn't asked for.
+/// reports a field it wasn't asked for. JSON also turns NaN and infinities into
+/// `null`, which a number field rejects.
 fn to_json(value: &JsValue) -> Option<String> {
     stringify(value).ok().and_then(|json| json.as_string())
 }
