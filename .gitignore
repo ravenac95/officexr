@@ -82,3 +82,6 @@ packages/world/world-settings.json.*.tmp
 
 # rust
 /target
+
+# generated render wasm builds
+/packages/render-wasm/pkg/

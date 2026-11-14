@@ -1,11 +1,13 @@
 /** `?op=bevy`: the studio boots `crates/officexr-render-web` on the current map. */
 
 import { test, expect } from '@playwright/test';
+import { forceWebgl2 } from './helpers.ts';
 
 test('op=bevy boots the Bevy renderer', async ({ page }) => {
   test.setTimeout(180_000);
   // A wasm panic surfaces as a pageerror; fail on it instead of waiting out the boot timeout.
   const pageError = new Promise<never>((_, reject) => page.once('pageerror', reject));
+  await forceWebgl2(page);
   await page.goto('/?op=bevy');
   await expect(page.locator('#bevy-canvas')).toBeVisible();
   const ready = page.waitForFunction(
@@ -14,4 +16,5 @@ test('op=bevy boots the Bevy renderer', async ({ page }) => {
     { timeout: 170_000 },
   );
   await Promise.race([ready, pageError]);
+  expect(await page.evaluate(() => (window as { __officexrRenderBackend?: string }).__officexrRenderBackend)).toBe('webgl2');
 });

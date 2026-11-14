@@ -2,6 +2,11 @@
 //! `setScene` whenever the map changes and `setPlayers` every frame.
 #![cfg(target_arch = "wasm32")]
 
+#[cfg(not(any(feature = "webgpu", feature = "webgl2")))]
+compile_error!("enable exactly one of the `webgpu` and `webgl2` features");
+#[cfg(all(feature = "webgpu", feature = "webgl2"))]
+compile_error!("the `webgpu` and `webgl2` features are mutually exclusive");
+
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 

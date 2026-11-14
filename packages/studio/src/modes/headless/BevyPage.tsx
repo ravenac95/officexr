@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPersistentLocalState } from '@officexr/core-refactor';
+import { loadRenderer, type RendererModule } from '@officexr/render-wasm';
 import type { OfficeState } from '@officexr/sdk';
 import { modelUrl } from '@officexr/world/app';
 import { pickCharacterForPlayer } from '@officexr/world/characters';
@@ -9,7 +10,7 @@ import { useMapPicker } from '../debug/useMapPicker.ts';
 import { DEFAULT_MUGSHOT_BACKGROUND, DEFAULT_MUGSHOT_LIGHTING, cubesForMode } from '../mugshot/MugshotApp.tsx';
 import { buildInMemoryStack } from '../../realtime/services.ts';
 
-type BevyModule = typeof import('@officexr/render-wasm');
+type BevyModule = RendererModule;
 type BakedLayout = ReturnType<typeof usePlaySession>['bakedLayouts'][number];
 
 interface BevyCamera {
@@ -39,8 +40,7 @@ let booted: Promise<BevyModule> | null = null;
 
 /** Bevy owns its event loop for the page's lifetime, so it boots once. */
 function bootBevy(): Promise<BevyModule> {
-  booted ??= import('@officexr/render-wasm').then(async (wasm) => {
-    await wasm.default();
+  booted ??= loadRenderer().then((wasm) => {
     const origin = modelUrl('/models/').replace(/\/models\/$/, '') || window.location.origin;
     wasm.start(`#${CANVAS_ID}`, origin);
     return wasm;

@@ -6,11 +6,14 @@
   "exports": {
     ".": {
       "types": "./index.d.ts",
-      "default": "./pkg/officexr_render_web.js"
+      "default": "./index.js"
     },
-    "./officexr_render_web_bg.wasm": "./pkg/officexr_render_web_bg.wasm"
+    "./load": {
+      "types": "./load.d.ts",
+      "default": "./load.js"
+    }
   },
   "scripts": {
-    "build": "wasm-pack build ../../crates/officexr-render-web --profile wasm-release --target web --no-pack --out-dir ../../packages/render-wasm/pkg"
+    "build": "node build.mjs"
   }
 }

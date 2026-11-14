@@ -17,7 +17,7 @@ import * as path from 'node:path';
 import { expect, test } from '@playwright/test';
 import { PNG } from 'pngjs';
 import { frameCamera, type Bounds } from '../../packages/studio/src/modes/headless/renderFraming.ts';
-import { pixelDiffCount } from './helpers.ts';
+import { forceWebgl2, pixelDiffCount } from './helpers.ts';
 
 const OUT_DIR = process.env.OFFICEXR_BEVY_DIFF;
 const SIZE = { width: 1024, height: 768 };
@@ -78,6 +78,7 @@ test(`three.js vs Bevy render of a placed "${LAYOUT}" layout`, async ({ page }) 
   const out = (name: string) => path.resolve(OUT_DIR!, name);
   fs.mkdirSync(OUT_DIR!, { recursive: true });
 
+  await forceWebgl2(page);
   await page.addInitScript((seed) => {
     (window as unknown as { __OFFICEXR_TEST_SEED__: unknown }).__OFFICEXR_TEST_SEED__ = seed;
   }, SEED);

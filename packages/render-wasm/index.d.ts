@@ -4,16 +4,25 @@
  * `#[wasm_bindgen]` exports in that crate's `src/lib.rs`.
  */
 
-/** Loads and instantiates the wasm module; call once before anything else. */
-export default function init(moduleOrPath?: unknown): Promise<unknown>;
+/** The wasm-bindgen module of one backend, already instantiated by `loadRenderer`. */
+export interface RendererModule {
+  /** Boots Bevy on the canvas matching `canvas`, loading models from `origin`. */
+  start(canvas: string, origin: string): void;
+  /** Replaces the scene; with `mugshot`, that character is drawn paused on it. */
+  setScene(sceneJson: string, camera: unknown, mugshot?: string | null): void;
+  setPlayers(players: unknown): void;
+  /** Every model of the last scene has loaded and settled. */
+  isReady(): boolean;
+}
 
-/** Boots Bevy on the canvas matching `canvas`, loading models from `origin`. */
-export function start(canvas: string, origin: string): void;
+export type Gpu = { requestAdapter(): Promise<unknown> };
 
-/** Replaces the scene; with `mugshot`, that character is drawn paused on it. */
-export function setScene(sceneJson: string, camera: unknown, mugshot?: string | null): void;
+export type RenderBackend = 'webgpu' | 'webgl2';
 
-export function setPlayers(players: unknown): void;
+export function pickBackend(gpu?: Gpu | null): Promise<RenderBackend>;
 
-/** Every model of the last scene has loaded and settled. */
-export function isReady(): boolean;
+/**
+ * Loads and instantiates the renderer: WebGPU when an adapter is available, else WebGL2, from
+ * `VITE_RENDER_WASM_BASE_URL` when set and from the bundled build otherwise.
+ */
+export function loadRenderer(): Promise<RendererModule>;

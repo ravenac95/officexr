@@ -66,12 +66,15 @@ COPY crates crates
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     wasm-pack build crates/officexr-sim-wasm --release --target web --no-pack --out-dir /app/packages/sim-wasm/pkg && \
-    wasm-pack build crates/officexr-render-web --profile wasm-release --target web --no-pack --out-dir /app/packages/render-wasm/pkg
+    for backend in webgpu webgl2; do \
+      wasm-pack build crates/officexr-render-web --profile wasm-release --target web --no-pack --out-dir /app/packages/render-wasm/pkg/$backend -- --features $backend || exit 1; \
+    done
 
 FROM store AS build
 COPY . .
 COPY --from=sim /app/packages/sim-wasm/pkg packages/sim-wasm/pkg
 COPY --from=sim /app/packages/render-wasm/pkg packages/render-wasm/pkg
+RUN node packages/render-wasm/hash.mjs
 RUN pnpm install --offline --frozen-lockfile \
       --filter @officexr/web... --filter @officexr/studio... --filter @officexr/studio-server... \
       --filter @officexr/world...

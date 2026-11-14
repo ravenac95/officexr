@@ -186,7 +186,7 @@ pnpm build                  # outputs the SPA to packages/web/dist/
 
 Host the SPA on Pages with the backend on another origin. The `pages-deploy` workflow
 (`.github/workflows/pages-deploy.yml`) builds and deploys it from GitHub Actions, since Cloudflare's Git build has no
-Rust toolchain for the wasm packages: it builds `@officexr/sim-wasm` and `@officexr/render-wasm` (failing if a wasm file tops Pages' 25 MiB cap), runs `pnpm build:pages` (web app at `/`, studio
+Rust toolchain for the wasm packages: it builds `@officexr/sim-wasm` and `@officexr/render-wasm` (failing if a Pages-bound wasm file tops the 25 MiB cap), uploads the renderer's WebGPU and WebGL2 builds to R2, runs `pnpm build:pages` (web app at `/`, studio
 at `/studio/`) and runs `wrangler pages deploy packages/web/dist`. Pushes to `main` deploy production (set the Pages
 project's production branch to `main`); other branches deploy previews, and a PR gets a comment with its preview URL.
 Without the secrets below, as on fork PRs, the workflow skips the deploy.
@@ -196,12 +196,19 @@ exist. Don't point it at a project that uses Cloudflare's Git integration: those
 Set in the repo's Actions settings, then run the workflow by hand (Actions → Pages deploy → Run workflow) for the first
 production deploy:
 
-- Secrets `CLOUDFLARE_API_TOKEN` (a token with *Cloudflare Pages: Edit*) and `CLOUDFLARE_ACCOUNT_ID`.
+- Secrets `CLOUDFLARE_API_TOKEN` (a token with *Cloudflare Pages: Edit* and *Workers R2 Storage: Edit*, for the renderer upload) and `CLOUDFLARE_ACCOUNT_ID`.
 - Variables `CLOUDFLARE_PAGES_PROJECT` (the Pages project name), `VITE_API_ORIGIN=https://api.example.com`
   (the backend's origin; unset means same-origin; see `packages/web/.env.example`),
   `VITE_ASSET_BASE_URL=https://officexr-assets.oso.xyz` (where the studio loads models and baked layouts from), and
   `VITE_STUDIO_API_ORIGIN=https://studio-api.example.com` (the studio backend's public port, which the studio calls
   with credentials for its API, realtime and in-browser bake; unset means same-origin and no sign-in gate).
+
+The Bevy renderer's wasm is too big for Pages, so the workflow uploads both builds to the `officexr-assets` bucket
+under `wasm/<content-hash>/{webgpu,webgl2}/` and bakes `VITE_RENDER_WASM_BASE_URL=${VITE_ASSET_BASE_URL}/wasm` into the
+build, which keeps the render wasm out of `packages/web/dist`. `loadRenderer()` picks WebGPU when the browser has an
+adapter, else WebGL2. The bucket's CORS policy must allow `GET` from the Pages origins (production and
+`https://*.<project>.pages.dev`), since the page imports the glue module and fetches the wasm cross-origin.
+Without the variable, as in dev and CI, the bundled build is used.
 
 The studio's Debug mode then loads baked layouts from that CDN, which can be up to 5 minutes stale.
 `build:pages` copies the whole studio `dist`, so `dist/studio/models` ships unused (ponytail: trim it if Pages size limits bite).
