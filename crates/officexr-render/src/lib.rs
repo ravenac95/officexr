@@ -7,6 +7,7 @@
 //! scene.
 
 mod avatars;
+mod compressed_gltf;
 mod layouts;
 mod lighting;
 #[cfg(feature = "mugshot")]
@@ -20,7 +21,10 @@ use bevy::asset::embedded_asset;
 use bevy::asset::io::AssetSourceBuilder;
 use bevy::camera::{Exposure, PerspectiveProjection, Projection};
 use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::gltf::{DefaultGltfImageSampler, GltfLoader, extensions::GltfExtensionHandlers};
+use bevy::image::CompressedImageFormatSupport;
 use bevy::light::GlobalAmbientLight;
+use bevy::mesh::MeshCompressionArgs;
 use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 
@@ -55,7 +59,7 @@ impl AssetBase {
     }
 
     pub fn asset_path(&self, gltf_path: &str) -> String {
-        // Already absolute, e.g. a decoded layout from the page's own origin.
+        // Already absolute, e.g. a layout from the page's own origin.
         if gltf_path.starts_with("http://") || gltf_path.starts_with("https://") {
             return gltf_path.to_string();
         }
@@ -126,6 +130,23 @@ impl Plugin for OfficeXrRenderPlugin {
             )
                 .chain(),
         );
+    }
+
+    // Registered after `GltfPlugin::finish` so this loader takes over `.gltf`/`.glb`.
+    fn finish(&self, app: &mut App) {
+        let world = app.world();
+        let loader = GltfLoader {
+            supported_compressed_formats: world
+                .get_resource::<CompressedImageFormatSupport>()
+                .map_or(default(), |support| support.0),
+            custom_vertex_attributes: default(),
+            default_sampler: world.resource::<DefaultGltfImageSampler>().get_internal(),
+            default_convert_coordinates: default(),
+            extensions: world.resource::<GltfExtensionHandlers>().0.clone(),
+            default_skinned_mesh_bounds_policy: default(),
+            default_mesh_compression: MeshCompressionArgs::none(),
+        };
+        app.register_asset_loader(compressed_gltf::CompressedGltfLoader(loader));
     }
 }
 

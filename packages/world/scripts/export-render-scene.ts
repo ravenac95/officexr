@@ -5,8 +5,7 @@
  * world lighting and background (`--editor-lighting`: the studio render page's
  * editor preset and flat background instead).
  *
- * Bevy's glTF loader reads neither meshopt nor quantized meshes, so each baked
- * layout (`bake:layout`) is decoded into `packages/studio/public/baked-layouts/`.
+ * Each baked layout (`bake:layout`) is copied into `packages/studio/public/baked-layouts/`.
  *
  * Usage: pnpm --filter @officexr/world export:render-scene <mapName> <outFile> [--editor-lighting]
  */
@@ -14,9 +13,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { NodeIO } from '@gltf-transform/core';
 import { DEFAULT_WORLD_CONSTANTS } from '@officexr/sdk';
-import { decodeCompressedGlb, registerCompressionCodecs } from '../src/app/glb-compression.ts';
 import { createCatalogService } from '../src/app/catalog-service.ts';
 import { createInstanceGeometry } from '../src/app/geometry-service.ts';
 import { loadMap } from '../src/app/map-loader.ts';
@@ -32,15 +29,13 @@ const WORLD_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 const STUDIO_PUBLIC = path.resolve(WORLD_ROOT, '../studio/public');
 const EDITOR_BACKGROUND = '#1b1d22';
 
-async function decodeBakedLayout(io: NodeIO, name: string): Promise<string> {
+async function copyBakedLayout(name: string): Promise<string> {
   const baked = path.resolve(WORLD_ROOT, 'baked-layouts', `${name}.glb`);
-  const glb = await fs.readFile(baked).catch((err: unknown) => {
-    throw new Error(`cannot read ${baked}; run \`pnpm --filter @officexr/world bake:layout ${name}\``, { cause: err });
-  });
-  const decoded = await decodeCompressedGlb(io, glb);
   const gltfPath = `/baked-layouts/${name}.glb`;
   await fs.mkdir(path.resolve(STUDIO_PUBLIC, 'baked-layouts'), { recursive: true });
-  await fs.writeFile(path.resolve(STUDIO_PUBLIC, gltfPath.slice(1)), decoded);
+  await fs.copyFile(baked, path.resolve(STUDIO_PUBLIC, gltfPath.slice(1))).catch((err: unknown) => {
+    throw new Error(`cannot read ${baked}; run \`pnpm --filter @officexr/world bake:layout ${name}\``, { cause: err });
+  });
   return gltfPath;
 }
 
@@ -72,10 +67,9 @@ async function main(mapName: string, outFile: string, editorLighting: boolean): 
   const { mapDoc, rooms, bakedLayouts } = await loadMap({ storages, catalog, roomService, geometry }, mapName);
   // As in the studio's map view: rooms draw their own commands, layouts draw from their bake.
   const objects = roomService.compileMap(mapDoc, rooms);
-  const io = await registerCompressionCodecs(new NodeIO());
   const gltfPaths = new Map<string, string>();
   for (const name of new Set(bakedLayouts.map((p) => p.layoutName))) {
-    gltfPaths.set(name, await decodeBakedLayout(io, name));
+    gltfPaths.set(name, await copyBakedLayout(name));
   }
 
   const usedKindIds = new Set(objects.instances.map((i) => i.kindId));
