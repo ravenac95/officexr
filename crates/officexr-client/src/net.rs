@@ -298,6 +298,8 @@ fn placements(rooms: &[RoomInstance], layout_of: &HashMap<String, Option<String>
                     gltf_path: format!("/api/baked-layouts/{layout}.glb"),
                     position: instance.position,
                     rotation_y: instance.rotation_y,
+                    layout_name: layout.clone(),
+                    room_instance_id: instance.id.clone(),
                 },
             })
         })

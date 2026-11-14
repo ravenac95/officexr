@@ -10,6 +10,7 @@ use bevy::prelude::*;
 
 use crate::AssetBase;
 use crate::lighting::{HemisphereFill, ObjectMaterial};
+use crate::picking::PickTarget;
 use crate::placement::mesh_transform;
 use crate::scene::{LocalAabb, ObjectInstance, WorldObjectKind, WorldSceneData, Xyz};
 use crate::views::ViewScene;
@@ -269,7 +270,10 @@ fn sync_view_objects(
     });
     for (id, inst) in wanted {
         let Some(&entity) = index.0.get(id) else {
-            let entity = commands.spawn((Placed(inst.clone()), ChildOf(view))).id();
+            let target = PickTarget::Object { id: id.to_string() };
+            let entity = commands
+                .spawn((Placed(inst.clone()), target, ChildOf(view)))
+                .id();
             index.0.insert(id.to_string(), entity);
             continue;
         };

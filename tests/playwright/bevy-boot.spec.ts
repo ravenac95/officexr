@@ -53,6 +53,27 @@ test('op=bevy&views=2 draws two live canvases from one Bevy app', async ({ page 
     .toBe(true);
 });
 
+test('op=bevy&pick=1 reports a click on the canvas centre', async ({ page }) => {
+  test.setTimeout(240_000);
+  const pageError = new Promise<never>((_, reject) => page.once('pageerror', reject));
+  await forceWebgl2(page);
+  await page.goto('/?op=bevy&pick=1');
+  const ready = page.waitForFunction(
+    () => (window as { __officexrBevyReady?: boolean }).__officexrBevyReady === true,
+    null,
+    { timeout: 170_000 },
+  );
+  await Promise.race([ready, pageError]);
+  // Read off the DOM: locator geometry waits on a compositor frame, too slow under SwiftShader.
+  const box = await page.evaluate(() => document.querySelector('#bevy-canvas')!.getBoundingClientRect().toJSON() as DOMRect);
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  const clicks = () =>
+    page.evaluate(
+      () => (window as { __officexrBevyPicks?: { kind: string }[] }).__officexrBevyPicks?.filter((e) => e.kind === 'click').length ?? 0,
+    );
+  await expect.poll(clicks, { timeout: 60_000 }).toBe(1);
+});
+
 /**
  * Each canvas's pixels from one page screenshot, which sees WebGL and read-back canvases alike as
  * composited. Element screenshots wait on a compositor frame, too slow under SwiftShader. `fromTop`

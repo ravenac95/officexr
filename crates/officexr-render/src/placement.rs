@@ -139,6 +139,7 @@ mod tests {
             gltf_path: "/l.glb".into(),
             position: [2.0, 0.0, 4.0],
             rotation_y: 1,
+            ..Default::default()
         });
         assert_eq!(t.translation, Vec3::new(1.0, 0.0, 2.0));
         assert!(

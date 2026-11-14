@@ -100,7 +100,7 @@ fn upsert<T>(items: &mut Vec<T>, new: Option<Vec<T>>, id: impl Fn(&T) -> &String
 }
 
 /// One room placement of a baked layout GLB.
-#[derive(Deserialize, Clone, PartialEq, Debug)]
+#[derive(Deserialize, Clone, PartialEq, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct BakedLayoutPlacement {
     pub gltf_path: String,
@@ -108,6 +108,11 @@ pub struct BakedLayoutPlacement {
     pub position: [f32; 3],
     /// Quarter turns.
     pub rotation_y: i32,
+    /// Reported by picks.
+    #[serde(default)]
+    pub layout_name: String,
+    #[serde(default)]
+    pub room_instance_id: String,
 }
 
 #[derive(Deserialize, Clone, PartialEq, Debug)]

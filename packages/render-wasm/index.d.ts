@@ -30,9 +30,69 @@ export interface WorldDiff {
   remove?: string[];
   lighting?: unknown;
   background?: unknown;
-  bakedLayouts?: { gltfPath: string; position: [number, number, number]; rotationY: number }[];
+  bakedLayouts?: {
+    gltfPath: string;
+    position: [number, number, number];
+    rotationY: number;
+    /** What picks on the layout report. */
+    layoutName?: string;
+    roomInstanceId?: string;
+  }[];
   /** A flat background instead of the sky; `null` brings the sky back. */
   clearColor?: string | null;
+}
+
+export type Vec3 = [number, number, number];
+
+/** What a pick hit; events bubble from a mesh up to the nearest target. */
+export type PickTarget =
+  | { type: 'object'; id: string }
+  | { type: 'layout'; name: string; roomInstanceId: string }
+  | { type: 'player'; id: string }
+  | { type: 'overlay'; tag: string }
+  /** The infinite floor plane at y = 0. */
+  | { type: 'ground' };
+
+/**
+ * - `over` / `out`: the pointer starts or stops hovering a target, including when it leaves the canvas.
+ *   A target that is despawned while hovered gets no `out`.
+ * - `move`: the pointer moved over a target, with this move's hit, so it follows faces and the ground.
+ * - `click`: a press and release on the same target. It still fires after a drag on that target, so
+ *   consumers that drag skip the `click` that follows a `dragEnd` themselves.
+ * - `dragStart` / `drag` / `dragEnd`: a pressed pointer moving; all go to the target the press was on.
+ *   A leave or `pointercancel` mid-press ends it without `up`, `click` or `dragEnd`.
+ */
+export type PickKind =
+  | 'over'
+  | 'out'
+  | 'move'
+  | 'down'
+  | 'up'
+  | 'click'
+  | 'dragStart'
+  | 'drag'
+  | 'dragEnd';
+
+export interface PickEvent {
+  kind: PickKind;
+  target: PickTarget;
+  /**
+   * World-space hit; `null` on `drag` and `dragEnd`, which follow the pointer off their target. To drag
+   * along a surface, use `intersectPlane` with the event's `screen`.
+   */
+  point: Vec3 | null;
+  normal: Vec3 | null;
+  /** As `MouseEvent.button`; `null` on `over`, `out` and `move`. */
+  button: 0 | 1 | 2 | null;
+  modifiers: { shift: boolean; ctrl: boolean; alt: boolean; meta: boolean };
+  /** CSS pixels from the canvas's top left. */
+  screen: [number, number];
+}
+
+/** `normal · p + constant = 0`, as three.js's `Plane`. */
+export interface Plane {
+  normal: Vec3;
+  constant: number;
 }
 
 export type CameraMode = 'first-person' | 'third-person' | 'fixed' | 'top-down' | 'free-fly' | 'orbit';
@@ -111,6 +171,20 @@ export interface RendererModule {
   /** `ready` once every model has loaded and settled; `pending` counts the models still loading. */
   isReady(id: ViewId): { ready: boolean; pending: number };
   frameStats(id: ViewId): { drawCalls: number; triangles: number };
+  /**
+   * Sends `callback` the view's pick events, from pointer events on its canvas, replacing any callback
+   * it had; `null` stops them. A view without a callback does no picking. A throwing callback is logged
+   * with `console.error` and the frame's other events are still delivered. Throws for a destroyed view.
+   * A left press on any target but the ground doesn't take the controls' pointer lock.
+   */
+  onPick(id: ViewId, callback: ((event: PickEvent) => void) | null): void;
+  /**
+   * The view camera's ray through `(x, y)`, in CSS pixels from its canvas's top left, from the pose last
+   * drawn (the controls' when they drive it) or a `setCamera` since.
+   */
+  rayAtScreen(id: ViewId, x: number, y: number): { origin: Vec3; dir: Vec3 };
+  /** Where that ray meets `plane` ahead of the camera, or `null`. Throws for a zero normal. */
+  intersectPlane(id: ViewId, x: number, y: number, plane: Plane): Vec3 | null;
 
   // Controls: once any of these is called on a view, its controls drive its camera, overriding
   // `setCamera`, in every frame its mode has something to frame. Top-down, free-fly and orbit always do;
