@@ -1,0 +1,88 @@
+{
+  "size": [
+    640,
+    360
+  ],
+  "layout": "scenario-collision",
+  "characters": [
+    {
+      "character": "Barbarian",
+      "spawn": [
+        3,
+        2.5,
+        1
+      ],
+      "moves": [
+        {
+          "frames": 30
+        },
+        {
+          "frames": 150,
+          "dir": [
+            0,
+            1
+          ]
+        }
+      ]
+    },
+    {
+      "character": "Knight",
+      "spawn": [
+        3,
+        2.5,
+        7
+      ],
+      "moves": [
+        {
+          "frames": 30
+        },
+        {
+          "frames": 150,
+          "dir": [
+            0,
+            -1
+          ]
+        }
+      ]
+    }
+  ],
+  "cameras": [
+    {
+      "name": "side",
+      "position": [
+        13,
+        8,
+        4
+      ],
+      "lookAt": [
+        4,
+        2,
+        4
+      ],
+      "fov": 45
+    }
+  ],
+  "captures": [
+    29,
+    60,
+    179
+  ],
+  "assert": [
+    {
+      "type": "feetOn",
+      "frame": 29,
+      "surfaceY": 2
+    },
+    {
+      "type": "feetOn",
+      "frame": 179,
+      "surfaceY": 2
+    },
+    {
+      "type": "spacing",
+      "frame": 179,
+      "min": 0.75,
+      "max": 1.0
+    }
+  ]
+}

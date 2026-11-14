@@ -48,6 +48,14 @@ impl ObjectKinds {
             .any(|m| matches!(m.state, ModelState::Loading))
     }
 
+    /// The ids of the kinds whose model failed to load.
+    pub fn failed(&self) -> impl Iterator<Item = &str> {
+        self.0
+            .iter()
+            .filter(|(_, m)| matches!(m.state, ModelState::Failed))
+            .map(|(id, _)| id.as_str())
+    }
+
     fn placed(&self, inst: &ObjectInstance) -> Option<(&Model, Transform)> {
         let kind = self.0.get(&inst.kind_id)?;
         let ModelState::Ready(model) = &kind.state else {

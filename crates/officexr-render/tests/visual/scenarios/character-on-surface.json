@@ -1,0 +1,163 @@
+{
+  "size": [
+    1024,
+    384
+  ],
+  "paused": true,
+  "instances": [
+    {
+      "kindId": "colored_block_blue",
+      "position": [
+        -12,
+        -2,
+        -2
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -2,
+        -2
+      ]
+    },
+    {
+      "kindId": "colored_block_blue",
+      "position": [
+        -4,
+        -2,
+        -2
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -2,
+        -2
+      ]
+    },
+    {
+      "kindId": "colored_block_blue",
+      "position": [
+        4,
+        -2,
+        -2
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        8,
+        -2,
+        -2
+      ]
+    }
+  ],
+  "characters": [
+    {
+      "character": "Barbarian",
+      "spawn": [
+        -5,
+        4,
+        0
+      ],
+      "moves": [
+        {
+          "frames": 60
+        }
+      ]
+    },
+    {
+      "character": "Knight",
+      "spawn": [
+        -3,
+        4,
+        0
+      ],
+      "moves": [
+        {
+          "frames": 60
+        }
+      ]
+    },
+    {
+      "character": "Mage",
+      "spawn": [
+        -1,
+        4,
+        0
+      ],
+      "moves": [
+        {
+          "frames": 60
+        }
+      ]
+    },
+    {
+      "character": "Ranger",
+      "spawn": [
+        1,
+        4,
+        0
+      ],
+      "moves": [
+        {
+          "frames": 60
+        }
+      ]
+    },
+    {
+      "character": "Rogue",
+      "spawn": [
+        3,
+        4,
+        0
+      ],
+      "moves": [
+        {
+          "frames": 60
+        }
+      ]
+    },
+    {
+      "character": "Rogue_Hooded",
+      "spawn": [
+        5,
+        4,
+        0
+      ],
+      "moves": [
+        {
+          "frames": 60
+        }
+      ]
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "position": [
+        0,
+        2.5,
+        -11
+      ],
+      "lookAt": [
+        0,
+        1.2,
+        0
+      ],
+      "fov": 30
+    }
+  ],
+  "captures": [
+    59
+  ],
+  "assert": [
+    {
+      "type": "feetOn",
+      "frame": 59,
+      "surfaceY": 1
+    }
+  ]
+}

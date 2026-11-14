@@ -1,0 +1,62 @@
+{
+  "size": [
+    640,
+    360
+  ],
+  "layout": "scenario-stairs",
+  "characters": [
+    {
+      "character": "Barbarian",
+      "spawn": [
+        6,
+        2.5,
+        2
+      ],
+      "moves": [
+        {
+          "frames": 30
+        },
+        {
+          "frames": 110,
+          "dir": [
+            -1,
+            0
+          ]
+        }
+      ]
+    }
+  ],
+  "cameras": [
+    {
+      "name": "side",
+      "position": [
+        2,
+        6,
+        16
+      ],
+      "lookAt": [
+        2,
+        3,
+        2
+      ],
+      "fov": 45
+    }
+  ],
+  "captures": [
+    29,
+    70,
+    139
+  ],
+  "assert": [
+    {
+      "type": "feetOn",
+      "frame": 29,
+      "surfaceY": 2
+    },
+    {
+      "type": "feetOn",
+      "frame": 139,
+      "surfaceY": 6
+    }
+  ]
+}

@@ -1,0 +1,124 @@
+{
+  "size": [
+    512,
+    512
+  ],
+  "paused": true,
+  "instances": [
+    {
+      "kindId": "colored_block_blue",
+      "position": [
+        -4,
+        -2,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -2,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -2,
+        0
+      ]
+    },
+    {
+      "kindId": "colored_block_blue",
+      "position": [
+        0,
+        -2,
+        0
+      ]
+    }
+  ],
+  "characters": [
+    {
+      "character": "Barbarian",
+      "spawn": [
+        0,
+        4,
+        0
+      ],
+      "moves": [
+        {
+          "frames": 60
+        }
+      ]
+    }
+  ],
+  "cameras": [
+    {
+      "name": "north",
+      "position": [
+        0,
+        1.7,
+        -6
+      ],
+      "lookAt": [
+        0,
+        1.560827,
+        -5.009732
+      ],
+      "fov": 40
+    },
+    {
+      "name": "east",
+      "position": [
+        6,
+        1.7,
+        0
+      ],
+      "lookAt": [
+        5.009732,
+        1.560827,
+        0
+      ],
+      "fov": 40
+    },
+    {
+      "name": "south",
+      "position": [
+        0,
+        1.7,
+        6
+      ],
+      "lookAt": [
+        0,
+        1.560827,
+        5.009732
+      ],
+      "fov": 40
+    },
+    {
+      "name": "west",
+      "position": [
+        -6,
+        1.7,
+        0
+      ],
+      "lookAt": [
+        -5.009732,
+        1.560827,
+        0
+      ],
+      "fov": 40
+    }
+  ],
+  "captures": [
+    59
+  ],
+  "assert": [
+    {
+      "type": "feetOn",
+      "frame": 59,
+      "surfaceY": 1
+    }
+  ]
+}

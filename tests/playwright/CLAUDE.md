@@ -1,7 +1,8 @@
 # CLAUDE.md — Playwright e2e, and the Mugshot gravity contract
 
-General Playwright guardrails (baselines, podman, mugshot vs native
-screenshots) live in the repo-root [`CLAUDE.md`](../../CLAUDE.md). This
+Rendering checks and their baselines live in the native harness
+(`crates/officexr-render/tests/visual/`, see the repo-root
+[`CLAUDE.md`](../../CLAUDE.md)), which asserts this same 10 cm contract. This
 file captures the one contract that's easy to break silently: **how the
 Mugshot places its character, and what the Y-offset slider is for.**
 
