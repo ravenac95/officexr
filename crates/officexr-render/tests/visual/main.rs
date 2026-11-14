@@ -567,6 +567,7 @@ fn encode_video(out: &Path) {
 }
 
 fn run(name: &str, update: bool) -> Vec<String> {
+    // ponytail(OSO-7958): stairs/slope walk stops on the top step; step-up hop overshoots ~0.45 m/frame
     let scenario: Scenario = read_json(&Path::new(HERE).join(format!("scenarios/{name}.json")));
     let out = Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join("visual-tests")
