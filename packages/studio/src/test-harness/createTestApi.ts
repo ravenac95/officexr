@@ -1,13 +1,5 @@
 import { createDefaultApi } from '@officexr/world/app';
 import type { ApplicationApi } from '@officexr/world/app';
-import type { GltfLoader } from '@officexr/world/app';
-
-export interface CreateTestApiOptions {
-  /** GLTF loader the BakeService uses. When omitted, `createDefaultApi`
-   *  installs one that throws on use; pass a loader only if a test
-   *  asserts on bake output. */
-  loadGltf?: GltfLoader;
-}
 
 /**
  * Composes a hermetic `ApplicationApi` for tests.
@@ -18,9 +10,8 @@ export interface CreateTestApiOptions {
  * roadmap leans on: editors mounted under a provider built from this
  * api never touch the network or the dev-server filesystem.
  */
-export function createTestApi(opts: CreateTestApiOptions = {}): ApplicationApi {
+export function createTestApi(): ApplicationApi {
   return createDefaultApi({
     apiPath: '',
-    loadGltf: opts.loadGltf,
   });
 }

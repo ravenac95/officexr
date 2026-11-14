@@ -8,9 +8,7 @@ the integration-test roadmap.
 
 - **`createTestApi()`** — composes an `ApplicationApi` via the
   production `createDefaultApi` with `apiPath: ''` (bundled default
-  catalog, no `/api/world-object-kinds` fetch) and the default bake
-  loader, which throws if a test triggers a bake (pass `loadGltf` to opt
-  in).
+  catalog, no `/api/world-object-kinds` fetch).
 - **`StudioHarness`** — wraps children in an `<ApplicationProvider>`
   built from `createTestApi()`. Use as the `wrapper` for `renderHook`
   on any hook that reads `useApplication` (e.g. `useRoomDocument`,

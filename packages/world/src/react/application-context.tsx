@@ -39,7 +39,7 @@ export interface ApplicationProviderProps {
 
 /**
  * Wraps a React subtree with an `ApplicationApi`. Production studio
- * passes the result of `createDefaultApi({ loadGltf })`; tests pass a
+ * passes the result of `createDefaultApi()`; tests pass a
  * hand-rolled mock so no network / no THREE is needed.
  */
 export function ApplicationProvider({ api, children }: ApplicationProviderProps) {
