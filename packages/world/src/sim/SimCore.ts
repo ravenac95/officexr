@@ -94,6 +94,12 @@ export interface SimCore {
   extrapolatePeer(peer: Extrapolatable, nowMs: number): Vec3;
   /** The player's body-root position as of the last step or teleport. */
   position(): Vec3;
+  /**
+   * Whether a standing body ball at `feet` touches no solid collider but the
+   * player's own. The ball stands on whatever ground lies within a step of
+   * `feet`, so a spot on a floor slab above a chair's footprint reads as free.
+   */
+  standingAt(feet: Vec3, charRadius: number): boolean;
   /** Moves the player to `pos` and clears its fall and jump state. */
   teleport(pos: Vec3): void;
   /** Off pins the player: no gravity and no jumping. */

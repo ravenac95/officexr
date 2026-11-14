@@ -9,25 +9,25 @@
  * nodes (a merged room would yield one giant AABB box — unwalkable
  * corridors, unclimbable stairs). Instead the bake computes collider
  * descriptors from the canonical physics source
- * (`worldObjectsToColliders` — the same helper MapColliders and
+ * (`worldObjectsToColliders` — the same helper SimCore and
  * BotPhysicsWorld use, including compound-steps stairs, scanned
  * cuboids, and slope trimeshes) and serialises them here. Physics and
  * visuals are decoupled: simplify can mangle the render mesh all it
  * wants without touching what characters stand on.
  *
  * One module owns BOTH sides of the schema (writer: `bakeLayout`;
- * reader: `BakedLayoutColliders`) so they cannot drift apart.
+ * reader: `readGlbColliders`) so they cannot drift apart.
  *
  * VERSIONS
  * --------
  *   v1 — `{ version: 1, cuboids }` (boxes only).
  *   v2 — `{ version: 2, cuboids, trimeshes }` (adds slope trimeshes).
  * The reader accepts both; the writer emits v2. Unknown versions parse
- * to `null` → callers fall back to legacy mesh-AABB traversal.
+ * to `null` → the layout has no embedded colliders.
  *
  * Round-trip: gltf-transform writes `scene.setExtras(...)` → glTF JSON
- * `scenes[i].extras` → three's GLTFLoader copies extras onto
- * `gltf.scene.userData`.
+ * `scenes[i].extras`, which `readGlbColliders` reads back from the GLB's
+ * JSON chunk.
  *
  * Headless: no `three`, no `react`, no DOM.
  */
@@ -77,16 +77,38 @@ export function buildColliderExtras(colliders: ColliderDescriptor[]): {
 }
 
 /**
- * Defensive parse of a loaded GLB scene's `userData`. Returns the
- * embedded collider descriptors, or `null` when the GLB carries none
- * (pre-extras bake) or the payload is malformed / from an unknown
- * schema version — callers fall back to legacy mesh-AABB traversal.
+ * The collider descriptors a baked GLB's default scene embeds, read from its
+ * JSON chunk without a glTF loader. `null` when the bytes aren't a GLB or the
+ * scene carries no valid colliders (see `parseEmbeddedColliders`).
+ */
+export function readGlbColliders(glb: ArrayBuffer): ColliderDescriptor[] | null {
+  const view = new DataView(glb);
+  const GLB_MAGIC = 0x46546c67;
+  const JSON_CHUNK = 0x4e4f534a;
+  if (view.byteLength < 20 || view.getUint32(0, true) !== GLB_MAGIC || view.getUint32(16, true) !== JSON_CHUNK) {
+    return null;
+  }
+  try {
+    const json = JSON.parse(new TextDecoder().decode(new Uint8Array(glb, 20, view.getUint32(12, true)))) as {
+      scene?: number;
+      scenes?: Array<{ extras?: unknown }>;
+    };
+    return parseEmbeddedColliders(json.scenes?.[json.scene ?? 0]?.extras);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Defensive parse of a scene's `extras`. Returns the embedded collider
+ * descriptors, or `null` when it carries none (pre-extras bake) or the
+ * payload is malformed / from an unknown schema version.
  */
 export function parseEmbeddedColliders(
-  userData: unknown,
+  extras: unknown,
 ): ColliderDescriptor[] | null {
-  if (typeof userData !== 'object' || userData === null) return null;
-  const officexr = (userData as { officexr?: unknown }).officexr;
+  if (typeof extras !== 'object' || extras === null) return null;
+  const officexr = (extras as { officexr?: unknown }).officexr;
   if (typeof officexr !== 'object' || officexr === null) return null;
   const colliders = (officexr as { colliders?: unknown }).colliders;
   if (typeof colliders !== 'object' || colliders === null) return null;

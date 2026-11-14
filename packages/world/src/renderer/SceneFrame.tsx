@@ -1,8 +1,6 @@
 import React, { useEffect, useEffectEvent, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import type { RapierRigidBody } from '@react-three/rapier';
-import { liveRigidBody } from './liveRigidBody.ts';
 import type {
   Actions,
   Store,
@@ -21,7 +19,7 @@ import type { CameraMode } from './config.ts';
 import { resolveCharacterTunables } from '../characters/resolve.ts';
 import { fixedMovementYaw, yawFromDirection, type ViewOffsets } from './lookControls.ts';
 import { moveIntent, type AutoWalkSource, type MoveInput } from './moveIntent.ts';
-import { sitOnPress, stepSeated, type SeatingSource } from './seated.ts';
+import { sitOnPress, type SeatingSource } from './seated.ts';
 import { useStoreWorldObjects } from './useStoreWorldObjects.ts';
 import type { SimBakedColliders, SimCore, SimPeer } from '../sim/SimCore.ts';
 
@@ -46,8 +44,8 @@ interface SceneFrameProps {
   /** E sits through it; while seated, any movement input stands through it instead of moving. */
   seating?: SeatingSource;
   selfId: string;
-  /** Set by `Players` when the self avatar's RigidBody mounts; mirrors the sim's position for the proximity sensors. */
-  selfBodyRef: React.MutableRefObject<RapierRigidBody | null>;
+  /** False until the map, models and baked colliders are ready; the sim neither steps nor seats before. */
+  selfReady?: boolean;
   /** Each frame's proximity result, for `ProximityGlow` to render. */
   proximityOutputRef: React.MutableRefObject<TrackerOutput | null>;
   /** Builds the local player's movement simulation; called once per mount, after Rapier has loaded. Null until it can be. */
@@ -89,8 +87,7 @@ const ARROW_KEYS = new Set([
 /**
  * Owns the per-frame loop: input into the local player's `SimCore`
  * step, world tick, rule evaluation, sync flushing, bot updates.
- * Mounted once inside `<Canvas>`, downstream of `<Physics>`, whose self
- * body it keeps on the sim's position. Each step's result goes back
+ * Mounted once inside `<Canvas>`. Each step's result goes back
  * into `actions.setSelfPosition` so the store + broadcast stay
  * consistent with where the character actually ended up.
  */
@@ -111,7 +108,7 @@ export function SceneFrame({
   autoWalk,
   seating,
   selfId,
-  selfBodyRef,
+  selfReady,
   proximityOutputRef,
   createSim,
   bakedColliders,
@@ -162,6 +159,14 @@ export function SceneFrame({
       sim.dispose();
     };
   }, [createSim, store, selfId]);
+  useEffect(
+    () =>
+      seating?.setStandingCheck((feet) => {
+        const sim = simRef.current;
+        return !sim || sim.standingAt(feet, store.getState().worldSettings.charRadius);
+      }),
+    [seating, store],
+  );
 
   const { catalog, voxelSize } = useApplication();
   const worldObjects = useStoreWorldObjects(store);
@@ -246,7 +251,6 @@ export function SceneFrame({
     // Read after E and auto-walk, which can seat the player, so this frame's movement doesn't overwrite the seated pose.
     const stateSnapshot = store.getState();
     const self = stateSnapshot.players[selfId];
-    const body = liveRigidBody(selfBodyRef.current);
     const { worldSettings } = stateSnapshot;
     // Resolve per-character overrides for the local model — each
     // character can have its own speed / run multiplier, falling back
@@ -292,12 +296,16 @@ export function SceneFrame({
       proximityOutputRef.current = proximity;
     }
 
-    if (self?.seat != null && body) {
-      stepSeated(store, selfId, body, seating, hasMoveInput || spacePressedThisFrame || autoWalkDir !== null);
+    // Held until the world is ready, so gravity can't drop the player through unloaded floors.
+    const held = selfReady === false;
+    if (!held && self?.seat != null) {
+      if (hasMoveInput || spacePressedThisFrame || autoWalkDir !== null) {
+        seating?.stand();
+      }
       sim?.teleport(store.getState().players[selfId]?.pos ?? self.pos);
       isAirborneRef.current = false;
       wasMoving.current = false;
-    } else if (self && body && sim) {
+    } else if (!held && self && sim) {
       // Auto-warp detector. If the store's pos has been mutated to
       // somewhere far from where the sim has the player (a map-switch
       // spawn or a test-driven `store.setState`), teleport there this
@@ -325,7 +333,6 @@ export function SceneFrame({
       let isMoving = false;
       if (dx0 * dx0 + dy0 * dy0 + dz0 * dz0 > warpThresholdSq) {
         sim.teleport(self.pos);
-        body.setNextKinematicTranslation(self.pos);
         isAirborneRef.current = false;
         // Reset moving/idle so the moving→idle edge-trigger below
         // doesn't fire spuriously after a teleport.
@@ -382,7 +389,6 @@ export function SceneFrame({
           });
         }
 
-        body.setNextKinematicTranslation(result.newPos);
         actions.setSelfPosition(result.newPos, result.broadcastVel, result.broadcastYaw, result.isAirborne);
         isMoving = result.moved;
       }

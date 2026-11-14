@@ -17,7 +17,7 @@ import {
   shouldRespawnFalling,
   worldObjectsToColliders,
 } from '../physics/rules.ts';
-import { tryStepUp, type StepUpProbe } from '../physics/step-up.ts';
+import { STEP_UP_MAX_HEIGHT, tryStepUp, type StepUpProbe } from '../physics/step-up.ts';
 import { extrapolatePos, type Extrapolatable } from './extrapolate.ts';
 import type {
   SimBakedColliders,
@@ -28,6 +28,9 @@ import type {
   SimProximityInput,
   SimStepResult,
 } from './SimCore.ts';
+
+/** Lifts the standing probe off the ground so the ground itself doesn't count as an obstacle. */
+const STANDING_FLOOR_GAP = 0.05;
 
 /**
  * `SimCore` on rapier3d-compat. The player is a kinematic ball the
@@ -113,6 +116,32 @@ export class TsSimCore implements SimCore {
   position(): Vec3 {
     const t = this.body.translation();
     return { x: t.x, y: t.y, z: t.z };
+  }
+
+  standingAt(feet: Vec3, charRadius: number): boolean {
+    // ponytail: an obstacle no taller than a step reads as ground, so a spot on a low table counts as free.
+    const from = { x: feet.x, y: feet.y + STEP_UP_MAX_HEIGHT, z: feet.z };
+    const ground = this.world.castRay(
+      new RAPIER.Ray(from, { x: 0, y: -1, z: 0 }),
+      2 * STEP_UP_MAX_HEIGHT,
+      true,
+      RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+      undefined,
+      undefined,
+      this.body,
+    );
+    const centre = { x: feet.x, y: (ground ? from.y - ground.timeOfImpact : feet.y) + charRadius + STANDING_FLOOR_GAP, z: feet.z };
+    return (
+      this.world.intersectionWithShape(
+        centre,
+        { x: 0, y: 0, z: 0, w: 1 },
+        new RAPIER.Ball(charRadius),
+        RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+        undefined,
+        undefined,
+        this.body,
+      ) === null
+    );
   }
 
   teleport(pos: Vec3): void {

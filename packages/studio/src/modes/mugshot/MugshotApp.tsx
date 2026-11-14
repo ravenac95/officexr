@@ -90,7 +90,7 @@ type CubeMode = 'gltf' | 'primitive';
  * The two layouts share INSTANCE IDs deliberately — when the user
  * flips cubeMode, the SDK store swap to `setWorldObjects` produces
  * the same set of inst.id values, so React-keyed reconciliation
- * in <MapColliders> reuses the same <CuboidCollider> nodes. The
+ * keeps the same static colliders. The
  * colliders are literally identical between modes; only the
  * visible mesh path differs. That's the whole point of the A/B
  * diagnostic. */
@@ -303,8 +303,8 @@ export function MugshotApp() {
   }, [stack, manualPlacement]);
 
   // Push the cube field. Re-runs on cubeMode change to swap the
-  // kindIds (instance IDs stay the same, so MapColliders' React-
-  // keyed reconciliation produces the identical collider tree).
+  // kindIds (instance IDs stay the same, so the sim's static
+  // colliders come out identical).
   useEffect(() => {
     if (!local) return;
     // cubeSize MUST equal the global VOXEL_SIZE (0.5) — see the

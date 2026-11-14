@@ -11,9 +11,8 @@ type Vec2 = { x: number; z: number };
  * exited`) are NOT emitted here any more — those are now driven by the
  * MeetingArea-aware `PairTracker` exported from `@officexr/sdk`
  * (`packages/sdk/src/spatial/pair-tracker.ts`), which is the single
- * source of truth for conversation lifecycle. The Rapier inner/outer-sensor
- * BallColliders in `Players.tsx` still exist (they're cheap) but
- * nothing routes their events through this bridge.
+ * source of truth for conversation lifecycle. The local player's bumps
+ * come from `SimCore`; this bridge serves the bots' physics worlds.
  */
 export function routeContactEvent(
   busEmit: Bus['emit'],

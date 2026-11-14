@@ -92,9 +92,42 @@ impl PhysicsWorld {
 
     /// Whether a solid ray from `origin` hits a non-sensor within `max_toi`.
     pub fn cast_ray_hits(&self, origin: Vec3, dir: Vector<Real>, max_toi: f64) -> bool {
+        self.cast_ray_toi(origin, dir, max_toi, None).is_some()
+    }
+
+    /// Distance to the first non-sensor a solid ray hits within `max_toi`, skipping `exclude`'s colliders.
+    pub fn cast_ray_toi(
+        &self,
+        origin: Vec3,
+        dir: Vector<Real>,
+        max_toi: f64,
+        exclude: Option<RigidBodyHandle>,
+    ) -> Option<f64> {
         let ray = Ray::new(origin.to_rapier().into(), dir);
-        self.query_pipeline(QueryFilter::default().exclude_sensors())
+        let filter = QueryFilter {
+            exclude_rigid_body: exclude,
+            ..QueryFilter::default().exclude_sensors()
+        };
+        self.query_pipeline(filter)
             .cast_ray(&ray, max_toi as Real, true)
+            .map(|(_, toi)| f64::from(toi))
+    }
+
+    /// Whether a ball at `centre` overlaps a non-sensor outside `exclude`.
+    pub fn ball_intersects(
+        &self,
+        centre: Vec3,
+        radius: f64,
+        exclude: Option<RigidBodyHandle>,
+    ) -> bool {
+        let filter = QueryFilter {
+            exclude_rigid_body: exclude,
+            ..QueryFilter::default().exclude_sensors()
+        };
+        let pos = Isometry::translation(centre.x as Real, centre.y as Real, centre.z as Real);
+        self.query_pipeline(filter)
+            .intersect_shape(pos, &Ball::new(radius as Real))
+            .next()
             .is_some()
     }
 }

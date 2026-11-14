@@ -30,7 +30,7 @@
  *
  * Same authoring-pipeline role as `bake-kind-dimensions.ts` (which
  * writes scanned dimensions/localAABB): scanners write CATALOG data so
- * all three collider consumers (baked extras, MapColliders, bots) pick
+ * all three collider consumers (baked extras, SimCore, bots) pick
  * it up through the shared `worldObjectsToCuboids` plumbing.
  */
 
