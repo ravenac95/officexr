@@ -1,0 +1,110 @@
+name: Pages cleanup
+
+# Deletes Cloudflare Pages preview deployments that are no longer needed, so
+# their aliases and per-push URLs stop serving (Pages never expires them).
+# - On PR close (merged or not): the PR's `pr-<number>` previews (see
+#   pages-deploy.yml), plus previews under its head branch from before the
+#   pr-<number> alias, unless another open PR uses that branch.
+# - By hand (workflow_dispatch): a backfill over every closed PR, plus previews
+#   whose branch no longer exists. Dry run by default: it only lists.
+# Never touches production or a branch with an open PR; the rules live in
+# .github/scripts/pages-cleanup-select.jq. The render wasm on R2 is
+# content-addressed and shared across builds, so it stays.
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only list the deployments that would be deleted
+        type: boolean
+        default: true
+
+concurrency:
+  group: pages-cleanup-${{ github.event.pull_request.number || 'backfill' }}
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+
+      - name: Delete stale preview deployments
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD: ${{ github.event.pull_request.head.ref }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ] || [ -z "${PROJECT:-}" ]; then
+            echo "::notice::Skipping the Pages cleanup: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID or CLOUDFLARE_PAGES_PROJECT is not set."
+            exit 0
+          fi
+          cf() { curl -sS --fail-with-body --retry 3 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$@"; }
+          project="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT"
+          prod=$(cf "$project" | jq -er '.result.production_branch')
+
+          # Every preview deployment. Collect them all before deleting: deleting while
+          # paging would shift the pages. The API schema states no per_page cap, but larger
+          # values are reported to be rejected here, so stay at 25. Stop at total_pages or
+          # on an empty page, whichever comes first.
+          deployments='[]'
+          page=1
+          while :; do
+            body=$(cf "$project/deployments?env=preview&per_page=25&page=$page")
+            jq -e '.success' <<<"$body" >/dev/null
+            deployments=$(jq -c --argjson acc "$deployments" \
+              '$acc + (.result | map({id, branch: .deployment_trigger.metadata.branch, environment, created_on}))' <<<"$body")
+            if [ "$(jq '.result | length' <<<"$body")" -eq 0 ] \
+              || [ "$page" -ge "$(jq '.result_info.total_pages // 1000' <<<"$body")" ]; then
+              break
+            fi
+            page=$((page + 1))
+          done
+
+          pr_fields='{number, head: .head.ref, repo: .head.repo.full_name}'
+          open=$(gh api --paginate "repos/$REPO/pulls?state=open&per_page=100" --jq ".[] | $pr_fields" | jq -cs .)
+          if [ -n "$PR_NUMBER" ]; then
+            closed=$(jq -cn --argjson number "$PR_NUMBER" --arg head "$PR_HEAD" --arg repo "$PR_HEAD_REPO" '[{number: $number, head: $head, repo: $repo}]')
+            branches=null
+          else
+            closed=$(gh api --paginate "repos/$REPO/pulls?state=closed&per_page=100" --jq ".[] | $pr_fields" | jq -cs .)
+            branches=$(gh api --paginate "repos/$REPO/branches?per_page=100" --jq '.[].name' | jq -Rcs 'split("\n") | map(select(. != ""))')
+          fi
+
+          doomed=$(jq -c --arg prod "$prod" --arg repo "$REPO" --argjson open "$open" \
+            --argjson closed "$closed" --argjson branches "$branches" \
+            -f .github/scripts/pages-cleanup-select.jq <<<"$deployments")
+
+          {
+            echo "### Pages cleanup ($([ "$DRY_RUN" = true ] && echo 'dry run' || echo 'deleting'))"
+            echo "$(jq length <<<"$doomed") of $(jq length <<<"$deployments") preview deployment(s) on project \`$PROJECT\` (production branch \`$prod\`)."
+            echo
+            echo '| Branch | Deployments |'
+            echo '| --- | --- |'
+            jq -r 'group_by(.branch)[] | "| `\(.[0].branch)` | \(length) |"' <<<"$doomed"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$DRY_RUN" = true ] && exit 0
+
+          failed=0
+          for id in $(jq -r '.[].id' <<<"$doomed"); do
+            # force: a branch's latest deployment backs its alias, and Pages refuses to
+            # delete an aliased deployment without it.
+            if ! out=$(cf -X DELETE "$project/deployments/$id?force=true"); then
+              echo "::warning::Failed to delete deployment $id: $out"
+              failed=$((failed + 1))
+            fi
+          done
+          echo "Deleted $(( $(jq length <<<"$doomed") - failed )) deployment(s), $failed failed."
+          [ "$failed" -eq 0 ]
