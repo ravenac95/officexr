@@ -117,6 +117,9 @@ export interface WorldObjectKind {
     min: { x: number; y: number; z: number };
     max: { x: number; y: number; z: number };
   };
+  /** Marks `dimensions` and `localAABB` as hand-set: the bake skips this kind
+   * and only reports when the model's measured size differs. */
+  dimensionsPinned?: boolean;
   /**
    * Optional override for the Rapier collider shape emitted by
    * `worldObjectsToColliders`. When absent the default
@@ -422,11 +425,12 @@ export function normalizeKind(raw: unknown, idx: number): WorldObjectKind {
       : WORLD_OBJECT_KIND_DEFAULTS.optimization,
     dimensions: normalizeDimensions(k.dimensions),
     localAABB: normalizeLocalAABB(k.localAABB),
+    dimensionsPinned: normalizeOptionalBoolean(k.dimensionsPinned, idx, 'dimensionsPinned'),
     colliderShape: normalizeColliderShape(k.colliderShape),
     colliderComplexity: normalizeColliderComplexity(k.colliderComplexity, idx),
     rotationStepDeg: normalizeRotationStep(k.rotationStepDeg, idx),
     seat: normalizeSeat(k.seat, idx),
-    isDesk: normalizeIsDesk(k.isDesk, idx),
+    isDesk: normalizeOptionalBoolean(k.isDesk, idx, 'isDesk'),
   };
 }
 
@@ -464,12 +468,12 @@ function normalizeSeat(raw: unknown, idx: number): SeatSpec | undefined {
   return { offset: { x: offset.x, y: offset.y, z: offset.z }, yawDeg: seat.yawDeg };
 }
 
-function normalizeIsDesk(raw: unknown, idx: number): boolean | undefined {
+function normalizeOptionalBoolean(raw: unknown, idx: number, field: string): boolean | undefined {
   if (raw === undefined) {
     return undefined;
   }
   if (typeof raw !== 'boolean') {
-    throw new Error(`world-object-kind-catalog: kinds[${idx}].isDesk must be a boolean, got ${String(raw)}`);
+    throw new Error(`world-object-kind-catalog: kinds[${idx}].${field} must be a boolean, got ${String(raw)}`);
   }
   return raw;
 }
