@@ -37,10 +37,18 @@ bevy = { version = "=0.20.1", default-features = false, features = ["multi_threa
 [features]
 # The `render` binary settles the mugshot character with the sim.
 mugshot = ["dep:officexr-sim"]
+# The scenario harness in `tests/visual/`; needs a GPU or Mesa lavapipe.
+visual-tests = ["mugshot"]
 
 [[bin]]
 name = "render"
 required-features = ["mugshot"]
+
+[[test]]
+name = "visual"
+path = "tests/visual/main.rs"
+harness = false
+required-features = ["visual-tests"]
 
 [dev-dependencies]
 bevy = { version = "=0.20.1", default-features = false, features = ["bevy_winit", "x11"] }

@@ -122,34 +122,23 @@ escape hatch is for genuine constraints, not for skipping refactors.
   `packages/studio/src/test-harness/` (see its README). When adding a
   new editor hook that persists, accept an optional `storage` and read
   `useTestStorages()` so it stays hermetically testable.
-- **Playwright e2e tests (incl. mugshot) MUST be run after any
-  change to `@officexr/world` renderer logic.** The mugshot
-  baselines under `tests/playwright/mugshot-baselines/` are the
-  visual contract for the renderer's positioning, scaling, and
-  lighting — they will silently drift when a renderer-side
-  convention changes (anchor convention, voxel size, kind AABB,
-  primitive sizing, camera plumbing, etc.) and unit tests will
-  not catch it because the divergence is purely pixel-level. Run
-  the full e2e suite (`pnpm test:e2e`, or at minimum the mugshot
-  specs `pnpm exec playwright test tests/playwright/mugshot-*`)
-  before considering a renderer change complete. If a baseline
-  truly needs to change, change BOTH the ideal PNGs and the
-  manifest in the same PR — never silently widen the diff
-  threshold to make the suite green.
-- **Regenerating per-platform Playwright baselines: use podman.**
-  `character-on-surface.spec.ts` uses Playwright's native
-  `toHaveScreenshot`, which writes OS-suffixed baselines
-  (`*-chromium-linux.png` / `*-chromium-darwin.png`). CI runs on
-  linux, so its `-linux.png` baselines can't be regenerated from a
-  macOS dev box directly. When they need refreshing (a renderer
-  change moved the rendered pixels), regenerate them in a linux
-  container via **podman** (Docker is not installed on these
-  machines — prefer podman when available, `podman --version` to
-  check). Use the Playwright image matching the installed version
-  (`mcr.microsoft.com/playwright:v<version>-noble`) against a
-  throwaway `git clone` of the repo (NOT a mount of the working
-  tree — an in-container `pnpm install` would clobber the host's
-  node_modules with linux binaries), then copy the generated
-  `*-chromium-linux.png` back into
-  `tests/playwright/<spec>-snapshots/`. Review each PNG by hand
-  before committing.
+- **The native visual tests MUST be run after any renderer
+  change** (`crates/officexr-render`, or `@officexr/world` renderer
+  logic it ports). `cargo test -p officexr-render --features
+  visual-tests [<scenario>]` renders the scenarios in
+  `crates/officexr-render/tests/visual/scenarios/` headless (Mesa
+  lavapipe is enough: `apt install mesa-vulkan-drivers`), asserts the
+  sim's positions (feet within 10 cm of the surface, character
+  spacing) and diffs keyframes against
+  `crates/officexr-render/tests/visual/baselines/`. The baselines are
+  the visual contract for positioning, scaling and lighting; unit
+  tests won't catch a pixel-level drift. Images and videos land in
+  `target/tmp/visual-tests/`. The scenario maps need
+  `pnpm asset-packs:install`.
+- **Regenerating visual baselines: from Bevy, by eye.** A missing
+  baseline is written from the first run;
+  `OFFICEXR_UPDATE_BASELINES=1` rewrites them all. CI renders on
+  ubuntu-24.04 lavapipe, so regenerate on linux with lavapipe
+  (in a **podman** container if you're on macOS) and review each PNG
+  by hand before committing. Never widen the diff threshold to make
+  the suite green.

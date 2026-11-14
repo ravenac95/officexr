@@ -82,8 +82,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install linker
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang lld
+      # The visual tests' scenario maps use the prototype pack's models.
+      - name: Install asset packs
+        run: pnpm asset-packs:install
+
+      # Mesa lavapipe renders the visual tests without a GPU; ffmpeg encodes their videos.
+      - name: Install linker, lavapipe and ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang lld mesa-vulkan-drivers ffmpeg
 
       - name: Install toolchain
         run: rustup toolchain install
@@ -98,6 +103,14 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --all-features
+
+      - name: Upload visual test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-tests
+          path: target/tmp/visual-tests/
+          if-no-files-found: ignore
 
       - name: Build client (Linux)
         run: cargo build -p officexr-client
