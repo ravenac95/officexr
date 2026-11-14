@@ -13,7 +13,7 @@ import {
   worldObjectsToColliders,
 } from '../physics/rules.ts';
 import { horizontalProgress } from '../physics/blocking.ts';
-import { StepUpHold, tryStepUp, type StepUpProbe } from '../physics/step-up.ts';
+import { StepUpHold, hasSupport, tryStepUp, type StepUpProbe } from '../physics/step-up.ts';
 import { kccStepUpProbe } from '../physics/kcc-step-up-probe.ts';
 import { ColliderSync } from '../physics/collider-sync.ts';
 
@@ -410,6 +410,7 @@ export class BotPhysicsWorld {
     // layout changes (new group bits, new collision rules), this must also
     // update. Acceptable because step() is the sole physics-integration
     // point in this class and the groups.ts file is the single authority.
+    const holdSupported = !this.stepUpHold.active || hasSupport(this.stepUpProbe);
     this.controller.computeColliderMovement(
       this.bodyCollider,
       {
@@ -423,8 +424,9 @@ export class BotPhysicsWorld {
     const corrected = this.controller.computedMovement();
     this.stepUpHold.update(
       Math.hypot(corrected.x, corrected.z),
+      Math.hypot(intent.x, intent.z),
       this.controller.computedGrounded(),
-      intent.x !== 0 || intent.z !== 0,
+      holdSupported,
     );
 
     // Reset accumulated vertical velocity when the character controller
@@ -517,6 +519,7 @@ export class BotPhysicsWorld {
     this._lastAppliedPos = { x: pos.x, y: pos.y, z: pos.z };
     this.body.setNextKinematicTranslation({ x: pos.x, y: pos.y, z: pos.z });
     this.verticalVel = 0;
+    this.stepUpHold.reset();
   }
 
   /** Advance the simulation one Rapier step. Must be called every

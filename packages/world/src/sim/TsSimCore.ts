@@ -17,7 +17,7 @@ import {
   shouldRespawnFalling,
   worldObjectsToColliders,
 } from '../physics/rules.ts';
-import { STEP_UP_MAX_HEIGHT, StepUpHold, tryStepUp, type StepUpProbe } from '../physics/step-up.ts';
+import { STEP_UP_MAX_HEIGHT, StepUpHold, hasSupport, tryStepUp, type StepUpProbe } from '../physics/step-up.ts';
 import { extrapolatePos, type Extrapolatable } from './extrapolate.ts';
 import type {
   SimBakedColliders,
@@ -51,7 +51,7 @@ export class TsSimCore implements SimCore {
   private gravityEnabled = true;
   /** m/s, negative falling; reset when grounded. */
   private verticalVel = 0;
-  private stepUpHold = new StepUpHold();
+  private readonly stepUpHold = new StepUpHold();
   /** Set by a jump and cleared once the landing ease finishes; not inferred from jumps left. */
   private airborne = false;
   /** Refilled to `maxJumps` on the ground; starts empty until the first grounded step. */
@@ -154,7 +154,7 @@ export class TsSimCore implements SimCore {
   /** Grounded with a fresh set of jumps and no fall, carry or landing ease left. */
   private land(): void {
     this.verticalVel = 0;
-    this.stepUpHold = new StepUpHold();
+    this.stepUpHold.reset();
     this.airborne = false;
     this.jumpsRemaining = this.maxJumps;
     this.airVel = { x: 0, z: 0 };
@@ -163,6 +163,7 @@ export class TsSimCore implements SimCore {
 
   setGravityEnabled(on: boolean): void {
     this.gravityEnabled = on;
+    this.stepUpHold.reset();
     if (!on) {
       // Jumps left stay: zeroing them would read as airborne every frame.
       this.verticalVel = 0;
@@ -207,6 +208,7 @@ export class TsSimCore implements SimCore {
 
     if (input.jump && this.jumpsRemaining > 0 && this.gravityEnabled) {
       this.verticalVel = jumpVelocity;
+      this.stepUpHold.reset();
       if (!this.airborne) {
         this.airVel = { x: dir.x * speed, z: dir.z * speed };
       }
@@ -221,8 +223,14 @@ export class TsSimCore implements SimCore {
     const moveX = isAirborne ? this.airVel.x * dtSec : dir.x * speed * dtSec;
     const moveZ = isAirborne ? this.airVel.z * dtSec : dir.z * speed * dtSec;
 
+    const holdSupported = !this.stepUpHold.active || hasSupport(this.stepUpProbe);
     const corrected = this.sweep(moveX, moveZ, dtSec);
-    this.stepUpHold.update(Math.hypot(corrected.x, corrected.z), this.controller.computedGrounded(), intendsMove);
+    this.stepUpHold.update(
+      Math.hypot(corrected.x, corrected.z),
+      intendsMove ? Math.hypot(moveX, moveZ) : 0,
+      this.controller.computedGrounded(),
+      holdSupported,
+    );
 
     // Lifted over a ledge rather than falling. Unlike bots, only a falling
     // speed resets: a jump's ascent also moves up and must survive.

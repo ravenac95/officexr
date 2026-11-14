@@ -18,7 +18,7 @@ use crate::physics::rules::{
     GRAVITY, pick_respawn_position, respawn_threshold, should_respawn_falling,
     world_objects_to_colliders,
 };
-use crate::physics::step_up::{STEP_UP_MAX_HEIGHT, StepUpHold, try_step_up};
+use crate::physics::step_up::{STEP_UP_MAX_HEIGHT, StepUpHold, has_support, try_step_up};
 use crate::proximity::{PairTracker, ProximityInput, TrackerOutput};
 use crate::world_objects::{Vec3, WorldObjects};
 
@@ -295,7 +295,7 @@ impl SimCore {
     /// Grounded with a fresh set of jumps and no fall, carry or landing ease left.
     fn land(&mut self) {
         self.vertical_vel = 0.0;
-        self.step_up_hold = StepUpHold::default();
+        self.step_up_hold.reset();
         self.airborne = false;
         self.jumps_remaining = self.max_jumps;
         self.air_vel = (0.0, 0.0);
@@ -305,6 +305,7 @@ impl SimCore {
     /// Off pins the player: no gravity and no jumping.
     pub fn set_gravity_enabled(&mut self, on: bool) {
         self.gravity_enabled = on;
+        self.step_up_hold.reset();
         if !on {
             // Jumps left stay: zeroing them would read as airborne every frame.
             self.vertical_vel = 0.0;
@@ -361,6 +362,7 @@ impl SimCore {
 
         if input.jump && self.jumps_remaining > 0 && self.gravity_enabled {
             self.vertical_vel = s.jump_velocity;
+            self.step_up_hold.reset();
             if !self.airborne {
                 self.air_vel = intent_vel;
             }
@@ -378,11 +380,26 @@ impl SimCore {
             (intent_vel.0 * dt_sec, intent_vel.1 * dt_sec)
         };
 
+        let hold_supported = !self.step_up_hold.active() || {
+            let mut probe = KccStepUpProbe {
+                world: &mut self.world,
+                controller: &mut self.controller,
+                body: self.body,
+                collider: self.body_collider,
+                peers: &self.colliders,
+            };
+            has_support(&mut probe)
+        };
         let corrected = self.sweep(move_x, move_z, dt_sec);
         self.step_up_hold.update(
             corrected.x.hypot(corrected.z),
+            if intends_move {
+                move_x.hypot(move_z)
+            } else {
+                0.0
+            },
             self.controller.computed_grounded(),
-            intends_move,
+            hold_supported,
         );
 
         // Lifted over a ledge rather than falling. Only a falling speed
@@ -543,8 +560,8 @@ mod tests {
         assert_eq!(radius(&sim), 0.5_f32);
     }
 
-    /// A real-Rapier climb of 8 risers: one hop per riser, never sagging back.
-    fn climb_stairs(speed: f64) -> (usize, usize, f64, f64) {
+    /// 8 risers of 0.5 m ascending toward -X onto a 4 m high landing, with a wall just past the walking line.
+    fn stairs() -> SimCore {
         let kind = |id: &str, shape: Option<ColliderShapeSpec>, size: [f64; 3]| SimKind {
             id: id.into(),
             local_aabb: Some(LocalAabb {
@@ -563,6 +580,7 @@ mod tests {
             kinds: vec![
                 kind("floor", None, [20.0, 1.0, 20.0]),
                 kind("landing", None, [4.0, 4.0, 4.0]),
+                kind("wall", None, [12.0, 6.0, 0.5]),
                 kind(
                     "stairs",
                     Some(ColliderShapeSpec::CompoundSteps {
@@ -587,6 +605,7 @@ mod tests {
                 place("floor", [-5.0, -1.0, -5.0]),
                 place("landing", [0.0, 0.0, 0.0]),
                 place("stairs", [4.0, 0.0, 0.0]),
+                place("wall", [0.0, 0.0, 2.5]),
             ],
         };
         let mut sim = SimCore::new(0.4);
@@ -596,39 +615,93 @@ mod tests {
             y: -0.5,
             z: 2.0,
         });
-        let mut walk = input(0.4);
-        walk.dir = XZ { x: -1.0, z: 0.0 };
-        walk.speed = speed;
-        walk.settings.movement_block_threshold = 0.9;
-        let (mut hops, mut sags, mut max_step_x) = (0, 0, 0.0_f64);
+        sim
+    }
+
+    fn walk(sim: &mut SimCore, speed: f64, dir: (f64, f64), jump: bool) -> Vec3 {
+        let mut i = input(0.4);
+        i.dir = XZ { x: dir.0, z: dir.1 };
+        i.speed = speed;
+        i.jump = jump;
+        sim.step(&i).new_pos
+    }
+
+    /// Walks -X until the first hop; returns the hop frame's pose.
+    fn walk_to_first_hop(sim: &mut SimCore, speed: f64) -> Vec3 {
         let mut prev = sim.position();
         for _ in 0..4000 {
-            if prev.x <= 1.0 {
-                break;
+            let pos = walk(sim, speed, (-1.0, 0.0), false);
+            if pos.y - prev.y > 0.3 {
+                return pos;
             }
-            let now = sim.step(&walk).new_pos;
-            if now.y - prev.y > 0.3 {
-                hops += 1;
-                max_step_x = max_step_x.max((now.x - prev.x).abs());
-            } else if now.y - prev.y < -0.02 {
-                sags += 1;
-            }
-            prev = now;
+            prev = pos;
         }
-        (hops, sags, max_step_x, prev.y)
+        panic!("never hopped");
     }
 
     #[test]
     fn climbs_eight_risers_in_eight_hops_at_any_walking_speed() {
         for speed in [0.5, 1.0, 3.0] {
-            let (hops, sags, max_step_x, end_y) = climb_stairs(speed);
+            let mut sim = stairs();
+            let mut prev = sim.position();
+            let mut max_y = prev.y;
+            let (mut hops, mut max_step_x) = (0, 0.0_f64);
+            for _ in 0..4000 {
+                if prev.x <= 1.0 {
+                    break;
+                }
+                let pos = walk(&mut sim, speed, (-1.0, 0.0), false);
+                if pos.y - prev.y > 0.3 {
+                    hops += 1;
+                    max_step_x = max_step_x.max((pos.x - prev.x).abs());
+                }
+                assert!(pos.y > max_y - 0.02, "sag at {speed} m/s: {pos:?}");
+                max_y = max_y.max(pos.y);
+                prev = pos;
+            }
             assert_eq!(hops, 8, "hops at {speed} m/s");
-            assert_eq!(sags, 0, "sags at {speed} m/s");
             assert!(
                 max_step_x <= speed / 60.0 + 0.01,
                 "hop advance at {speed} m/s"
             );
-            assert!((end_y - 3.5).abs() < 0.1, "end y {end_y} at {speed} m/s");
+            assert!(
+                (prev.y - 3.5).abs() < 0.1,
+                "end y {} at {speed} m/s",
+                prev.y
+            );
         }
+    }
+
+    #[test]
+    fn a_jump_during_the_hold_clears_half_a_metre() {
+        let mut sim = stairs();
+        let hop = walk_to_first_hop(&mut sim, 1.0);
+        let mut max_y = walk(&mut sim, 1.0, (-1.0, 0.0), true).y;
+        for _ in 0..20 {
+            max_y = max_y.max(walk(&mut sim, 1.0, (-1.0, 0.0), false).y);
+        }
+        assert!(max_y - hop.y > 0.5);
+    }
+
+    #[test]
+    fn reversing_off_the_tread_mid_hold_drops_the_ball() {
+        let mut sim = stairs();
+        let hop = walk_to_first_hop(&mut sim, 1.0);
+        let mut y = hop.y;
+        for _ in 0..15 {
+            y = walk(&mut sim, 1.0, (1.0, 0.0), false).y;
+        }
+        assert!(y < hop.y - 0.3);
+    }
+
+    #[test]
+    fn being_blocked_mid_hold_ends_it() {
+        let mut sim = stairs();
+        let hop = walk_to_first_hop(&mut sim, 1.0);
+        let mut y = hop.y;
+        for _ in 0..30 {
+            y = walk(&mut sim, 1.0, (0.0, 1.0), false).y;
+        }
+        assert!(y < hop.y - 0.1);
     }
 }

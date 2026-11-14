@@ -253,6 +253,7 @@ describe('TsSimCore stair climb', () => {
     kinds: [
       box('floor', { x: 40, y: 1, z: 40 }),
       box('landing', { x: 4, y: 4, z: 4 }),
+      box('wall', { x: 12, y: 6, z: 0.5 }),
       {
         ...box('stairs', { x: 4, y: 4, z: 4 }),
         colliderShape: { kind: 'compound-steps', stepCount: 8, stepRise: 0.5, stepRun: 0.5, stepDepth: 4 },
@@ -260,8 +261,8 @@ describe('TsSimCore stair climb', () => {
     ],
   };
 
-  /** 8 risers of 0.5 m ascending toward -X onto a 4 m high landing; returns the hop and sag counts. */
-  function climb(speed: number) {
+  /** 8 risers of 0.5 m ascending toward -X onto a 4 m high landing, with a wall just past the walking line. */
+  function stairs(): TsSimCore {
     const sim = new TsSimCore(BASE.settings.charRadius);
     sim.setStaticColliders(
       {
@@ -270,38 +271,87 @@ describe('TsSimCore stair climb', () => {
           place('floor', { x: -5, y: -1, z: -5 }),
           place('landing', { x: 0, y: 0, z: 0 }),
           place('stairs', { x: 4, y: 0, z: 0 }),
+          place('wall', { x: 0, y: 0, z: 2.5 }),
         ],
       },
       STAIRS_KINDS,
       [],
     );
     sim.teleport({ x: 10, y: -0.5, z: 2 });
+    return sim;
+  }
+
+  const walk = (sim: TsSimCore, speed: number, dir: { x: number; z: number }, jump = false) =>
+    sim.step({ ...BASE, dir, speed, jump }).newPos;
+
+  /** Walks -X until the first hop, then `extra` more frames; returns the hop frame's pose. */
+  function walkToFirstHop(sim: TsSimCore, speed: number) {
     let prev = sim.position();
-    let hops = 0;
-    let sags = 0;
-    let maxStepX = 0;
-    for (let i = 0; i < 4000 && prev.x > 1; i++) {
-      const { newPos } = sim.step({ ...BASE, dir: { x: -1, z: 0 }, speed });
-      if (newPos.y - prev.y > 0.3) {
-        hops++;
-        maxStepX = Math.max(maxStepX, Math.abs(newPos.x - prev.x));
-      } else if (newPos.y - prev.y < -0.02) {
-        sags++;
+    for (let i = 0; i < 4000; i++) {
+      const pos = walk(sim, speed, { x: -1, z: 0 });
+      if (pos.y - prev.y > 0.3) {
+        return pos;
       }
-      prev = newPos;
+      prev = pos;
     }
-    const end = prev;
-    sim.dispose();
-    return { hops, sags, maxStepX, end };
+    throw new Error('never hopped');
   }
 
   for (const speed of [0.5, 1, 3]) {
     it(`climbs 8 risers in 8 hops without sagging back at ${speed} m/s`, () => {
-      const { hops, sags, maxStepX, end } = climb(speed);
+      const sim = stairs();
+      let prev = sim.position();
+      let maxY = prev.y;
+      let hops = 0;
+      let maxStepX = 0;
+      for (let i = 0; i < 4000 && prev.x > 1; i++) {
+        const pos = walk(sim, speed, { x: -1, z: 0 });
+        if (pos.y - prev.y > 0.3) {
+          hops++;
+          maxStepX = Math.max(maxStepX, Math.abs(pos.x - prev.x));
+        }
+        expect(pos.y).toBeGreaterThan(maxY - 0.02);
+        maxY = Math.max(maxY, pos.y);
+        prev = pos;
+      }
+      sim.dispose();
       expect(hops).toBe(8);
-      expect(sags).toBe(0);
-      expect(maxStepX).toBeLessThanOrEqual((speed / 60) + 0.01);
-      expect(end.y).toBeCloseTo(3.5, 1);
+      expect(maxStepX).toBeLessThanOrEqual(speed / 60 + 0.01);
+      expect(prev.y).toBeCloseTo(3.5, 1);
     });
   }
+
+  it('lets a jump during the hold clear more than 0.5 m', () => {
+    const sim = stairs();
+    const hop = walkToFirstHop(sim, 1);
+    let maxY = hop.y;
+    maxY = Math.max(maxY, walk(sim, 1, { x: -1, z: 0 }, true).y);
+    for (let i = 0; i < 20; i++) {
+      maxY = Math.max(maxY, walk(sim, 1, { x: -1, z: 0 }).y);
+    }
+    sim.dispose();
+    expect(maxY - hop.y).toBeGreaterThan(0.5);
+  });
+
+  it('drops the ball soon after reversing off the tread mid-hold', () => {
+    const sim = stairs();
+    const hop = walkToFirstHop(sim, 1);
+    let y = hop.y;
+    for (let i = 0; i < 15; i++) {
+      y = walk(sim, 1, { x: 1, z: 0 }).y;
+    }
+    sim.dispose();
+    expect(y).toBeLessThan(hop.y - 0.3);
+  });
+
+  it('ends the hold when blocked sideways mid-hold', () => {
+    const sim = stairs();
+    const hop = walkToFirstHop(sim, 1);
+    let y = hop.y;
+    for (let i = 0; i < 30; i++) {
+      y = walk(sim, 1, { x: 0, z: 1 }).y;
+    }
+    sim.dispose();
+    expect(y).toBeLessThan(hop.y - 0.1);
+  });
 });

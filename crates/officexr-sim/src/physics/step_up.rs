@@ -94,11 +94,24 @@ pub fn try_step_up(probe: &mut impl StepUpProbe, dx: f64, dz: f64) -> Option<Vec
     })
 }
 
+/// Whether something lies within the probe reach below the ball. A corner
+/// makes the sweep slide, so any deviation from the straight drop counts.
+pub fn has_support(probe: &mut impl StepUpProbe) -> bool {
+    let m = probe
+        .compute(Vec3 {
+            x: 0.0,
+            y: -STEP_UP_FORWARD_CLEARANCE,
+            z: 0.0,
+        })
+        .movement;
+    m.x.hypot(m.z).hypot(m.y + STEP_UP_FORWARD_CLEARANCE) > 0.01
+}
+
 /// Keeps gravity off after a hop until the ball rests on the tread. The hop
 /// only advances the walk distance, so the ball sits at tread height short of
 /// the edge; gravity would slide it back down the riser at slow speeds.
-/// The hold ends on grounding, on stopping, or once the ball has walked the
-/// probe reach.
+/// The hold ends on grounding, losing support, being blocked, stopping, or
+/// once the ball has walked the probe reach.
 #[derive(Debug, Default)]
 pub struct StepUpHold {
     remaining: f64,
@@ -109,13 +122,18 @@ impl StepUpHold {
         self.remaining = STEP_UP_FORWARD_CLEARANCE;
     }
 
+    pub fn reset(&mut self) {
+        self.remaining = 0.0;
+    }
+
     pub fn active(&self) -> bool {
         self.remaining > 0.0
     }
 
-    /// Call after each sweep with the horizontal distance it moved.
-    pub fn update(&mut self, walked: f64, grounded: bool, intends_move: bool) {
-        self.remaining = if grounded || !intends_move {
+    /// Call after each sweep: `walked` of the `intended` horizontal distance was covered.
+    pub fn update(&mut self, walked: f64, intended: f64, grounded: bool, supported: bool) {
+        let blocked = walked < intended * 0.1;
+        self.remaining = if grounded || !supported || intended == 0.0 || blocked {
             0.0
         } else {
             (self.remaining - walked).max(0.0)

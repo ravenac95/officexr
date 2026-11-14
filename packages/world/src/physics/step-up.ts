@@ -149,12 +149,18 @@ export function tryStepUp(
   return { x: fwd.x * scale, y: landedRise, z: fwd.z * scale };
 }
 
+/** Whether something lies within the probe reach below the ball. A corner makes the sweep slide, so any deviation from the straight drop counts. */
+export function hasSupport(probe: StepUpProbe): boolean {
+  const m = probe.compute({ x: 0, y: -STEP_UP_FORWARD_CLEARANCE, z: 0 });
+  return Math.hypot(m.x, m.y + STEP_UP_FORWARD_CLEARANCE, m.z) > 0.01;
+}
+
 /**
  * Keeps gravity off after a hop until the ball rests on the tread. The hop
  * only advances the walk distance, so the ball sits at tread height short of
  * the edge; gravity would slide it back down the riser at slow speeds.
- * The hold ends on grounding, on stopping, or once the ball has walked the
- * probe reach.
+ * The hold ends on grounding, losing support, being blocked, stopping, or
+ * once the ball has walked the probe reach.
  */
 export class StepUpHold {
   private remaining = 0;
@@ -163,12 +169,17 @@ export class StepUpHold {
     this.remaining = STEP_UP_FORWARD_CLEARANCE;
   }
 
+  reset(): void {
+    this.remaining = 0;
+  }
+
   get active(): boolean {
     return this.remaining > 0;
   }
 
-  /** Call after each sweep with the horizontal distance it moved. */
-  update(walked: number, grounded: boolean, intendsMove: boolean): void {
-    this.remaining = grounded || !intendsMove ? 0 : Math.max(0, this.remaining - walked);
+  /** Call after each sweep: `walked` of the `intended` horizontal distance was covered. */
+  update(walked: number, intended: number, grounded: boolean, supported: boolean): void {
+    const blocked = walked < intended * 0.1;
+    this.remaining = grounded || !supported || intended === 0 || blocked ? 0 : Math.max(0, this.remaining - walked);
   }
 }

@@ -786,3 +786,7 @@ The `waitForBotCondition` itself IS the assertion: it only resolves when the pre
 **Test results:**
 - `scenario-corridor.spec.ts`: **passed** (4 runs total — 2 before adding log, 2 after; all green; ~19–26 s each)
 - `scenario-stairs.spec.ts`: **passed** (1 run; 15.6 s; measured top y=5.500 > threshold 5.2)
+
+### OSO-7958 — `StepUpHold` (step-up hop support)
+
+The step-up hop lifts the ball to tread height but advances only the walk distance, so the ball sits short of the edge with nothing under it. Without help gravity slid it back down the riser below about 1.5 m/s and it hopped again. `StepUpHold` (`physics/step-up.ts`, `physics/step_up.rs`) keeps gravity off after a hop. It ends on grounding, no support within the probe reach (`hasSupport` / `has_support`), being blocked (moved under 10% of the intended walk), no input, a jump, a teleport or gravity toggle, or after walking the 0.45 m probe reach. `TsSimCore`, `BotPhysicsWorld` and the Rust `SimCore` use it identically. The support probe treats any deviation from a straight drop as support, because a corner makes the sweep slide.
