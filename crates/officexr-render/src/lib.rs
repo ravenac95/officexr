@@ -196,6 +196,10 @@ fn spawn_camera(
         let id = commands
             .spawn((
                 Camera3d::default(),
+                Camera {
+                    is_active: !view.paused,
+                    ..default()
+                },
                 view.target.clone(),
                 camera_projection(camera),
                 Tonemapping::AcesFitted,

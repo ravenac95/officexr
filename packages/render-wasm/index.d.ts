@@ -40,6 +40,7 @@ export interface RendererModule {
   /**
    * Boots Bevy once, loading models from `origin`. A view later created on `primaryCanvas` draws into
    * Bevy's primary window directly; with WebGL2 every other view is read back and copied into its canvas.
+   * The primary canvas is styled to fill its parent; it takes one live view at a time.
    */
   init(origin: string, primaryCanvas?: HTMLCanvasElement | string): void;
   /** A view drawing into `canvas` (an element, or a selector matching one). */

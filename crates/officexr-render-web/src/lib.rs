@@ -16,6 +16,7 @@ compile_error!("enable exactly one of the `webgpu` and `webgl2` features");
 #[cfg(all(feature = "webgpu", feature = "webgl2"))]
 compile_error!("the `webgpu` and `webgl2` features are mutually exclusive");
 
+use std::cell::Cell;
 use std::sync::OnceLock;
 
 use bevy::asset::AssetMetaCheck;
@@ -29,6 +30,11 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 static HUB: OnceLock<ViewHub> = OnceLock::new();
+
+thread_local! {
+    /// The live view on the primary canvas: a second would add a second camera to its window.
+    static PRIMARY_VIEW: Cell<Option<ViewId>> = const { Cell::new(None) };
+}
 /// Marks the canvas Bevy's primary window draws into.
 const PRIMARY_ATTR: &str = "data-officexr-primary";
 
@@ -185,13 +191,19 @@ pub fn create_view(canvas: JsValue, kind: &str) -> Result<ViewId, JsError> {
         _ => return Err(js_err(format!("unknown view kind {kind:?}"))),
     };
     let canvas = resolve_canvas(canvas)?;
-    Ok(hub()?.create(kind, |id| {
-        if canvas.has_attribute(PRIMARY_ATTR) {
-            return ViewTarget::PrimaryWindow;
-        }
-        canvas.set_attribute("data-officexr-view", &id.to_string());
-        target(id, canvas)
-    }))
+    let hub = hub()?;
+    if !canvas.has_attribute(PRIMARY_ATTR) {
+        return Ok(hub.create(kind, |id| {
+            canvas.set_attribute("data-officexr-view", &id.to_string());
+            target(id, canvas)
+        }));
+    }
+    if PRIMARY_VIEW.get().is_some() {
+        return Err(js_err("the primary canvas already has a view"));
+    }
+    let id = hub.create(kind, |_| ViewTarget::PrimaryWindow);
+    PRIMARY_VIEW.set(Some(id));
+    Ok(id)
 }
 
 #[cfg(feature = "webgpu")]
@@ -208,6 +220,9 @@ fn target(id: ViewId, canvas: Canvas) -> ViewTarget {
 #[wasm_bindgen(js_name = destroyView)]
 pub fn destroy_view(id: ViewId) -> Result<(), JsError> {
     send(id, ViewMsg::Destroy)?;
+    if PRIMARY_VIEW.get() == Some(id) {
+        PRIMARY_VIEW.set(None);
+    }
     #[cfg(feature = "webgl2")]
     image_views::unregister(id);
     Ok(())

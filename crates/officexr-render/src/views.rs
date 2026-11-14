@@ -123,7 +123,11 @@ pub struct View {
     pub(crate) kind: ViewKind,
     pub(crate) target: RenderTarget,
     pub(crate) camera: Option<Entity>,
+    /// Hidden: its camera, once spawned, is inactive, and nothing is read back.
+    pub(crate) paused: bool,
     settled: u32,
+    /// The player ids its frame stats were last counted with.
+    player_ids: Vec<String>,
 }
 
 #[derive(Component, Deref)]
@@ -147,7 +151,9 @@ fn view_bundle(id: ViewId, layer: usize, kind: ViewKind, target: RenderTarget) -
             kind,
             target,
             camera: None,
+            paused: false,
             settled: 0,
+            player_ids: vec![],
         },
         ObjectKinds::default(),
         ObjectIndex::default(),
@@ -277,9 +283,13 @@ fn spawn_view(world: &mut World, id: ViewId, kind: ViewKind, target: ViewTarget)
             );
             image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
             let handle = world.resource_mut::<Assets<Image>>().add(image);
-            world
-                .entity_mut(view)
-                .insert(Readback::texture(handle.clone()));
+            if size.x > 0 && size.y > 0 {
+                world
+                    .entity_mut(view)
+                    .insert(Readback::texture(handle.clone()));
+            } else {
+                world.get_mut::<View>(view).unwrap().paused = true;
+            }
             RenderTarget::Image(handle.into())
         }
     };
@@ -310,7 +320,7 @@ fn resize(world: &mut World, entity: Entity, size: UVec2) {
     } else {
         world.entity_mut(entity).remove::<Readback>();
     }
-    // ponytail: a view paused before its camera spawns still draws once at its old size.
+    world.get_mut::<View>(entity).unwrap().paused = !active;
     if let Some(mut camera) = camera.and_then(|c| world.get_mut::<Camera>(c)) {
         camera.is_active = active;
     }
@@ -319,16 +329,20 @@ fn resize(world: &mut World, entity: Entity, size: UVec2) {
 fn pause_occluded(
     mut occluded: MessageReader<WindowOccluded>,
     primary: Query<(), With<PrimaryWindow>>,
-    views: Query<&View>,
+    mut views: Query<&mut View>,
     mut cameras: Query<&mut Camera>,
 ) {
     for event in occluded.read() {
-        let on_window = |v: &&View| match v.target {
-            RenderTarget::Window(WindowRef::Entity(w)) => w == event.window,
-            RenderTarget::Window(WindowRef::Primary) => primary.contains(event.window),
-            _ => false,
-        };
-        for view in views.iter().filter(on_window) {
+        for mut view in &mut views {
+            let on_window = match view.target {
+                RenderTarget::Window(WindowRef::Entity(w)) => w == event.window,
+                RenderTarget::Window(WindowRef::Primary) => primary.contains(event.window),
+                _ => false,
+            };
+            if !on_window {
+                continue;
+            }
+            view.paused = event.occluded;
             if let Some(mut camera) = view.camera.and_then(|c| cameras.get_mut(c).ok()) {
                 camera.is_active = !event.occluded;
             }
@@ -344,7 +358,7 @@ fn report_status(
         &mut View,
         &ObjectKinds,
         &LayoutIndex,
-        &ViewPlayers,
+        Ref<ViewPlayers>,
         Option<Ref<ViewScene>>,
     )>,
     bound: Query<&ChildOf, With<Bound>>,
@@ -357,7 +371,17 @@ fn report_status(
         let bound = bound.iter().filter(|c| c.parent() == entity).count();
         let pending =
             kinds.pending() + layouts.pending() + players.players.len().saturating_sub(bound);
-        let loaded = scene.is_some_and(|s| !s.is_changed()) && pending == 0;
+        // A player leaving changes no pending count, but does change what's drawn.
+        let players_changed = players.is_changed()
+            && !players
+                .players
+                .iter()
+                .map(|p| &p.id)
+                .eq(view.player_ids.iter());
+        if players_changed {
+            view.player_ids = players.players.iter().map(|p| p.id.clone()).collect();
+        }
+        let loaded = scene.is_some_and(|s| !s.is_changed()) && pending == 0 && !players_changed;
         view.settled = if loaded { view.settled + 1 } else { 0 };
         let Some(status) = hub.status.get_mut(&view.id) else {
             continue;
@@ -407,6 +431,11 @@ mod tests {
     fn view_on(app: &mut App, target: ViewTarget) -> ViewId {
         let hub = hub(app);
         let id = hub.create(ViewKind::World, |_| target);
+        world_view_content(&hub, id);
+        id
+    }
+
+    fn world_view_content(hub: &ViewHub, id: ViewId) {
         let json = include_str!("../examples/booper.scene.json");
         let mut diff: WorldDiff = serde_json::from_str(json).unwrap();
         diff.kinds = Some(vec![]);
@@ -415,7 +444,6 @@ mod tests {
             .into();
         hub.send(id, ViewMsg::World(Box::new(diff)));
         hub.send(id, ViewMsg::Camera(camera(0.0)));
-        id
     }
 
     fn live(app: &App) -> usize {
@@ -523,12 +551,6 @@ mod tests {
         let mut app = bare_app();
         let id = view_on(&mut app, ViewTarget::Image(UVec2::new(8, 8)));
         app.update();
-        let has_readback = |app: &mut App| {
-            let mut q = app
-                .world_mut()
-                .query_filtered::<(), (With<View>, With<Readback>)>();
-            q.iter(app.world()).count() == 1
-        };
         assert!(has_readback(&mut app));
         hub(&app).send(id, ViewMsg::Resize(UVec2::ZERO));
         app.update();
@@ -584,5 +606,114 @@ mod tests {
         // The two cubes share one draw; the sky dome is the other.
         assert_eq!(status.draw_calls, 2);
         assert!(status.triangles > 2 * 12);
+    }
+
+    fn camera_of(app: &mut App, id: ViewId) -> Entity {
+        let mut views = app.world_mut().query::<&View>();
+        views
+            .iter(app.world())
+            .find(|v| v.id == id)
+            .unwrap()
+            .camera
+            .unwrap()
+    }
+
+    fn has_readback(app: &mut App) -> bool {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<(), (With<View>, With<Readback>)>();
+        q.iter(app.world()).count() == 1
+    }
+
+    #[test]
+    fn a_zero_sized_image_view_draws_and_reads_back_nothing() {
+        let mut app = bare_app();
+        let id = view_on(&mut app, ViewTarget::Image(UVec2::ZERO));
+        app.update();
+        assert!(!has_readback(&mut app));
+        let camera = camera_of(&mut app, id);
+        assert!(!app.world().get::<Camera>(camera).unwrap().is_active);
+
+        hub(&app).send(id, ViewMsg::Resize(UVec2::new(4, 4)));
+        app.update();
+        assert!(has_readback(&mut app));
+        assert!(app.world().get::<Camera>(camera).unwrap().is_active);
+    }
+
+    #[test]
+    fn an_image_view_paused_before_its_camera_spawns_starts_inactive() {
+        let mut app = bare_app();
+        let hub = hub(&app);
+        let id = hub.create(ViewKind::World, |_| ViewTarget::Image(UVec2::new(8, 8)));
+        hub.send(id, ViewMsg::Resize(UVec2::ZERO));
+        app.update();
+        world_view_content(&hub, id);
+        app.update();
+        let camera = camera_of(&mut app, id);
+        assert!(!app.world().get::<Camera>(camera).unwrap().is_active);
+        assert!(!has_readback(&mut app));
+    }
+
+    #[test]
+    fn a_primary_window_view_draws_into_the_primary_window_and_leaves_it() {
+        let mut app = bare_app();
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        let id = view_on(&mut app, ViewTarget::PrimaryWindow);
+        app.update();
+
+        let camera = camera_of(&mut app, id);
+        assert!(matches!(
+            app.world().get::<RenderTarget>(camera),
+            Some(RenderTarget::Window(WindowRef::Primary))
+        ));
+        assert!(layer_of(&mut app, id) >= 1);
+        assert!(!has_readback(&mut app));
+
+        hub(&app).send(id, ViewMsg::Destroy);
+        app.update();
+        assert!(app.world().get_entity(window).is_ok());
+        assert!(app.world().get_entity(camera).is_err());
+    }
+
+    #[test]
+    fn a_player_leaving_recounts_the_frame_stats() {
+        let mut app = bare_app();
+        let id = world_view(&mut app, "#c");
+        let players = |ids: &[&str]| Players {
+            players: ids
+                .iter()
+                .map(|id| crate::PlayerRender {
+                    id: id.to_string(),
+                    character: "Barbarian".into(),
+                    pos: Vec3::ZERO,
+                    yaw: 0.0,
+                    vel: Vec3::ZERO,
+                    name: String::new(),
+                    airborne: false,
+                })
+                .collect(),
+            ..default()
+        };
+        hub(&app).send(id, ViewMsg::Players(players(&["p"])));
+        app.update();
+        // Stands in for the player's avatar, which this app can't load.
+        let view = find_view(app.world_mut(), id).unwrap();
+        app.world_mut().spawn((Bound, ChildOf(view)));
+        let settled = |app: &App| app.world().get::<View>(view).unwrap().settled;
+        for _ in 0..SETTLE_FRAMES + 2 {
+            app.update();
+        }
+        assert!(settled(&app) > SETTLE_FRAMES);
+
+        hub(&app).send(id, ViewMsg::Players(players(&["p"])));
+        app.update();
+        assert!(settled(&app) > SETTLE_FRAMES, "the same players recounted");
+
+        hub(&app).send(id, ViewMsg::Players(players(&[])));
+        app.update();
+        assert_eq!(settled(&app), 0);
     }
 }
