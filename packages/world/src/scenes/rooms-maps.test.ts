@@ -16,7 +16,6 @@ import {
 import { isBakedRoom, newPlaceObject } from './commands.ts';
 import { deserializeLayout } from './layout-document.ts';
 import {
-  DEFAULT_MAP_ENVIRONMENT,
   emptyMapDocument,
   type MapDocumentV1,
   type MapDocumentV2,
@@ -205,13 +204,6 @@ describe('serializeMap + deserializeMap', () => {
         { id: 's-1', label: 'front-door', position: [1.5, 0, 1.5] },
         { id: 's-2', position: [11.5, 0, 1.5] },
       ],
-      environment: {
-        sun: { positionX: 10, positionY: 30, positionZ: 5, color: '#ffeecc', intensity: 1.6 },
-        sky: { enabled: true, turbidity: 8, rayleigh: 1.5, inclination: 0.6, azimuth: 0.25 },
-        stars: { enabled: true, radius: 200, depth: 50, count: 5000, factor: 4, saturation: 0, fade: true },
-        hdri: { url: '/hdri/sunset.hdr', intensity: 1.0, background: false },
-        ambientIntensity: 0.2,
-      },
     });
   }
 
@@ -232,7 +224,7 @@ describe('serializeMap + deserializeMap', () => {
 
   it('serializeMap passes deskAreas through and omits the key when absent', () => {
     const base = makeFullMap();
-    const input = { name: 'm', rooms: [], spawnPoints: [], environment: base.environment };
+    const input = { name: 'm', rooms: [], spawnPoints: [] };
     const areas = [{ id: 'd1', min: { x: 0, z: 0 }, max: { x: 1, z: 1 } }];
     expect(serializeMap({ ...input, deskAreas: areas }).deskAreas).toEqual(areas);
     expect('deskAreas' in serializeMap(input)).toBe(false);
@@ -263,7 +255,6 @@ describe('serializeMap + deserializeMap', () => {
         { id: 'r-2', roomName: 'default-v2', position: [10, 0, 0] as [number, number, number] },
       ],
       spawnPoints: [],
-      environment: makeFullMap().environment,
     };
     const back = deserializeMap(JSON.parse(JSON.stringify(serializeMap(input))));
     expect(back.rooms[0].building).toBe(true);
@@ -272,17 +263,12 @@ describe('serializeMap + deserializeMap', () => {
     expect(() => deserializeMap(JSON.parse(JSON.stringify(bad)))).toThrow(/building/);
   });
 
-  it('preserves null sky/stars/hdri across round-trip', () => {
-    const m = serializeMap({
-      name: 'plain',
-      rooms: [],
-      spawnPoints: [],
-      environment: { ...DEFAULT_MAP_ENVIRONMENT },
-    });
-    const back = deserializeMap(JSON.parse(JSON.stringify(m)));
-    expect(back.environment.sky).toBeNull();
-    expect(back.environment.stars).toBeNull();
-    expect(back.environment.hdri).toBeNull();
+  it('drops a legacy environment block on load', () => {
+    const m = makeFullMap();
+    const legacy = { ...m, environment: { sun: { positionX: 1 }, sky: null, stars: null, hdri: null } };
+    const back = deserializeMap(JSON.parse(JSON.stringify(legacy)));
+    expect(back).toEqual(m);
+    expect(back).not.toHaveProperty('environment');
   });
 
   it('rejects unknown schemaVersion', () => {
@@ -294,9 +280,6 @@ describe('serializeMap + deserializeMap', () => {
     expect(() =>
       deserializeMap({ schemaVersion: 1, name: 'x', rooms: [] }),
     ).toThrow(/spawnPoints/);
-    expect(() =>
-      deserializeMap({ schemaVersion: 1, name: 'x', rooms: [], spawnPoints: [] }),
-    ).toThrow(/environment/);
   });
 
   it('rejects rooms without a string roomName or with a rotationY outside 0-3', () => {
@@ -321,7 +304,6 @@ describe('serializeMap + deserializeMap', () => {
       name: 'plain',
       rooms: [{ id: 'r-1', roomName: 'k', position: [0, 0, 0] }],
       spawnPoints: [],
-      environment: { ...DEFAULT_MAP_ENVIRONMENT },
     });
     const back = deserializeMap(JSON.parse(JSON.stringify(m)));
     expect(back.rooms[0].rotationY).toBeUndefined();
@@ -348,7 +330,6 @@ describe('migrateMapV1toV2', () => {
   it('leaves non-baked placements and spawn points untouched', () => {
     expect(migrated.rooms[1]).toEqual(v1.rooms[1]);
     expect(migrated.spawnPoints).toEqual(v1.spawnPoints);
-    expect(migrated.environment).toEqual(v1.environment);
   });
 
   it('deserializeMap passes a v2 map through unchanged', () => {

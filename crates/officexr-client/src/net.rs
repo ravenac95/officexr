@@ -197,7 +197,6 @@ async fn fetch_kinds(url: &str, cookie: &str) -> Result<Vec<Value>, reqwest::Err
     Ok(catalog.kinds)
 }
 
-/// The office map's baked layout placements, served decoded for Bevy's glTF loader.
 /// `{web_url}/api/{segments...}`, with each segment percent-encoded.
 fn api_url(web_url: &str, segments: &[&str]) -> Result<reqwest::Url, String> {
     let mut url = reqwest::Url::parse(web_url).map_err(|err| format!("{web_url}: {err}"))?;
@@ -296,7 +295,7 @@ fn placements(rooms: &[RoomInstance], layout_of: &HashMap<String, Option<String>
             Some(Layout {
                 room_instance_id: instance.id.clone(),
                 placement: BakedLayoutPlacement {
-                    gltf_path: format!("/api/baked-layouts/{layout}.decoded.glb"),
+                    gltf_path: format!("/api/baked-layouts/{layout}.glb"),
                     position: instance.position,
                     rotation_y: instance.rotation_y,
                 },
@@ -491,7 +490,7 @@ mod tests {
         assert_eq!(placed.len(), 1);
         assert_eq!(placed[0].room_instance_id, "r1");
         let placement = &placed[0].placement;
-        assert_eq!(placement.gltf_path, "/api/baked-layouts/lobby.decoded.glb");
+        assert_eq!(placement.gltf_path, "/api/baked-layouts/lobby.glb");
         assert_eq!(
             (placement.position, placement.rotation_y),
             ([1.0, 0.0, 2.0], 1)

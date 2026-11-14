@@ -149,7 +149,7 @@ function StoreFeed() {
       objects: state.worldObjects,
       lighting: state.worldConstants.lighting,
       background: state.worldConstants.background,
-      bakedLayouts: bakedLayouts.map(decodedPlacement),
+      bakedLayouts: bakedLayouts.map(layoutPlacement),
     };
     wasm.setScene(JSON.stringify(scene), OVERVIEW_CAMERA, undefined);
   }, [wasm, loaded, bakedLayouts, local, catalog]);
@@ -183,9 +183,8 @@ function StoreFeed() {
   return null;
 }
 
-/** Bevy reads neither meshopt nor quantized meshes, so it loads the storage plugin's decoded copy. */
-const decodedPlacement = (p: BakedLayout) => ({
-  gltfPath: `${window.location.origin}/api/baked-layouts/${p.layoutName}.decoded.glb`,
+const layoutPlacement = (p: BakedLayout) => ({
+  gltfPath: `${window.location.origin}/api/baked-layouts/${p.layoutName}.glb`,
   position: p.position,
   rotationY: p.rotationY,
 });

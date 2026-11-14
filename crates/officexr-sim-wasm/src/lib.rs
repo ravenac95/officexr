@@ -61,6 +61,12 @@ impl WasmSim {
         to_js(&self.0.position())
     }
 
+    #[wasm_bindgen(js_name = standingAt)]
+    pub fn standing_at(&self, feet: JsValue, char_radius: f64) -> Result<bool, JsError> {
+        let feet: Vec3 = from_js(feet)?;
+        Ok(self.0.standing_at(feet, char_radius))
+    }
+
     pub fn teleport(&mut self, pos: JsValue) -> Result<(), JsError> {
         let pos: Vec3 = from_js(pos)?;
         self.0.teleport(pos);

@@ -2,7 +2,7 @@ import React from 'react';
 import ReactThreeTestRenderer from '@react-three/test-renderer';
 import { ApplicationProvider } from '@officexr/world/react';
 import type { ApplicationApi } from '@officexr/world/app';
-import { createTestApi } from './createTestApi.ts';
+import { createTestApi } from '../../../test-harness/createTestApi.ts';
 
 export type EditorSceneRenderer = Awaited<
   ReturnType<typeof ReactThreeTestRenderer.create>

@@ -112,7 +112,7 @@ The original `@officexr/core` was split as follows:
 |---------|----------|--------------|
 | `@officexr/sdk` | GameState store, event bus, realtime protocol, supabase client, typed RPCs | No React. No `three`. Plain TS + `@supabase/supabase-js` + `zod` (or `valibot`). |
 | `@officexr/core-refactor` | Communication subsystem (voice / Jitsi), stack factory | React optional. No `three`. Depends on `@officexr/sdk`. |
-| `@officexr/world` | Renderer, physics, bots, character registry, scene serialization | React, `three`, `@react-three/fiber`, `@react-three/rapier`. Depends on `@officexr/sdk`. |
+| `@officexr/world` | Renderer, physics, bots, character registry, scene serialization | React, `three`, `@react-three/fiber`. Depends on `@officexr/sdk`. |
 | `@officexr/studio` | Authoring app — Debug / Character / Scene mode shells over `@officexr/world`'s renderer | React. Depends on `@officexr/world` + `@officexr/sdk` + `@officexr/core-refactor`. |
 | `@officexr/web` | Vite shell (production app) + `/api` server | Depends on `@officexr/world` + `@officexr/core-refactor` + `@officexr/sdk`; HUD lives in `web/src/hud/`. |
 

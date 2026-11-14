@@ -6,8 +6,6 @@
  *   - per-instance `RoomInstance` placement (voxel-coord offset +
  *     quarter-turn yaw)
  *   - `SpawnPoint`s in continuous world coords for character spawns
- *   - `MapEnvironment` (sun + Sky + Stars + HDRI) for the scene's
- *     visual backdrop
  *
  * Runtime: `compileMap()` (studio-side) recompiles each referenced
  * RoomDocument, offsets cube positions by the RoomInstance position,
@@ -46,56 +44,6 @@ export interface SpawnPoint {
   position: [number, number, number];
 }
 
-/** Directional sun. Replaces the local Leva state today in
- * `renderer/panels/LightingPanel.ts` so the map persists the chosen
- * sun position rather than relying on per-mount defaults. */
-export interface MapSunSettings {
-  positionX: number;
-  positionY: number;
-  positionZ: number;
-  color: string;
-  intensity: number;
-}
-
-/** drei `<Sky>` shader settings (mapped 1:1 to its props). */
-export interface MapSkySettings {
-  enabled: boolean;
-  turbidity: number;
-  rayleigh: number;
-  inclination: number;
-  azimuth: number;
-}
-
-/** drei `<Stars>` particle-shader settings (mapped 1:1 to its props). */
-export interface MapStarsSettings {
-  enabled: boolean;
-  radius: number;
-  depth: number;
-  count: number;
-  factor: number;
-  saturation: number;
-  fade: boolean;
-}
-
-/** drei `<Environment>` HDRI settings. `url` is the only required
- * field; the rest match its props. */
-export interface MapHdriSettings {
-  url: string;
-  intensity: number;
-  background: boolean;
-}
-
-/** Full lighting / sky / stars / HDRI bag for one map. Any of `sky`,
- * `stars`, `hdri` may be null when disabled, so the on-disk shape is
- * explicit about "not configured" vs "configured but disabled". */
-export interface MapEnvironment {
-  sun: MapSunSettings;
-  sky: MapSkySettings | null;
-  stars: MapStarsSettings | null;
-  hdri: MapHdriSettings | null;
-  ambientIntensity: number;
-}
-
 /** An XZ rectangle (world metres) that is a voice zone. An area with more than one chair or more than one desk has no seat. */
 export interface DeskArea {
   id: string;
@@ -111,7 +59,6 @@ export interface MapDocumentV1 {
   updatedAt?: number;
   rooms: RoomInstance[];
   spawnPoints: SpawnPoint[];
-  environment: MapEnvironment;
   deskAreas?: DeskArea[];
 }
 
@@ -123,14 +70,6 @@ export interface MapDocumentV2 extends Omit<MapDocumentV1, 'schemaVersion'> {
 /** Any map version found on disk. */
 export type SerializedMap = MapDocumentV1 | MapDocumentV2;
 
-export const DEFAULT_MAP_ENVIRONMENT: MapEnvironment = {
-  sun: { positionX: 20, positionY: 40, positionZ: 20, color: '#ffffff', intensity: 1.4 },
-  sky: null,
-  stars: null,
-  hdri: null,
-  ambientIntensity: 0.15,
-};
-
 export function emptyMapDocument(name: string, title?: string): MapDocumentV2 {
   return {
     schemaVersion: 2,
@@ -139,6 +78,5 @@ export function emptyMapDocument(name: string, title?: string): MapDocumentV2 {
     updatedAt: Date.now(),
     rooms: [],
     spawnPoints: [],
-    environment: { ...DEFAULT_MAP_ENVIRONMENT, sun: { ...DEFAULT_MAP_ENVIRONMENT.sun } },
   };
 }

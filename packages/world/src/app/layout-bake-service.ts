@@ -250,11 +250,11 @@ export async function bakeLayout(
   // VISUAL geometry, so mesh nodes can no longer serve as the collider
   // source — a fully-merged room would read back as one giant AABB.
   // Instead, compute collider descriptors from the canonical physics
-  // helper `worldObjectsToColliders` — the exact function MapColliders
+  // helper `worldObjectsToColliders` — the exact function SimCore
   // (browser, unbaked rooms) and BotPhysicsWorld.syncCubes (bots) use,
   // including compound-steps stairs, scanned cuboids and slope
   // trimeshes — so a character walks on identical geometry in baked
-  // and unbaked rooms alike. `BakedLayoutColliders` reads these back
+  // and unbaked rooms alike. `readGlbColliders` reads these back
   // via `parseEmbeddedColliders`.
   //
   // Runs AFTER the optimizer so no transform can strip or reshape the

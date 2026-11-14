@@ -1,12 +1,10 @@
 import React, { Suspense, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { Physics, type RapierRigidBody } from '@react-three/rapier';
-import { XR, type XRStore } from '@react-three/xr';
+import RAPIER from '@dimforge/rapier3d-compat';
 import { SkyDome } from './SkyDome.tsx';
 import { LightingRig } from './LightingRig.tsx';
 import { lightBasis, snapToShadowTexel } from './shadow-snap.ts';
-import { MapColliders } from './MapColliders.tsx';
 import { excludeLayoutInstances } from '../scenes/compile-map.ts';
 import type {
   Actions,
@@ -22,12 +20,11 @@ import type {
 import type { BotPool } from '../bot/BotPool.ts';
 import { Players } from './Players.tsx';
 import { CameraRig } from './CameraRig.tsx';
-import { XRAvatarOrigin } from './XRAvatarOrigin.tsx';
 import type { MotionLookState } from './motionLook.ts';
 import { SceneFrame } from './SceneFrame.tsx';
 import { ObjectInstances } from './ObjectInstances.tsx';
 import { BakedLayout } from './BakedLayout.tsx';
-import { BakedLayoutColliders } from './BakedLayoutColliders.tsx';
+import { useBakedColliders } from './useBakedColliders.ts';
 import { ProximityGlow } from './ProximityGlow.tsx';
 import { ModelsReady } from './ModelsReady.tsx';
 import { FrameStatsProbe, type FrameStatsSample } from './FrameStatsProbe.tsx';
@@ -39,8 +36,7 @@ import type { BakedLayoutPlacement } from '../app/map-loader.ts';
 import type { ViewConfig } from './viewConfig.ts';
 import type { ViewOffsets } from './lookControls.ts';
 import type { AutoWalkSource, MoveInput } from './moveIntent.ts';
-import { StandingCheck, type SeatingSource } from './seated.ts';
-import type { ColliderDescriptor } from '../physics/rules.ts';
+import type { SeatingSource } from './seated.ts';
 import type { SimBakedColliders, SimCore } from '../sim/SimCore.ts';
 import { TsSimCore } from '../sim/TsSimCore.ts';
 import { loadWasmSimCore } from '../sim/WasmSimCore.ts';
@@ -87,12 +83,6 @@ function SunFollower(props: {
   return null;
 }
 
-function OptionalXR({ store, children }: { store?: XRStore; children: React.ReactNode }) {
-  return store ? <XR store={store}>{children}</XR> : <>{children}</>;
-}
-
-const noopSubscribe = () => () => {};
-
 type CreateSim = (charRadius: number) => SimCore;
 
 const createTsSimCore: CreateSim = (charRadius) => new TsSimCore(charRadius);
@@ -100,19 +90,17 @@ const createTsSimCore: CreateSim = (charRadius) => new TsSimCore(charRadius);
 /** Which `SimCore` runs the local player; `'rust'` is the wasm build of `crates/officexr-sim`. */
 export type SimImplementation = 'ts' | 'rust';
 
-/** The factory for `sim`, or null while the wasm module loads. */
+/** The factory for `sim`, or null while its Rapier build loads. */
 function useCreateSim(sim: SimImplementation, onError?: (error: Error) => void): CreateSim | null {
-  const [wasm, setWasm] = useState<CreateSim | null>(null);
+  const [loaded, setLoaded] = useState<{ sim: SimImplementation; create: CreateSim } | null>(null);
   const reportError = useEffectEvent((error: Error) => onError?.(error));
   useEffect(() => {
-    if (sim !== 'rust') {
-      return;
-    }
     let live = true;
-    loadWasmSimCore().then(
+    const load = sim === 'rust' ? loadWasmSimCore() : RAPIER.init().then(() => createTsSimCore);
+    load.then(
       (create) => {
         if (live) {
-          setWasm(() => create);
+          setLoaded({ sim, create });
         }
       },
       (error: Error) => reportError(error),
@@ -121,7 +109,7 @@ function useCreateSim(sim: SimImplementation, onError?: (error: Error) => void):
       live = false;
     };
   }, [sim]);
-  return sim === 'rust' ? wasm : createTsSimCore;
+  return loaded?.sim === sim ? loaded.create : null;
 }
 
 /** A layout placement with the URL of its baked GLB, e.g. `/api/baked-layouts/lobby`. */
@@ -164,7 +152,7 @@ interface SceneProps {
   /**
    * Layout placements to draw from their baked GLBs, with their colliders.
    * The store's instances compiled from these layouts are then left out
-   * of `ObjectInstances` and `MapColliders`; bots still collide with them.
+   * of `ObjectInstances` and the sim colliders; bots still collide with them.
    */
   bakedLayouts?: readonly SceneBakedLayout[];
   /** When true, every character rendered in this scene is frozen at
@@ -197,16 +185,12 @@ interface SceneProps {
   onCollidersError?: (error: Error) => void;
   /** Default `'ts'`. */
   sim?: SimImplementation;
-  /** Enables immersive XR sessions from the self avatar's eyes. Without it the scene has no `<XR>` wrapper. */
-  xrStore?: XRStore;
 }
 
 export function Scene(props: SceneProps) {
   const { store, selfId, cameraMode, sync, bakedLayouts } = props;
   const excludeBakedInstance = useMemo(() => excludeLayoutInstances(bakedLayouts), [bakedLayouts]);
-  const [loadedBakedColliders, setLoadedBakedColliders] = useState<
-    ReadonlyMap<string, readonly ColliderDescriptor[]>
-  >(new Map());
+  const loadedBakedColliders = useBakedColliders(bakedLayouts, props.onCollidersError);
   const notifiedColliders = useRef(new Set<string>());
   const createSim = useCreateSim(props.sim ?? 'ts', props.onCollidersError);
   const notifyCollidersReady = (ids: readonly string[]) => {
@@ -220,14 +204,18 @@ export function Scene(props: SceneProps) {
   const bakedColliders = useMemo(
     (): SimBakedColliders[] =>
       (bakedLayouts ?? []).flatMap((p) => {
-        const colliders = loadedBakedColliders.get(p.roomInstanceId) ?? [];
+        const colliders = loadedBakedColliders.get(p.roomInstanceId);
+        if (colliders === null) {
+          // A stale bake embeds none: its compiled store instances collide instead.
+          return [];
+        }
         const { position, rotation } = placementTransform(p);
         return [
           {
             roomInstanceId: p.roomInstanceId,
             position: { x: position[0], y: position[1], z: position[2] },
             yawRad: rotation[1],
-            colliders,
+            colliders: colliders ?? [],
           },
         ];
       }),
@@ -235,11 +223,6 @@ export function Scene(props: SceneProps) {
   );
   const { proximity, lighting, background, fixedCamera } = props.view;
   const worldFocused = props.worldFocused ?? true;
-  const { xrStore } = props;
-  const xrPresenting = useSyncExternalStore(
-    xrStore?.subscribe ?? noopSubscribe,
-    () => xrStore?.getState().session != null,
-  );
 
   // After Scene mounts, force-broadcast the current world state.
   // The regular `onStoreChange` diff path only fires when values
@@ -273,10 +256,6 @@ export function Scene(props: SceneProps) {
   // tracks the local player.
   const sunLightRef = useRef<THREE.DirectionalLight | null>(null);
   const sunLightTargetRef = useRef<THREE.Object3D | null>(null);
-
-  // Set by `Players` when the self avatar's `RigidBody` mounts; SceneFrame
-  // moves it to the sim's position each frame.
-  const selfBodyRef = useRef<RapierRigidBody | null>(null);
 
   // Mutated each frame by SceneFrame to true while the local player is
   // airborne. Players reads this ref (not React state) to drive the jump
@@ -335,19 +314,8 @@ export function Scene(props: SceneProps) {
       // consumers (Debug) don't use the export path.
       gl={{ preserveDrawingBuffer: true }}
     >
-      <OptionalXR store={xrStore}>
       {props.onFrameStats && <FrameStatsProbe onSample={props.onFrameStats} />}
       <Suspense fallback={null}>
-        {/*
-          SRP: <Physics> no longer moves the local player (SceneFrame's
-          SimCore does) but still hosts the character bodies whose
-          sensors raise proximity and bump events (Players →
-          physics/bridge.ts) and the colliders the seating standing
-          check probes, so map colliders live in both worlds until
-          those move into SimCore.
-        */}
-        <Physics gravity={[0, -20, 0]} timeStep="vary">
-        <MapColliders store={store} exclude={excludeBakedInstance} />
         {bakedLayouts?.map((p) => {
           const transform = placementTransform(p);
           return (
@@ -355,15 +323,6 @@ export function Scene(props: SceneProps) {
               <group {...transform}>
                 <BakedLayout gltfPath={p.gltfPath} layoutName={p.layoutName} />
               </group>
-              <BakedLayoutColliders
-                gltfPath={p.gltfPath}
-                layoutName={p.layoutName}
-                transform={transform}
-                onReady={(colliders) =>
-                  setLoadedBakedColliders((prev) => new Map(prev).set(p.roomInstanceId, colliders))
-                }
-                onError={props.onCollidersError}
-              />
             </React.Fragment>
           );
         })}
@@ -405,14 +364,11 @@ export function Scene(props: SceneProps) {
           selfId={selfId}
           cameraMode={cameraMode}
           selfPosRef={selfPosRef}
-          selfBodyRef={selfBodyRef}
           paused={props.paused}
           isAirborneRef={isAirborneRef}
-          xrPresenting={xrPresenting}
           selfReady={props.selfReady}
           onPingPlayer={props.onPingPlayer}
         />
-        {xrStore && <XRAvatarOrigin selfPosRef={selfPosRef} charRadius={charRadius} />}
 
         {/* Mounted after Players: same-priority useFrames run in
             subscription order, so this reads the current frame's
@@ -439,7 +395,6 @@ export function Scene(props: SceneProps) {
           conversationDistance={proximity.conversationDistance}
           conversationHeight={proximity.conversationHeight}
           fixed={fixedCam}
-          xrPresenting={xrPresenting}
           paused={props.paused}
         />
         {/* After CameraRig, so the probe reads this frame's pose, not last frame's. */}
@@ -463,14 +418,13 @@ export function Scene(props: SceneProps) {
           moveInputRef={props.moveInputRef}
           autoWalk={props.autoWalk}
           seating={props.seating}
-          selfBodyRef={selfBodyRef}
+          selfReady={props.selfReady}
           createSim={createSim}
           bakedColliders={bakedColliders}
           onBakedCollidersApplied={notifyCollidersReady}
           worldFocused={worldFocused}
           spawnPoints={props.spawnPoints}
           isAirborneRef={isAirborneRef}
-          xrPresenting={xrPresenting}
         />
         <ProximityGlow
           proximityOutputRef={proximityOutputRef}
@@ -491,13 +445,10 @@ export function Scene(props: SceneProps) {
           cameraMode={cameraMode}
           conversationFocusRef={conversationFocusRef}
         />
-        <StandingCheck store={store} seating={props.seating} selfBodyRef={selfBodyRef} />
         {props.onModelsReady && (
           <ModelsReady store={store} selfId={selfId} onReady={props.onModelsReady} />
         )}
-        </Physics>
       </Suspense>
-      </OptionalXR>
     </Canvas>
   );
 }

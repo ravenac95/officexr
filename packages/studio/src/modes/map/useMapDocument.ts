@@ -100,9 +100,6 @@ export interface UseMapDocumentResult {
   removeDeskArea: (id: string) => void;
   setDeskAreaLabel: (id: string, label: string) => void;
   setDeskAreaBounds: (id: string, bounds: Pick<DeskArea, 'min' | 'max'>) => void;
-  setEnvironment: (
-    update: (env: SerializedMap['environment']) => SerializedMap['environment'],
-  ) => void;
   loadMap: (name: string) => Promise<void>;
   newMap: (name: string) => void;
   listMaps: () => Promise<string[]>;
@@ -388,13 +385,6 @@ export function useMapDocument(
     [updateDeskArea],
   );
 
-  const setEnvironment = useCallback(
-    (update: (env: SerializedMap['environment']) => SerializedMap['environment']) => {
-      stampUpdated((prev) => ({ ...prev, environment: update(prev.environment) }));
-    },
-    [stampUpdated],
-  );
-
   const loadMap = useCallback(async (name: string) => {
     setMapName(name);
   }, []);
@@ -435,7 +425,6 @@ export function useMapDocument(
     removeDeskArea,
     setDeskAreaLabel,
     setDeskAreaBounds,
-    setEnvironment,
     loadMap,
     newMap,
     listMaps,

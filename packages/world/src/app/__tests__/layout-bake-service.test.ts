@@ -532,7 +532,7 @@ describe('bakeLayout', () => {
     // so the runtime can't derive physics from mesh nodes anymore. The
     // bake must embed one collider cuboid per placeObject command in
     // the scene extras, positioned by the canonical geometry service —
-    // the same answer MapColliders computes for unbaked rooms.
+    // the same answer `worldObjectsToColliders` gives for unbaked rooms.
     const cubeBytes = await makeTrivialGlb('cube');
     const kindMap = new Map<string, WorldObjectKind>([
       [

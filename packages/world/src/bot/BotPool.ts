@@ -36,7 +36,7 @@ interface BotPoolOptions {
   instanceAABB?: import('../physics/rules.ts').InstanceAABBLookup;
   /** Optional collider-shape override lookup. Threaded into every bot's
    * Rapier world so compound-step staircase colliders mirror what
-   * `MapColliders` emits on the browser side. Production wiring passes
+   * `SimCore`'s static colliders hold on the browser side. Production wiring passes
    * `(id) => api.catalog.getKind(id)?.colliderShape`. */
   colliderShape?: import('../physics/rules.ts').ColliderShapeLookup;
 }

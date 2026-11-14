@@ -6,7 +6,7 @@
  * --mode=trimesh`), not stepped boxes: the KCC's slope handling gives
  * smooth gliding ascent (validated by deterministic Rapier simulation
  * at every slope-angle config). This spec covers the full production
- * path: baked v2 extras → BakedLayoutColliders TrimeshCollider →
+ * path: baked v2 extras → the sim static trimesh collider →
  * SceneFrame keyboard walk.
  *
  * Map `scenario-slope` mirrors scenario-stairs exactly, with

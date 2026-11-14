@@ -31,7 +31,7 @@ import { DEFAULT_WORLD_CONSTANTS, type WorldConstants } from '@officexr/sdk';
 import { serializeRoom, serializeMap } from './serialize.ts';
 import { newPlaceCube } from './commands.ts';
 import { emptyLayoutDocument } from './layout-document.ts';
-import { DEFAULT_MAP_ENVIRONMENT, type SerializedMap } from './map-document.ts';
+import type { SerializedMap } from './map-document.ts';
 import type { RoomDocument } from './commands.ts';
 import type { LayoutDocument } from './layout-document.ts';
 
@@ -179,10 +179,6 @@ function makeMapDoc(name: string): SerializedMap {
     title: name,
     rooms: [],
     spawnPoints: [],
-    environment: {
-      ...DEFAULT_MAP_ENVIRONMENT,
-      sun: { ...DEFAULT_MAP_ENVIRONMENT.sun },
-    },
   });
 }
 
