@@ -9,7 +9,7 @@ export const apiUrl = (path: string) => `${API_ORIGIN}${path}`;
  * The session cookie is SameSite=Lax, so a cross-origin backend only sees it with credentials included. A preview
  * deployment has no cookie the backend can see and sends its preview token instead.
  */
-export const apiFetch = (path: string, init?: RequestInit) => fetch(apiUrl(path), { credentials: 'include', ...withPreviewTokenHeader(init) });
+export const apiFetch = (path: string, init?: RequestInit) => fetch(apiUrl(path), { credentials: 'include', ...withPreviewTokenHeader(path, init) });
 
 export const wsUrl = () => `${(API_ORIGIN || window.location.origin).replace(/^http/, 'ws')}/ws`;
 

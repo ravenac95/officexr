@@ -39,6 +39,7 @@ export function browserRealtimeConfig(): RealtimeConfig {
   const origin =
     STUDIO_API_ORIGIN ||
     (typeof window !== 'undefined' && window.location?.origin ? window.location.origin : LOCAL_DEFAULT_HOST);
+  // ponytail: reconnects reuse this token, so once it expires they get 401 until the user signs in again.
   const token = STUDIO_API_ORIGIN ? previewToken() : null;
   const query = token === null ? '' : `?${PREVIEW_TOKEN_PARAM}=${encodeURIComponent(token)}`;
   return {

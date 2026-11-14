@@ -75,13 +75,14 @@ export function clearPreviewToken(storage = sessionStore()) {
   }
 }
 
-/** `init` with the stored preview token as `Authorization: Bearer`, or `init` unchanged without one. */
-export function withPreviewTokenHeader(init?: RequestInit): RequestInit | undefined {
+/** `init` for fetching `input` with the stored preview token as `Authorization: Bearer`, or `init` unchanged without one. */
+export function withPreviewTokenHeader(input: RequestInfo | URL, init?: RequestInit): RequestInit | undefined {
   const token = previewToken();
   if (token === null) {
     return init;
   }
-  const headers = new Headers(init?.headers);
+  // `init.headers` replaces a `Request`'s own headers, so they are carried over.
+  const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
   headers.set('Authorization', `Bearer ${token}`);
   return { ...init, headers };
 }

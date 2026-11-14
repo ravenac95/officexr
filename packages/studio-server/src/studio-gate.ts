@@ -109,6 +109,13 @@ export function studioGate(
   };
 }
 
+/** `url` without its preview token, so the token isn't forwarded upstream. */
+export function withoutPreviewToken(url: string): string {
+  const parsed = new URL(url, 'http://localhost');
+  parsed.searchParams.delete(PREVIEW_TOKEN_PARAM);
+  return `${parsed.pathname}${parsed.search}`;
+}
+
 /**
  * The same check for a WebSocket upgrade, which never reaches the app's middleware stack. CORS doesn't cover
  * WebSockets and the cookie rides on handshakes from any same-site page, so a foreign `Origin` is refused first.

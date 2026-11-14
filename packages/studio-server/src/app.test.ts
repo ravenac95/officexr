@@ -483,7 +483,29 @@ describe('public preview tokens', () => {
     const ws = new WebSocket(`${pub.replace('http', 'ws')}/ws?officexr_token=${await mint(STUDIO_ONLY)}`, { origin: FRONTEND });
     await new Promise((resolve, reject) => ws.once('open', resolve).once('error', reject));
     ws.close();
-    expect(await rawUpgradeEnds(pub, '/ws?officexr_token=garbage', undefined, FRONTEND)).toMatch(/^HTTP\/1\.1 401 /);
+    const expired = await tokens(SECRET, ISSUER, NOW - 11 * 60_000).sign({ login: STUDIO_ONLY, name: STUDIO_ONLY });
+    for (const token of ['garbage', expired]) {
+      expect(await rawUpgradeEnds(pub, `/ws?officexr_token=${token}`, undefined, FRONTEND)).toMatch(/^HTTP\/1\.1 401 /);
+    }
+  });
+
+  it('strips the token before proxying /ws upstream', async () => {
+    const upstream = createServer();
+    const wss = new WebSocketServer({ server: upstream });
+    const seen: string[] = [];
+    wss.on('connection', (socket, req) => seen.push(req.url ?? ''));
+    listeners.push({ server: upstream, close: () => new Promise((r) => wss.close(() => upstream.close(() => r()))) });
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+    const { pub } = await boot(loopbackOrigin(upstream));
+    const ws = new WebSocket(`${pub.replace('http', 'ws')}/ws?room=a&officexr_token=${await mint(STUDIO_ONLY)}`, { origin: FRONTEND });
+    await new Promise((resolve, reject) => ws.once('open', resolve).once('error', reject));
+    ws.close();
+    expect(seen).toEqual(['/ws?room=a']);
+  });
+
+  it('only takes the query-string token on /ws', async () => {
+    const { pub } = await boot();
+    expect((await fetch(`${pub}/api/me?officexr_token=${await mint(STUDIO_ONLY)}`)).status).toBe(401);
   });
 });
 

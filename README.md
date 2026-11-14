@@ -223,7 +223,9 @@ headers). The studio backend verifies it with the web backend's `SESSION_SECRET`
 which it reads from `OFFICEXR_WEB_PUBLIC_URL` (so its MCP OAuth server must be on), and treats it like a session
 cookie: the login must be on `studio_allowlist`. For a studio preview, also add `https://*.<project>.pages.dev` to the
 studio backend's `FRONTEND_ORIGINS`. Files the studio's 3D loaders fetch from the studio API (baked layouts, and
-models when baking in the browser) don't carry the token, so on a preview they still fail.
+models when baking in the browser) don't carry the token, so on a preview they still fail (ponytail: they'd need a
+token-carrying loader). The `/ws` connection keeps the token it opened with, so reconnects after it expires fail until
+the user signs in again.
 
 ## License
 

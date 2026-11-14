@@ -14,7 +14,7 @@ import { pathname } from './http.ts';
 import { modelSourceRoutes } from './model-sources/routes.ts';
 import { agentTokenRoutes } from './agent-tokens/routes.ts';
 import type { AgentTokens } from '@officexr/studio-mcp/agent-tokens';
-import { sendJson, studioGate, upgradeAccess, type Access, type IsAllowed, type VerifyApiToken, type VerifyPreviewToken } from './studio-gate.ts';
+import { sendJson, studioGate, upgradeAccess, withoutPreviewToken, type Access, type IsAllowed, type VerifyApiToken, type VerifyPreviewToken } from './studio-gate.ts';
 
 export interface StudioListener {
   server: Server;
@@ -76,6 +76,7 @@ function proxyRealtime(
           return;
         }
         if (access.type === 'allowed') {
+          req.url = withoutPreviewToken(req.url ?? '/');
           proxy.ws(req, socket, head);
         } else {
           refuseUpgrade(socket, access.status);
