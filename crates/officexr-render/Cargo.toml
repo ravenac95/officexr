@@ -27,6 +27,7 @@ bevy = { version = "=0.20.1", default-features = false, features = [
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 meshopt-rs = "0.1.2"
+percent-encoding = "2"
 officexr-sim = { path = "../officexr-sim", optional = true }
 
 # The browser has no worker-backed task pool. Native builds get `multi_threaded`

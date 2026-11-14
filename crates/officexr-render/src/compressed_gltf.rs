@@ -1,6 +1,7 @@
-//! A GLB -> GLB transform that expands `EXT_meshopt_compression` buffer views
-//! and turns quantized vertex attributes into floats, so `bevy_gltf` (which
-//! reads neither extension) can load files compressed with gltf-transform.
+//! Rewrites a GLB, or a JSON `.gltf` with external buffers, into a plain GLB:
+//! it expands `EXT_meshopt_compression` buffer views and turns quantized vertex
+//! attributes into floats, so `bevy_gltf` (which reads neither extension) can
+//! load files compressed with gltf-transform.
 //!
 //! The input is untrusted network data: every malformed shape must come back
 //! as an `Err`, never a panic, because a panic takes the wasm app down.
@@ -14,6 +15,7 @@ use bevy::reflect::TypePath;
 use meshopt_rs::index::buffer::decode_index_buffer;
 use meshopt_rs::vertex::buffer::decode_vertex_buffer;
 use meshopt_rs::vertex::filter;
+use percent_encoding::percent_decode_str;
 use serde_json::{Value, json};
 
 const MESHOPT: &str = "EXT_meshopt_compression";
@@ -24,8 +26,8 @@ const BIN_CHUNK: u32 = 0x004E_4942;
 const FLOAT: u64 = 5126;
 const ARRAY_BUFFER: u64 = 34962;
 /// Caps allocations sized from untrusted JSON.
-// ponytail: a single meshopt buffer view that decodes to more than 64 MiB is rejected.
-const MAX_DECODED_VIEW_BYTES: usize = 1 << 26;
+// ponytail: a meshopt view, or the whole decoded buffer, over 64 MiB is rejected.
+const MAX_DECODED_BYTES: usize = 1 << 26;
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -60,19 +62,19 @@ fn uses_compression(doc: &Value) -> bool {
 }
 
 /// Parses a JSON `.gltf`; `Some` only if it uses meshopt or mesh quantization.
-pub(crate) fn compressed_gltf(json: &[u8]) -> Result<Option<Value>> {
+fn compressed_gltf(json: &[u8]) -> Result<Option<Value>> {
     Ok(Some(parse_root(json)?).filter(uses_compression))
 }
 
 /// The URI of each of `doc`'s buffers, in order; `None` for a buffer with no URI.
-pub(crate) fn buffer_uris(doc: &Value) -> Vec<Option<&str>> {
+fn buffer_uris(doc: &Value) -> Vec<Option<&str>> {
     let buffers = doc["buffers"].as_array().into_iter().flatten();
     buffers.map(|b| b["uri"].as_str()).collect()
 }
 
 /// Expands `doc` into a GLB whose only buffer holds every buffer view.
 /// `buffers[i]` is the data of `doc`'s buffer `i`.
-pub(crate) fn decode_document(mut doc: Value, buffers: &[&[u8]]) -> Result<Vec<u8>> {
+fn decode_document(mut doc: Value, buffers: &[&[u8]]) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     rewrite_buffer_views(&mut doc, buffers, &mut out)?;
     dequantize_attributes(&mut doc, &mut out)?;
@@ -142,11 +144,14 @@ fn write_glb(doc: &Value, bin: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Appends `data` to `out`, 4-byte aligned, and returns its offset.
-fn append(out: &mut Vec<u8>, data: &[u8]) -> usize {
-    out.resize(out.len().next_multiple_of(4), 0);
-    let offset = out.len();
+fn append(out: &mut Vec<u8>, data: &[u8]) -> Result<usize> {
+    let offset = out.len().next_multiple_of(4);
+    if offset.saturating_add(data.len()) > MAX_DECODED_BYTES {
+        return Err("decoded buffer is too large".into());
+    }
+    out.resize(offset, 0);
     out.extend_from_slice(data);
-    offset
+    Ok(offset)
 }
 
 /// A non-negative integer field; absent counts as 0 (glTF's default for offsets).
@@ -189,7 +194,7 @@ fn rewrite_buffer_views(doc: &mut Value, buffers: &[&[u8]], out: &mut Vec<u8>) -
             .map_err(|_| "buffer view overruns the buffer")?
             .to_vec(),
         };
-        let offset = append(out, &data);
+        let offset = append(out, &data)?;
         let view = view.as_object_mut().ok_or("buffer view is not an object")?;
         view.remove("extensions");
         view.insert("buffer".into(), json!(0));
@@ -208,7 +213,7 @@ fn decode_meshopt(ext: &Value, view_len: usize, src: &[u8]) -> Result<Vec<u8>> {
     if decoded != view_len {
         return Err("meshopt count * byteStride does not match the buffer view length".into());
     }
-    if decoded > MAX_DECODED_VIEW_BYTES {
+    if decoded > MAX_DECODED_BYTES {
         return Err("meshopt view is too large".into());
     }
     let mode = ext["mode"].as_str().unwrap_or_default();
@@ -336,7 +341,7 @@ fn dequantize_attributes(doc: &mut Value, out: &mut Vec<u8>) -> Result<()> {
             .ok_or("missing bufferViews")?;
         let view = views.len();
         // ponytail: the quantized source bytes stay in the BIN chunk, unreferenced.
-        let offset = append(out, &bytes);
+        let offset = append(out, &bytes)?;
         views.push(json!({ "buffer": 0, "byteOffset": offset, "byteLength": bytes.len(), "target": ARRAY_BUFFER }));
         let acc = doc["accessors"]
             .get_mut(idx)
@@ -448,15 +453,19 @@ async fn decode<'a>(bytes: &'a [u8], load_context: &mut LoadContext<'_>) -> Resu
                 return Err("data: URI buffers are not supported".into());
             }
             Some(uri) => {
+                let uri = percent_decode_str(uri)
+                    .decode_utf8()
+                    .map_err(|e| e.to_string())?;
                 let path = load_context
                     .path()
-                    .resolve_embed_str(uri)
+                    .resolve_embed_str(&uri)
                     .map_err(|e| e.to_string())?;
                 load_context
                     .read_asset_bytes(path)
                     .await
                     .map_err(|e| e.to_string())?
             }
+            // A buffer without a URI is a meshopt fallback or the GLB blob; it is never read.
             None => Vec::new(),
         });
     }
@@ -501,7 +510,17 @@ impl AssetLoader for CompressedGltfLoader {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
+    use bevy::app::{App, TaskPoolPlugin};
+    use bevy::asset::io::memory::{Dir, MemoryAssetReader};
+    use bevy::asset::io::{AssetSourceBuilder, AssetSourceId};
+    use bevy::asset::{AssetApp, AssetPlugin, AssetServer, Handle, LoadState};
     use bevy::gltf::gltf::Gltf;
+    use bevy::gltf::{Gltf as GltfAsset, GltfMaterial, GltfPlugin};
+    use bevy::image::Image;
+    use bevy::mesh::MeshPlugin;
+    use bevy::world_serialization::WorldSerializationPlugin;
 
     use super::*;
 
@@ -646,5 +665,58 @@ mod tests {
     fn rejects_a_meshopt_view_whose_size_disagrees_with_its_count() {
         let err = decode_compressed_glb(&meshopt_triangles(3, 2, 8)).unwrap_err();
         assert!(err.contains("does not match"), "{err}");
+    }
+
+    #[test]
+    fn loads_a_compressed_gltf_through_the_asset_server() {
+        let dir = Dir::default();
+        dir.insert_asset(Path::new("kinds/block.gltf"), BLOCK_GLTF);
+        dir.insert_asset(Path::new("kinds/colored_block_blue.bin"), BLOCK_BIN);
+        let reader = MemoryAssetReader { root: dir };
+        let mut app = App::new();
+        app.register_asset_source(
+            AssetSourceId::Default,
+            AssetSourceBuilder::new(move || Box::new(reader.clone())),
+        )
+        .add_plugins((
+            TaskPoolPlugin::default(),
+            AssetPlugin::default(),
+            WorldSerializationPlugin,
+            MeshPlugin,
+            GltfPlugin::default(),
+        ))
+        .init_asset::<Image>();
+        app.finish();
+        app.register_asset_loader(CompressedGltfLoader::new(crate::gltf_loader(&app)));
+        app.cleanup();
+
+        let server = app.world().resource::<AssetServer>().clone();
+        let handle: Handle<GltfAsset> = server.load("kinds/block.gltf");
+        for _ in 0..10_000 {
+            app.update();
+            match server.get_load_state(&handle).unwrap() {
+                LoadState::Loaded => break,
+                LoadState::Failed(err) => panic!("{err}"),
+                _ => {}
+            }
+        }
+        let gltf = app
+            .world()
+            .resource::<bevy::asset::Assets<GltfAsset>>()
+            .get(&handle)
+            .expect("the glTF loaded");
+        assert_eq!(gltf.meshes.len(), 1);
+        let material = app
+            .world()
+            .resource::<bevy::asset::Assets<GltfMaterial>>()
+            .get(&gltf.materials[0])
+            .expect("the material loaded");
+        let texture = material
+            .base_color_texture
+            .as_ref()
+            .unwrap()
+            .path()
+            .unwrap();
+        assert_eq!(texture.path(), Path::new("kinds/block_bits_texture.png"));
     }
 }
