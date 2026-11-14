@@ -89,8 +89,6 @@ interface CameraRigProps {
      * different y values. */
     lookAt?: readonly [number, number, number];
   };
-  /** An immersive XR session owns the camera; the rig leaves it alone. */
-  xrPresenting: boolean;
   /** A paused scene ignores canvas touch and wheel gestures. */
   paused?: boolean;
 }
@@ -114,7 +112,6 @@ export function CameraRig({
   conversationDistance,
   conversationHeight,
   fixed,
-  xrPresenting,
   paused,
 }: CameraRigProps) {
   const { camera, gl } = useThree();
@@ -125,8 +122,7 @@ export function CameraRig({
   );
   const lookSign = invertLook ? 1 : -1;
   useTouchCameraGestures(mode, lookRefs, lookSign, paused);
-  // The headset owns the camera while presenting; motion look re-baselines after.
-  useMotionLook(xrPresenting ? undefined : motionLook, mode, lookRefs);
+  useMotionLook(motionLook, mode, lookRefs);
   const onMouseLook = useEffectEvent((e: MouseEvent) =>
     applyLookDelta(
       mode,
@@ -166,9 +162,6 @@ export function CameraRig({
   // Keep fixed/top-down/free-fly camera fov in sync. Each mode sets its
   // own default; everything else falls back to the gameplay 75°.
   useEffect(() => {
-    if (xrPresenting) {
-      return;
-    }
     if (mode === 'fixed') {
       persp.fov = fixed.fov;
     } else if (mode === 'top-down') {
@@ -179,7 +172,7 @@ export function CameraRig({
       persp.fov = GAMEPLAY_FOV;
     }
     persp.updateProjectionMatrix();
-  }, [mode, fixed.fov, persp, xrPresenting]);
+  }, [mode, fixed.fov, persp]);
 
   const target = useRef(new THREE.Vector3());
 
@@ -197,10 +190,9 @@ export function CameraRig({
   const fixedNeedsInit = useRef(false);
   const appliedAzimuthOffset = useRef(0);
 
-  // Re-placed after an XR session too, as the player has moved meanwhile.
   useEffect(() => {
     if (mode === 'fixed') fixedNeedsInit.current = true;
-  }, [mode, xrPresenting]);
+  }, [mode]);
 
   // --- Free-fly camera state -------------------------------------
   // Persistent (across frames) state for the free-fly mode. Lives in
@@ -359,8 +351,7 @@ export function CameraRig({
 
   useFrame((_, dtSec) => {
     const pos = playerPosRef.current;
-    // The prop lags the XR camera swap by a commit; gl.xr is synchronous.
-    if (xrPresenting || gl.xr.isPresenting || !pos) {
+    if (!pos) {
       return;
     }
     const yaw = yawRef.current;

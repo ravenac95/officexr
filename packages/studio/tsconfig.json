@@ -16,6 +16,5 @@
     "esModuleInterop": true,
     "types": ["@react-three/fiber", "node"]
   },
-  "files": ["../world/src/renderer/xr-types.ts"],
   "include": ["src"]
 }

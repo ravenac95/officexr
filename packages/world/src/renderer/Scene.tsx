@@ -2,7 +2,6 @@ import React, { Suspense, useCallback, useEffect, useEffectEvent, useMemo, useRe
 import * as THREE from 'three';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Physics, type RapierRigidBody } from '@react-three/rapier';
-import { XR, type XRStore } from '@react-three/xr';
 import { SkyDome } from './SkyDome.tsx';
 import { LightingRig } from './LightingRig.tsx';
 import { lightBasis, snapToShadowTexel } from './shadow-snap.ts';
@@ -22,7 +21,6 @@ import type {
 import type { BotPool } from '../bot/BotPool.ts';
 import { Players } from './Players.tsx';
 import { CameraRig } from './CameraRig.tsx';
-import { XRAvatarOrigin } from './XRAvatarOrigin.tsx';
 import type { MotionLookState } from './motionLook.ts';
 import { SceneFrame } from './SceneFrame.tsx';
 import { ObjectInstances } from './ObjectInstances.tsx';
@@ -86,12 +84,6 @@ function SunFollower(props: {
   });
   return null;
 }
-
-function OptionalXR({ store, children }: { store?: XRStore; children: React.ReactNode }) {
-  return store ? <XR store={store}>{children}</XR> : <>{children}</>;
-}
-
-const noopSubscribe = () => () => {};
 
 type CreateSim = (charRadius: number) => SimCore;
 
@@ -197,8 +189,6 @@ interface SceneProps {
   onCollidersError?: (error: Error) => void;
   /** Default `'ts'`. */
   sim?: SimImplementation;
-  /** Enables immersive XR sessions from the self avatar's eyes. Without it the scene has no `<XR>` wrapper. */
-  xrStore?: XRStore;
 }
 
 export function Scene(props: SceneProps) {
@@ -235,11 +225,6 @@ export function Scene(props: SceneProps) {
   );
   const { proximity, lighting, background, fixedCamera } = props.view;
   const worldFocused = props.worldFocused ?? true;
-  const { xrStore } = props;
-  const xrPresenting = useSyncExternalStore(
-    xrStore?.subscribe ?? noopSubscribe,
-    () => xrStore?.getState().session != null,
-  );
 
   // After Scene mounts, force-broadcast the current world state.
   // The regular `onStoreChange` diff path only fires when values
@@ -335,7 +320,6 @@ export function Scene(props: SceneProps) {
       // consumers (Debug) don't use the export path.
       gl={{ preserveDrawingBuffer: true }}
     >
-      <OptionalXR store={xrStore}>
       {props.onFrameStats && <FrameStatsProbe onSample={props.onFrameStats} />}
       <Suspense fallback={null}>
         {/*
@@ -408,11 +392,9 @@ export function Scene(props: SceneProps) {
           selfBodyRef={selfBodyRef}
           paused={props.paused}
           isAirborneRef={isAirborneRef}
-          xrPresenting={xrPresenting}
           selfReady={props.selfReady}
           onPingPlayer={props.onPingPlayer}
         />
-        {xrStore && <XRAvatarOrigin selfPosRef={selfPosRef} charRadius={charRadius} />}
 
         {/* Mounted after Players: same-priority useFrames run in
             subscription order, so this reads the current frame's
@@ -439,7 +421,6 @@ export function Scene(props: SceneProps) {
           conversationDistance={proximity.conversationDistance}
           conversationHeight={proximity.conversationHeight}
           fixed={fixedCam}
-          xrPresenting={xrPresenting}
           paused={props.paused}
         />
         {/* After CameraRig, so the probe reads this frame's pose, not last frame's. */}
@@ -470,7 +451,6 @@ export function Scene(props: SceneProps) {
           worldFocused={worldFocused}
           spawnPoints={props.spawnPoints}
           isAirborneRef={isAirborneRef}
-          xrPresenting={xrPresenting}
         />
         <ProximityGlow
           proximityOutputRef={proximityOutputRef}
@@ -497,7 +477,6 @@ export function Scene(props: SceneProps) {
         )}
         </Physics>
       </Suspense>
-      </OptionalXR>
     </Canvas>
   );
 }

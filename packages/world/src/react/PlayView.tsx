@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import type { XRStore } from '@react-three/xr';
 import { useProgress } from '@react-three/drei';
 import type { Actions, Bus, PlayerId, RuleRegistry, Store, SyncEngine, SnapshotHandshake, Vec3 } from '@officexr/sdk';
 import type { BotPool } from '../bot/BotPool.ts';
@@ -61,8 +60,6 @@ export interface PlayViewProps {
   invertLook?: boolean;
   /** `'debug'` shows the camera, transport and layout status plus the focus chip; `'player'` shows none of it. */
   hud?: 'debug' | 'player';
-  /** Lets the host start immersive XR sessions; see `createWorldXRStore`. */
-  xrStore?: XRStore;
   /** Shows a ping bell when hovering another player's avatar in the fixed camera. */
   onPingPlayer?: (id: PlayerId) => void;
   /** The local player's simulation; default `'ts'`. */
@@ -144,7 +141,6 @@ export function PlayView(props: PlayViewProps) {
           bakedLayouts={session.bakedLayouts}
           onFrameStats={props.onFrameStats}
           viewYaw={viewYaw}
-          xrStore={props.xrStore}
           selfReady={ready}
           onPingPlayer={props.onPingPlayer}
           sim={props.sim}
