@@ -19,6 +19,8 @@ interface BevySentinels {
   __officexrBevyViews?: ViewId[];
   /** Every view has loaded and settled. */
   __officexrBevyReady?: boolean;
+  /** Where the mugshot character's feet settled, in metres. */
+  __officexrBevyMugshotFeetY?: number;
 }
 
 const sentinels = () => window as unknown as BevySentinels;
@@ -103,6 +105,7 @@ function useReadySentinel() {
       delete sentinels().__officexrBevy;
       delete sentinels().__officexrBevyViews;
       delete sentinels().__officexrBevyReady;
+      delete sentinels().__officexrBevyMugshotFeetY;
     };
   }, []);
 }
@@ -151,24 +154,34 @@ function MugshotFeed({ id, character, primary = false }: { id: string; character
       kind="preview"
       primary={primary}
       onView={(wasm, view) => {
-        const instances = cubesForMode('gltf');
-        const kindIds = new Set(instances.map((i) => i.kindId));
-        const scene = {
-          kinds: catalog.getCatalog().kinds.filter((k) => kindIds.has(k.id)),
-          objects: { cubeSize: 0.5, instances },
-          lighting: DEFAULT_MUGSHOT_LIGHTING,
-          background: DEFAULT_MUGSHOT_BACKGROUND,
-        };
-        const pitch = (-8 * Math.PI) / 180;
-        const distance = 6;
-        wasm.setWorld(view, JSON.stringify(scene), character);
-        wasm.setCamera(view, {
-          position: [0, 1.7, distance],
-          lookAt: [0, 1.7 + Math.sin(pitch), distance - Math.cos(pitch)],
-          fovDeg: 40,
-          near: NEAR,
-          far: FAR,
+        let cancelled = false;
+        // The character settles on the kinds' colliders, so it waits for the served catalog.
+        void catalog.ready().then(() => {
+          if (cancelled) {
+            return;
+          }
+          const instances = cubesForMode('gltf');
+          const kindIds = new Set(instances.map((i) => i.kindId));
+          const scene = {
+            kinds: catalog.getCatalog().kinds.filter((k) => kindIds.has(k.id)),
+            objects: { cubeSize: 0.5, instances },
+            lighting: DEFAULT_MUGSHOT_LIGHTING,
+            background: DEFAULT_MUGSHOT_BACKGROUND,
+          };
+          const pitch = (-8 * Math.PI) / 180;
+          const distance = 6;
+          sentinels().__officexrBevyMugshotFeetY = wasm.setWorld(view, JSON.stringify(scene), character);
+          wasm.setCamera(view, {
+            position: [0, 1.7, distance],
+            lookAt: [0, 1.7 + Math.sin(pitch), distance - Math.cos(pitch)],
+            fovDeg: 40,
+            near: NEAR,
+            far: FAR,
+          });
         });
+        return () => {
+          cancelled = true;
+        };
       }}
     />
   );
@@ -188,9 +201,10 @@ function StoreFeed({ id }: { id: string }) {
   const [bevy, setBevy] = useState<{ wasm: RendererModule; view: ViewId } | null>(null);
   const sentIds = useRef(new Set<string>());
 
-  const { loaded, bakedLayouts } = session;
+  const { ready, loaded, bakedLayouts } = session;
+  // A map that fails to load still gets the sky, under its error, rather than a blank canvas.
   useEffect(() => {
-    if (!bevy || !loaded) {
+    if (!bevy || !ready) {
       return;
     }
     const state = local.store.getState();
@@ -208,7 +222,7 @@ function StoreFeed({ id }: { id: string }) {
     sentIds.current = ids;
     bevy.wasm.setWorld(bevy.view, JSON.stringify(diff));
     bevy.wasm.setCamera(bevy.view, OVERVIEW_CAMERA);
-  }, [bevy, loaded, bakedLayouts, local, catalog]);
+  }, [bevy, ready, bakedLayouts, local, catalog]);
 
   // One wandering in-browser bot keeps a player moving.
   useEffect(() => {
@@ -236,7 +250,16 @@ function StoreFeed({ id }: { id: string }) {
     };
   }, [bevy, loaded, local]);
 
-  return <BevyCanvas id={id} kind="world" primary onView={(wasm, view) => setBevy({ wasm, view })} />;
+  return (
+    <>
+      <BevyCanvas id={id} kind="world" primary onView={(wasm, view) => setBevy({ wasm, view })} />
+      {session.error && (
+        <p role="alert" style={{ position: 'absolute', top: 8, left: 8, margin: 0, color: '#fff', font: '13px sans-serif' }}>
+          {session.error}
+        </p>
+      )}
+    </>
+  );
 }
 
 const layoutPlacement = (p: BakedLayout) => ({

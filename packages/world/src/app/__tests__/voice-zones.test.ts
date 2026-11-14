@@ -13,6 +13,8 @@ import {
 } from '../../scenes/index.ts';
 
 const kindId = 'colored_block_blue';
+/** `colored_block_blue` is a 2 m block: four voxels on a side. */
+const BLOCK = 4;
 const api = createDefaultApi({ fetcher: async () => new Response('{}', { status: 404 }) });
 
 function zonesFor(
@@ -49,8 +51,8 @@ describe('computeVoiceZones', () => {
     expect(zone.label).toBe('Big Hall');
     near(zone.min.x, 10 * vs);
     near(zone.min.z, 4 * vs);
-    near(zone.max.x, 14 * vs);
-    near(zone.max.z, 5 * vs);
+    near(zone.max.x, (10 + 3 + BLOCK) * vs);
+    near(zone.max.z, (4 + BLOCK) * vs);
   });
 
   it('rotates the footprint with the placement', () => {
@@ -69,7 +71,7 @@ describe('computeVoiceZones', () => {
     layout.commands.push(newPlaceObject({ kindId, position: [0, 0, 0] }), newPlaceObject({ kindId, position: [2, 0, 0] }));
     const [zone] = zonesFor([{ id: 'b', roomName: 'baked', position: [0, 0, 0], voiceZone: true }], [baked], [layout]);
     expect(zone.id).toBe('b');
-    near(zone.max.x - zone.min.x, 3 * api.voxelSize);
+    near(zone.max.x - zone.min.x, (2 + BLOCK) * api.voxelSize);
   });
 
   it('spans both the own commands and the linked layout of a room that has both', () => {
@@ -78,8 +80,8 @@ describe('computeVoiceZones', () => {
     const layout = emptyLayoutDocument('wing');
     layout.commands.push(newPlaceObject({ kindId, position: [0, 0, 8] }));
     const [zone] = zonesFor([{ id: 'z', roomName: 'both', position: [0, 0, 0], voiceZone: true }], [room], [layout]);
-    near(zone.max.x - zone.min.x, 4 * api.voxelSize);
-    near(zone.max.z - zone.min.z, 9 * api.voxelSize);
+    near(zone.max.x - zone.min.x, (3 + BLOCK) * api.voxelSize);
+    near(zone.max.z - zone.min.z, (8 + BLOCK) * api.voxelSize);
   });
 
   it('emits only flagged placements, one per placement of the same room', () => {

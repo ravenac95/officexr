@@ -47,8 +47,11 @@ export interface RendererModule {
   createView(canvas: HTMLCanvasElement | string, kind: ViewKind): ViewId;
   /** Despawns the view's window, camera and scene, freeing its canvas for another view. The primary canvas keeps Bevy's window, idle. */
   destroyView(id: ViewId): void;
-  /** `diffJson` is a `WorldDiff`; with `mugshot`, that character is settled on its objects and drawn paused. */
-  setWorld(id: ViewId, diffJson: string, mugshot?: string | null): void;
+  /**
+   * `diffJson` is a `WorldDiff`; with `mugshot`, that character is settled on its objects and drawn
+   * paused, and the height its feet settled at is returned.
+   */
+  setWorld(id: ViewId, diffJson: string, mugshot?: string | null): number | undefined;
   setPlayers(id: ViewId, players: unknown): void;
   setCamera(id: ViewId, pose: CameraPose): void;
   /** `ready` once every model has loaded and settled; `pending` counts the models still loading. */

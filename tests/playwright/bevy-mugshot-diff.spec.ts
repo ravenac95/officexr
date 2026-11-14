@@ -81,7 +81,8 @@ function renderNative(scene: string, file: string, size: string, position: numbe
 }
 
 async function renderBrowser(page: Page, scene: string, file: string, position: number[], target: number[], manifest: Manifest) {
-  await page.waitForFunction(() => (window as { __officexrBevyViews?: number[] }).__officexrBevyViews?.length === 1, null, {
+  // The page has set its own mugshot scene, which ours then replaces.
+  await page.waitForFunction(() => (window as { __officexrBevyMugshotFeetY?: number }).__officexrBevyMugshotFeetY !== undefined, null, {
     timeout: 120_000,
   });
   await page.evaluate(

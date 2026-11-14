@@ -230,15 +230,22 @@ pub fn destroy_view(id: ViewId) -> Result<(), JsError> {
 
 /// Applies a world diff (`WorldDiff` JSON). With `mugshot`, that character
 /// is settled on the diff's objects and drawn paused instead of the
-/// `setPlayers` feed.
+/// `setPlayers` feed, and the height its feet settled at is returned.
 #[wasm_bindgen(js_name = setWorld)]
-pub fn set_world(id: ViewId, diff_json: &str, mugshot: Option<String>) -> Result<(), JsError> {
+pub fn set_world(
+    id: ViewId,
+    diff_json: &str,
+    mugshot: Option<String>,
+) -> Result<Option<f32>, JsError> {
     let diff: WorldDiff = serde_json::from_str(diff_json).map_err(js_err)?;
     send(id, ViewMsg::World(Box::new(diff)))?;
-    if let Some(character) = mugshot {
-        send(id, ViewMsg::Players(mugshot_player(diff_json, character)))?;
-    }
-    Ok(())
+    let Some(character) = mugshot else {
+        return Ok(None);
+    };
+    let players = mugshot_player(diff_json, character);
+    let feet_y = players.feet(&players.players[0]).y;
+    send(id, ViewMsg::Players(players))?;
+    Ok(Some(feet_y))
 }
 
 #[wasm_bindgen(js_name = setCamera)]

@@ -55,6 +55,13 @@ pub struct Players {
     pub paused: bool,
 }
 
+impl Players {
+    /// Where `player`'s character model stands: the ball collider's bottom.
+    pub fn feet(&self, player: &PlayerRender) -> Vec3 {
+        player.pos + Vec3::Y * (self.body_y - self.char_radius)
+    }
+}
+
 impl Default for Players {
     fn default() -> Self {
         Self {
@@ -274,9 +281,8 @@ fn sync_view_avatars(
     }
     for p in &players.players {
         // ponytail: the yaw snaps; Players.tsx eases it at `turnSpeed`.
-        let transform =
-            Transform::from_translation(p.pos + Vec3::Y * (players.body_y - players.char_radius))
-                .with_rotation(Quat::from_rotation_y(p.yaw + AVATAR_YAW_OFFSET));
+        let transform = Transform::from_translation(players.feet(p))
+            .with_rotation(Quat::from_rotation_y(p.yaw + AVATAR_YAW_OFFSET));
         let existing = avatars
             .iter_mut()
             .find(|(_, a, _, v)| v.parent() == view && a.id == p.id && a.character == p.character);

@@ -93,6 +93,16 @@ describe('cube-kinds.default.json (the bundled fallback)', () => {
     expect(() => validateCubeKindCatalog(bundledDefault)).not.toThrow();
   });
 
+  // Without them the sim, voice zones and the Bevy renderer fall back to one-voxel blocks.
+  it("carries the committed catalog's baked dimensions and AABBs", () => {
+    const committed = new Map(validateCubeKindCatalog(committedCatalog).kinds.map((k) => [k.id, k]));
+    for (const k of validateCubeKindCatalog(bundledDefault).kinds) {
+      expect(k.dimensions, `${k.id}.dimensions`).toBeDefined();
+      expect(k.dimensions, `${k.id}.dimensions`).toEqual(committed.get(k.id)?.dimensions);
+      expect(k.localAABB, `${k.id}.localAABB`).toEqual(committed.get(k.id)?.localAABB);
+    }
+  });
+
   it('contains only the original 12 block-category kinds', () => {
     const cat = validateCubeKindCatalog(bundledDefault);
     expect(cat.kinds).toHaveLength(12);
