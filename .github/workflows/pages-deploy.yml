@@ -59,12 +59,17 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ASSET_BASE_URL: ${{ vars.VITE_ASSET_BASE_URL }}
         run: |
+          if [ -z "$ASSET_BASE_URL" ]; then
+            echo "::error::VITE_ASSET_BASE_URL must be set: the render wasm is served from its bucket"
+            exit 1
+          fi
           hash=$(node -e "import('./packages/render-wasm/pkg/hash.js').then((m) => console.log(m.RENDER_WASM_HASH))")
           for backend in webgpu webgl2; do
             dir="packages/render-wasm/pkg/$backend"
-            npx --yes wrangler@4.20.0 r2 object put "officexr-assets/wasm/$hash/$backend/officexr_render_web_bg.wasm" --remote --file="$dir/officexr_render_web_bg.wasm" --content-type=application/wasm
-            npx --yes wrangler@4.20.0 r2 object put "officexr-assets/wasm/$hash/$backend/officexr_render_web.js" --remote --file="$dir/officexr_render_web.js" --content-type=text/javascript
+            npx --yes wrangler@4.20.0 r2 object put "officexr-assets/wasm/$hash/$backend/officexr_render_web_bg.wasm" --remote --file="$dir/officexr_render_web_bg.wasm" --content-type=application/wasm --cache-control "public, max-age=31536000, immutable"
+            npx --yes wrangler@4.20.0 r2 object put "officexr-assets/wasm/$hash/$backend/officexr_render_web.js" --remote --file="$dir/officexr_render_web.js" --content-type=text/javascript --cache-control "public, max-age=31536000, immutable"
           done
 
       - name: Build
@@ -74,7 +79,12 @@ jobs:
           VITE_API_ORIGIN: ${{ vars.VITE_API_ORIGIN }}
           VITE_ASSET_BASE_URL: ${{ vars.VITE_ASSET_BASE_URL }}
           VITE_STUDIO_API_ORIGIN: ${{ vars.VITE_STUDIO_API_ORIGIN }}
-        run: pnpm build:pages
+        run: |
+          pnpm build:pages
+          if [ -n "$(find packages/web/dist -name 'officexr_render_web_bg*.wasm')" ]; then
+            echo "::error::the render wasm must be served from R2, not bundled into the Pages build"
+            exit 1
+          fi
 
       - name: Deploy
         id: deploy

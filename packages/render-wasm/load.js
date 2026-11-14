@@ -15,6 +15,8 @@ export async function pickBackend(gpu) {
  */
 export async function loadRendererFrom({ gpu, baseUrl, hash, importModule, bundled }) {
   const backend = await pickBackend(gpu);
+  // ponytail: a device-level WebGPU failure after an adapter is returned does not fall back to WebGL2.
+  globalThis.__officexrRenderBackend = backend;
   if (!baseUrl) {
     const renderer = await bundled[backend]();
     await renderer.default();

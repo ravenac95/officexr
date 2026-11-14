@@ -15,7 +15,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { test, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
-import { pixelDiffCount } from './helpers.ts';
+import { forceWebgl2, pixelDiffCount } from './helpers.ts';
 
 const OUT_DIR = process.env.OFFICEXR_BEVY_DIFF;
 const ROOT = path.resolve(__dirname, '../..');
@@ -107,6 +107,7 @@ async function renderBrowser(page: Page, scene: string, file: string, position: 
 test('Bevy render of the Barbarian mugshot vs its ideal PNGs', async ({ page }) => {
   test.setTimeout(30 * 60_000);
   if (VARIANT !== 'native') {
+    await forceWebgl2(page);
     await page.goto(`/?op=bevy&mugshot=${path.basename(BASELINE)}`);
   }
   const out = (name: string) => path.resolve(OUT_DIR!, name);

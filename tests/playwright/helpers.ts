@@ -14,6 +14,11 @@ import { expect, type Locator, type Page } from '@playwright/test';
  *     dev-server process.
  *
  * The active-tab assertion below is the real "mode mounted" gate. */
+/** Hides WebGPU so `loadRenderer` picks the WebGL2 build, the one SwiftShader renders reliably. */
+export async function forceWebgl2(page: Page) {
+  await page.addInitScript(() => Object.defineProperty(Navigator.prototype, 'gpu', { get: () => undefined }));
+}
+
 export async function goToMode(
   page: Page,
   mode: 'map' | 'room' | 'object' | 'character' | 'debug' | 'mugshot',

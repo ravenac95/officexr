@@ -74,6 +74,7 @@ FROM store AS build
 COPY . .
 COPY --from=sim /app/packages/sim-wasm/pkg packages/sim-wasm/pkg
 COPY --from=sim /app/packages/render-wasm/pkg packages/render-wasm/pkg
+RUN node packages/render-wasm/hash.mjs
 RUN pnpm install --offline --frozen-lockfile \
       --filter @officexr/web... --filter @officexr/studio... --filter @officexr/studio-server... \
       --filter @officexr/world...

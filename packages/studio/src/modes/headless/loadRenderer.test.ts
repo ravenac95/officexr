@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { loadRendererFrom, pickBackend } from '@officexr/render-wasm/load';
 
 const adapter = { requestAdapter: async () => ({}) };
-const noBundled = {
+const bundled = {
   webgpu: async () => ({ default: async (_arg?: unknown) => {}, backend: 'webgpu' }),
   webgl2: async () => ({ default: async (_arg?: unknown) => {}, backend: 'webgl2' }),
 };
@@ -25,7 +25,7 @@ describe('loadRendererFrom', () => {
       gpu: adapter,
       baseUrl: 'https://cdn.example/wasm/',
       hash: async () => 'abc123',
-      bundled: noBundled,
+      bundled: bundled,
       importModule: async (url) => {
         imported.push(url);
         return { default: async (arg?: unknown) => void inits.push(arg), backend: 'x' };
@@ -41,7 +41,7 @@ describe('loadRendererFrom', () => {
       gpu: noAdapter,
       baseUrl: 'https://cdn.example/wasm',
       hash: async () => 'abc123',
-      bundled: noBundled,
+      bundled: bundled,
       importModule: async (url) => {
         imported.push(url);
         return { default: async (_arg?: unknown) => {}, backend: 'x' };
@@ -57,7 +57,7 @@ describe('loadRendererFrom', () => {
       importModule: async () => {
         throw new Error('must not fetch');
       },
-      bundled: noBundled,
+      bundled: bundled,
     });
     expect(renderer).toMatchObject({ backend: 'webgpu' });
   });

@@ -43,7 +43,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: packages/render-wasm/pkg
-        key: render-wasm-${{ hashFiles('crates/**', 'Cargo.lock', 'rust-toolchain.toml') }}
+        key: render-wasm-${{ hashFiles('crates/**', 'Cargo.lock', 'rust-toolchain.toml', 'packages/render-wasm/build.mjs', 'packages/render-wasm/hash.mjs') }}
 
     - name: Build render-wasm
       if: inputs.render == 'true' && steps.render-cache.outputs.cache-hit != 'true'

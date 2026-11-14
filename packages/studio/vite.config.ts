@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import studioStorage, { seedDataDir } from '@officexr/world/vite-plugin-storage';
@@ -24,7 +24,7 @@ const REALTIME_TARGET =
 const backend = studioBackend(process.env);
 const PUBLIC_DIR = fileURLToPath(new URL('./public', import.meta.url));
 
-export default defineConfig(({ command }) => ({
+export default defineConfig(({ command, mode }) => ({
   // Only builds move to /studio/: in dev, Vite's base middleware would 404 root /models and /mcp.
   base: command === 'build' ? '/studio/' : '/',
   plugins: [
@@ -45,7 +45,7 @@ export default defineConfig(({ command }) => ({
       name: 'officexr:drop-render-wasm',
       apply: 'build',
       generateBundle(_, bundle) {
-        if (!process.env.VITE_RENDER_WASM_BASE_URL) {
+        if (!loadEnv(mode, import.meta.dirname, 'VITE_').VITE_RENDER_WASM_BASE_URL) {
           return;
         }
         for (const name of Object.keys(bundle)) {
