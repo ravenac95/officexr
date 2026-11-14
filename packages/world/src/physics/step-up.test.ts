@@ -147,6 +147,16 @@ describe('tryStepUp on honest scanned stair colliders (real Rapier)', () => {
     expect(maxY).toBeGreaterThan(5.4);
   });
 
+  it('hops vertically: the step-up frame advances at most the walk distance + 1 cm', () => {
+    const rig = makeStairsRig();
+    walkMinusX(rig, 120, false);
+    const walk = 3 / 60;
+    const hop = tryStepUp(rig.probe, -walk, 0);
+    expect(hop).not.toBeNull();
+    expect(hop!.y).toBeGreaterThan(0.4);
+    expect(Math.hypot(hop!.x, hop!.z)).toBeLessThanOrEqual(walk + 0.01);
+  });
+
   it('control: without the assist the character wedges at the first riser', () => {
     const rig = makeStairsRig();
     const maxY = walkMinusX(rig, 600, false);

@@ -47,7 +47,7 @@ import type { Vec3 } from '@officexr/sdk';
 /** Horizontal distance the assist carries the character past the
  * ledge edge — at least the ball radius (0.4) plus a margin so the
  * contact foot lands ON the tread instead of teetering on its corner.
- * The one-frame forward carry is the "hop" feel of taking a step. */
+ * It is only a probe distance; the applied hop advances the walk distance. */
 export const STEP_UP_FORWARD_CLEARANCE = 0.45;
 
 /** Tallest ledge the assist will climb. The REAL KayKit staircase
@@ -145,10 +145,7 @@ export function tryStepUp(
     return null;
   }
 
-  // The applied delta is the exact sum of the three probe movements.
-  return {
-    x: up.x + fwd.x + down.x,
-    y: landedRise,
-    z: up.z + fwd.z + down.z,
-  };
+  // Vertical hop plus the normal walk: the forward probe only verifies the
+  // landing and must not leak into the applied advance.
+  return { x: dx, y: landedRise, z: dz };
 }

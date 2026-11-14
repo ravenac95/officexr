@@ -1,6 +1,7 @@
-//! Ledge climbing for kinematic characters: lift, carry forward past the
+//! Ledge climbing for kinematic characters: lift, probe forward past the
 //! edge, drop back down, and accept only a grounded landing higher than the
-//! start. Rapier's autostep can't lift a ball over a real riser.
+//! start. The hop itself rises vertically and advances only the walk
+//! distance. Rapier's autostep can't lift a ball over a real riser.
 
 use crate::world_objects::Vec3;
 
@@ -84,9 +85,9 @@ pub fn try_step_up(probe: &mut impl StepUpProbe, dx: f64, dz: f64) -> Option<Vec
         return None;
     }
     Some(Vec3 {
-        x: up.x + fwd.x + down.movement.x,
+        x: dx,
         y: landed_rise,
-        z: up.z + fwd.z + down.movement.z,
+        z: dz,
     })
 }
 
@@ -120,6 +121,17 @@ mod tests {
         fn last_contact_is_character(&self) -> bool {
             self.character
         }
+    }
+
+    #[test]
+    fn step_up_hop_advances_only_the_walk_distance() {
+        let mut ledge = LedgeProbe {
+            pos: Vec3::default(),
+            character: false,
+        };
+        let hop = try_step_up(&mut ledge, -0.05, 0.0).expect("ledge");
+        assert!(hop.y > 0.0);
+        assert!(hop.x.hypot(hop.z) <= 0.05 + 0.01);
     }
 
     #[test]

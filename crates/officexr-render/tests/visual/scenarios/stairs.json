@@ -17,11 +17,14 @@
           "frames": 30
         },
         {
-          "frames": 110,
+          "frames": 150,
           "dir": [
             -1,
             0
           ]
+        },
+        {
+          "frames": 30
         }
       ]
     }
@@ -44,8 +47,8 @@
   ],
   "captures": [
     29,
-    70,
-    139
+    100,
+    209
   ],
   "assert": [
     {
@@ -54,8 +57,19 @@
       "surfaceY": 2
     },
     {
+      "type": "near",
+      "frame": 209,
+      "character": 0,
+      "position": [
+        -1.13,
+        5.5,
+        2
+      ],
+      "tolerance": 0.1
+    },
+    {
       "type": "feetOn",
-      "frame": 139,
+      "frame": 209,
       "surfaceY": 6
     }
   ]
