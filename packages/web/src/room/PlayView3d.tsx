@@ -1,7 +1,7 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { PersistentLocalState } from '@officexr/core-refactor';
 import { PlayView, simFromSearch } from '@officexr/world/react';
-import { createWorldXRStore, useXRSessionModeSupported, type CameraMode, type XRStore } from '@officexr/world/renderer';
+import type { CameraMode } from '@officexr/world/renderer';
 import type { TopDownPlayViewProps } from '@officexr/world/top-down';
 import { Switch } from '../hud/ui/Switch';
 import { CameraModeControl } from './CameraModeControl';
@@ -9,18 +9,6 @@ import { CharacterAction, CharacterPane } from './CharacterPane';
 import { MotionLookControl } from './MotionLookControl';
 import type { SettingsAction, SettingsTab } from './Settings';
 import { SettingRow, SettingsModal } from './SettingsModal';
-import { vrActions } from './VrAction';
-
-/** Created in an effect so StrictMode's remount destroys the first store, which appends a DOM overlay. */
-function useWorldXRStore(): XRStore | undefined {
-  const [store, setStore] = useState<XRStore>();
-  useEffect(() => {
-    const created = createWorldXRStore();
-    setStore(created);
-    return () => created.destroy();
-  }, []);
-  return store;
-}
 
 /** Everything that reaches three/R3F, so `OfficeWorld` can load it only in 3D. */
 export default function PlayView3d({
@@ -41,8 +29,6 @@ export default function PlayView3d({
   const [motionLook, setMotionLook] = useState({ enabled: false, recenterKey: 0 });
   const [motionUnsupported, setMotionUnsupported] = useState(false);
   const [invertLook, setInvertLook] = useState(false);
-  const xrStore = useWorldXRStore();
-  const vrSupported = useXRSessionModeSupported('immersive-vr') === true;
 
   const controls = (
     <>
@@ -63,10 +49,7 @@ export default function PlayView3d({
       </SettingRow>
     </>
   );
-  const actions: SettingsAction[] = [
-    { id: 'character', render: () => <CharacterAction /> },
-    ...vrActions(xrStore, vrSupported, onError),
-  ];
+  const actions: SettingsAction[] = [{ id: 'character', render: () => <CharacterAction /> }];
 
   return (
     <PlayView
@@ -78,7 +61,6 @@ export default function PlayView3d({
       invertLook={invertLook}
       hud="player"
       sim={simFromSearch(window.location.search)}
-      xrStore={xrStore}
     >
       <SettingsModal
         title={viewProps.title}
