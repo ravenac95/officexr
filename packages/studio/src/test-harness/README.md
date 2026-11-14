@@ -17,6 +17,9 @@ the integration-test roadmap.
   subtree under a hermetic provider using
   `@react-three/test-renderer`. Returns the test renderer so you can
   query the scene graph and `fireEvent`.
+- **`renderEditorStore({ stagedKindId? })`** — headless scene editor: the
+  Room document store plus tool dispatch, no renderer. Drive it with
+  `setTool`, `pick({ target, point })` and `moveSelection(delta)`.
 - **`seeds/`** — fixture documents (`emptyMapSeed`, `simpleRoomSeed`,
   `twoRoomMapSeed`). Pair with an `InMemory*Storage` (from
   `@officexr/world/scenes`) to seed a hook hermetically.

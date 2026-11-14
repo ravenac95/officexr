@@ -1,14 +1,10 @@
-import { Group } from 'three';
 import { createDefaultApi } from '@officexr/world/app';
 import type { ApplicationApi } from '@officexr/world/app';
 import type { GltfLoader } from '@officexr/world/app';
 
 export interface CreateTestApiOptions {
-  /** GLTF loader the BakeService uses. Defaults to a no-op that
-   *  resolves to an empty group, so a bake scheduled during a test
-   *  (e.g. the Layout hook's afterSave) is harmless rather than
-   *  throwing. Pass a real loader only if a test asserts on bake
-   *  output. */
+  /** GLTF loader the BakeService uses. Defaults to one that rejects;
+   *  pass a loader only if a test asserts on bake output. */
   loadGltf?: GltfLoader;
 }
 
@@ -24,6 +20,6 @@ export interface CreateTestApiOptions {
 export function createTestApi(opts: CreateTestApiOptions = {}): ApplicationApi {
   return createDefaultApi({
     apiPath: '',
-    loadGltf: opts.loadGltf ?? (async () => ({ scene: new Group() })),
+    loadGltf: opts.loadGltf ?? (() => Promise.reject(new Error('createTestApi: no loadGltf provided'))),
   });
 }
