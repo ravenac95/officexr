@@ -59,3 +59,23 @@ export function measureKindDocument(doc: Document, scale: number): KindMeasureme
   }
   return measurement;
 }
+
+const PIN_TOLERANCE = 1e-6;
+
+/**
+ * Writes a measurement into a raw catalog kind, unless the kind pins its
+ * dimensions. Returns whether a pinned kind's size differs from the measurement.
+ */
+export function mergeKindMeasurement(
+  kind: Record<string, unknown>,
+  { localAABB, ...dimensions }: KindMeasurement,
+): { pinnedDrift: boolean } {
+  if (!kind.dimensionsPinned) {
+    Object.assign(kind, { dimensions, localAABB });
+    return { pinnedDrift: false };
+  }
+  const pinned = kind.dimensions as Record<keyof typeof dimensions, number>;
+  return {
+    pinnedDrift: (['width', 'height', 'depth'] as const).some((k) => Math.abs(pinned[k] - dimensions[k]) > PIN_TOLERANCE),
+  };
+}

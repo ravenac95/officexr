@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { describe, expect, it } from 'vitest';
-import { measureKindDocument } from '../kind-dimensions.ts';
+import { type KindMeasurement, measureKindDocument, mergeKindMeasurement } from '../kind-dimensions.ts';
 
 const MODELS = fileURLToPath(new URL('../../../../studio/public/models', import.meta.url));
 
@@ -51,5 +51,36 @@ describe('measureKindDocument', () => {
       depth: 1,
       localAABB: { min: { x: -1, y: 4.5, z: -0.5 }, max: { x: 1, y: 5.5, z: 0.5 } },
     });
+  });
+});
+
+describe('mergeKindMeasurement', () => {
+  const box = (size: number): KindMeasurement => ({
+    width: size,
+    height: size,
+    depth: size,
+    localAABB: { min: { x: 0, y: 0, z: 0 }, max: { x: size, y: size, z: size } },
+  });
+  const kind = (extra: Record<string, unknown> = {}) => ({
+    dimensions: { width: 2, height: 2, depth: 2 },
+    localAABB: box(2).localAABB,
+    ...extra,
+  });
+
+  it('overwrites an unpinned kind', () => {
+    const k = kind();
+    expect(mergeKindMeasurement(k, box(2.02))).toEqual({ pinnedDrift: false });
+    expect(k.dimensions).toEqual({ width: 2.02, height: 2.02, depth: 2.02 });
+    expect(k.localAABB).toEqual(box(2.02).localAABB);
+  });
+
+  it('leaves a pinned kind alone and reports drift', () => {
+    const k = kind({ dimensionsPinned: true });
+    expect(mergeKindMeasurement(k, box(2.02))).toEqual({ pinnedDrift: true });
+    expect(k).toEqual(kind({ dimensionsPinned: true }));
+  });
+
+  it('reports no drift when a pinned kind matches', () => {
+    expect(mergeKindMeasurement(kind({ dimensionsPinned: true }), box(2))).toEqual({ pinnedDrift: false });
   });
 });
