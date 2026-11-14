@@ -11,7 +11,7 @@ use bevy::prelude::*;
 
 use crate::AssetBase;
 use crate::lighting::{HemisphereFill, ObjectMaterial};
-use crate::scene::WorldSceneData;
+use crate::views::{View, ViewKind, ViewPlayers, ViewScene};
 
 const RIGS: [&str; 4] = [
     "/models/animations/Rig_Medium_General.glb",
@@ -53,6 +53,13 @@ pub struct Players {
     pub run_speed: f32,
     /// Bind pose, no clips and no name tags, as the mugshot renders.
     pub paused: bool,
+}
+
+impl Players {
+    /// Where `player`'s character model stands: the ball collider's bottom.
+    pub fn feet(&self, player: &PlayerRender) -> Vec3 {
+        player.pos + Vec3::Y * (self.body_y - self.char_radius)
+    }
 }
 
 impl Default for Players {
@@ -189,12 +196,21 @@ pub(crate) fn plugin(app: &mut App) {
         .register_type::<bevy::gltf::GltfSceneName>()
         .register_type::<bevy::gltf::GltfSceneExtras>()
         .register_type::<bevy::camera::visibility::DynamicSkinnedMeshBounds>();
-    app.add_systems(Startup, load_rigs).add_systems(
-        Update,
-        (build_graph, sync_avatars, bind_avatars, animate, place_tags)
-            .chain()
-            .run_if(resource_exists::<Players>),
-    );
+    app.add_systems(Startup, load_rigs)
+        .add_systems(
+            Update,
+            (build_graph, sync_avatars, bind_avatars, animate, place_tags)
+                .chain()
+                .in_set(crate::views::SceneSystems)
+                .after(crate::views::mirror_resources),
+        )
+        .add_observer(despawn_tag);
+}
+
+fn despawn_tag(remove: On<Remove<Avatar>>, avatars: Query<&Avatar>, mut commands: Commands) {
+    if let Ok(avatar) = avatars.get(remove.entity) {
+        commands.entity(avatar.tag).try_despawn();
+    }
 }
 
 fn load_rigs(mut commands: Commands, base: Res<AssetBase>, assets: Res<AssetServer>) {
@@ -235,47 +251,61 @@ fn build_graph(
 
 fn sync_avatars(
     mut commands: Commands,
-    players: Res<Players>,
+    views: Query<(Entity, &View, &ViewPlayers), Changed<ViewPlayers>>,
     base: Res<AssetBase>,
     assets: Res<AssetServer>,
-    mut avatars: Query<(Entity, &mut Avatar, &mut Transform)>,
+    mut avatars: Query<(Entity, &Avatar, &mut Transform, &ChildOf)>,
 ) {
-    for (entity, avatar, _) in &avatars {
+    for (entity, view, players) in &views {
+        let view = (entity, view.camera);
+        sync_view_avatars(&mut commands, view, players, &base, &assets, &mut avatars);
+    }
+}
+
+fn sync_view_avatars(
+    commands: &mut Commands,
+    (view, camera): (Entity, Option<Entity>),
+    players: &Players,
+    base: &AssetBase,
+    assets: &AssetServer,
+    avatars: &mut Query<(Entity, &Avatar, &mut Transform, &ChildOf)>,
+) {
+    for (entity, avatar, _, _) in avatars.iter().filter(|(.., v)| v.parent() == view) {
         let kept = players
             .players
             .iter()
             .any(|p| p.id == avatar.id && p.character == avatar.character);
         if !kept {
-            commands.entity(avatar.tag).despawn();
             commands.entity(entity).despawn();
         }
     }
     for p in &players.players {
         // ponytail: the yaw snaps; Players.tsx eases it at `turnSpeed`.
-        let transform =
-            Transform::from_translation(p.pos + Vec3::Y * (players.body_y - players.char_radius))
-                .with_rotation(Quat::from_rotation_y(p.yaw + AVATAR_YAW_OFFSET));
+        let transform = Transform::from_translation(players.feet(p))
+            .with_rotation(Quat::from_rotation_y(p.yaw + AVATAR_YAW_OFFSET));
         let existing = avatars
             .iter_mut()
-            .find(|(_, a, _)| a.id == p.id && a.character == p.character);
-        if let Some((_, _, mut t)) = existing {
+            .find(|(_, a, _, v)| v.parent() == view && a.id == p.id && a.character == p.character);
+        if let Some((_, _, mut t, _)) = existing {
             *t = transform;
             continue;
         }
-        let tag = commands
-            .spawn((
-                NameTag,
-                Text::new(p.name.clone()),
-                TextFont::from_font_size(14.0),
-                Node {
-                    position_type: PositionType::Absolute,
-                    padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
-                Visibility::Hidden,
-            ))
-            .id();
+        let mut tag = commands.spawn((
+            NameTag,
+            Text::new(p.name.clone()),
+            TextFont::from_font_size(14.0),
+            Node {
+                position_type: PositionType::Absolute,
+                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
+            Visibility::Hidden,
+        ));
+        if let Some(camera) = camera {
+            tag.insert(UiTargetCamera(camera));
+        }
+        let tag = tag.id();
         let path = base.asset_path(&format!("/models/characters/{}.glb", p.character));
         // ponytail: no bind-pose foot anchor; every KayKit character's lowest vertex is within 2 mm of y=0.
         commands.spawn((
@@ -289,6 +319,7 @@ fn sync_avatars(
             transform,
             Visibility::default(),
             WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(path))),
+            ChildOf(view),
         ));
     }
 }
@@ -300,20 +331,19 @@ fn sync_avatars(
 #[allow(clippy::too_many_arguments)]
 fn bind_avatars(
     mut commands: Commands,
-    mut avatars: Query<(Entity, &mut Avatar), Without<Bound>>,
-    players: Res<Players>,
+    mut avatars: Query<(Entity, &mut Avatar, &ChildOf), Without<Bound>>,
+    views: Query<(&ViewPlayers, &ViewScene)>,
     clips: Res<Clips>,
-    scene: Option<Res<WorldSceneData>>,
     children: Query<&Children>,
     names: Query<&Name>,
     standard: Query<&MeshMaterial3d<StandardMaterial>>,
     standard_materials: Res<Assets<StandardMaterial>>,
     mut materials: ResMut<Assets<ObjectMaterial>>,
 ) {
-    let Some(scene) = scene else {
-        return;
-    };
-    for (avatar, mut state) in &mut avatars {
+    for (avatar, mut state, view) in &mut avatars {
+        let Ok((players, scene)) = views.get(view.parent()) else {
+            continue;
+        };
         let Some(rig) = children
             .iter_descendants(avatar)
             .find(|e| names.get(*e).is_ok_and(|n| n.as_str() == RIG_ROOT))
@@ -374,15 +404,21 @@ fn tag_targets(
 }
 
 fn animate(
-    players: Res<Players>,
+    views: Query<&ViewPlayers>,
     clips: Res<Clips>,
-    mut avatars: Query<&mut Avatar, With<Bound>>,
+    mut avatars: Query<(&mut Avatar, &ChildOf), With<Bound>>,
     mut rigs: Query<(&mut AnimationPlayer, &mut AnimationTransitions)>,
 ) {
-    let (Some((_, nodes)), false) = (&clips.graph, players.paused) else {
+    let Some((_, nodes)) = &clips.graph else {
         return;
     };
-    for mut avatar in &mut avatars {
+    for (mut avatar, view) in &mut avatars {
+        let Ok(players) = views.get(view.parent()) else {
+            continue;
+        };
+        if players.paused {
+            continue;
+        }
         let Some(p) = players.players.iter().find(|p| p.id == avatar.id) else {
             continue;
         };
@@ -412,23 +448,45 @@ fn animate(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn place_tags(
-    players: Res<Players>,
-    avatars: Query<(&Avatar, &GlobalTransform)>,
-    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
-    mut tags: Query<(&mut Node, &mut Visibility, &ComputedNode), With<NameTag>>,
+    mut commands: Commands,
+    views: Query<(&View, &ViewPlayers)>,
+    avatars: Query<(&Avatar, &GlobalTransform, &ChildOf)>,
+    cameras: Query<(&Camera, &GlobalTransform)>,
+    mut tags: Query<
+        (
+            &mut Node,
+            &mut Visibility,
+            &ComputedNode,
+            Has<UiTargetCamera>,
+        ),
+        With<NameTag>,
+    >,
 ) {
-    let Ok((camera, camera_transform)) = cameras.single() else {
-        return;
-    };
-    for (avatar, transform) in &avatars {
-        let Ok((mut node, mut visibility, computed)) = tags.get_mut(avatar.tag) else {
+    for (avatar, transform, view) in &avatars {
+        let Ok((view, players)) = views.get(view.parent()) else {
             continue;
         };
-        let named = players
-            .players
-            .iter()
-            .any(|p| p.id == avatar.id && !p.name.is_empty());
+        let Some((camera_entity, (camera, camera_transform))) =
+            view.camera.and_then(|c| Some((c, cameras.get(c).ok()?)))
+        else {
+            continue;
+        };
+        let Ok((mut node, mut visibility, computed, target)) = tags.get_mut(avatar.tag) else {
+            continue;
+        };
+        // An avatar spawned before its view's camera.
+        if !target {
+            commands
+                .entity(avatar.tag)
+                .insert(UiTargetCamera(camera_entity));
+        }
+        let named = view.kind == ViewKind::World
+            && players
+                .players
+                .iter()
+                .any(|p| p.id == avatar.id && !p.name.is_empty());
         let at = transform.translation() + Vec3::Y * TAG_HEIGHT_M;
         match camera.world_to_viewport(camera_transform, at) {
             Ok(xy) if named && !players.paused => {

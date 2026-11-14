@@ -81,15 +81,23 @@ function renderNative(scene: string, file: string, size: string, position: numbe
 }
 
 async function renderBrowser(page: Page, scene: string, file: string, position: number[], target: number[], manifest: Manifest) {
-  await page.waitForFunction(() => (window as { __officexrBevy?: unknown }).__officexrBevy !== undefined, null, {
+  // The page has set its own mugshot scene, which ours then replaces.
+  await page.waitForFunction(() => (window as { __officexrBevyMugshotFeetY?: number }).__officexrBevyMugshotFeetY !== undefined, null, {
     timeout: 120_000,
   });
   await page.evaluate(
     ([json, camera, character]) => {
       const w = window as unknown as {
-        __officexrBevy: { setScene: (json: string, camera: object, mugshot: string) => void };
+        __officexrBevy: {
+          setWorld: (view: number, json: string, mugshot: string) => void;
+          setCamera: (view: number, camera: object) => void;
+        };
+        __officexrBevyViews: number[];
       };
-      w.__officexrBevy.setScene(json, camera, character);
+      const view = w.__officexrBevyViews[0];
+      // Replace, not upsert, so the page's own mugshot cubes don't stay underneath.
+      w.__officexrBevy.setWorld(view, JSON.stringify({ ...JSON.parse(json), replace: true }), character);
+      w.__officexrBevy.setCamera(view, camera);
     },
     [
       fs.readFileSync(scene, 'utf-8'),
@@ -97,9 +105,17 @@ async function renderBrowser(page: Page, scene: string, file: string, position: 
       manifest.character,
     ] as const,
   );
-  await page.waitForFunction(() => (window as unknown as { __officexrBevy: { isReady: () => boolean } }).__officexrBevy.isReady(), null, {
-    timeout: 120_000,
-  });
+  await page.waitForFunction(
+    () => {
+      const w = window as unknown as {
+        __officexrBevy: { isReady: (view: number) => { ready: boolean } };
+        __officexrBevyViews: number[];
+      };
+      return w.__officexrBevy.isReady(w.__officexrBevyViews[0]).ready;
+    },
+    null,
+    { timeout: 120_000 },
+  );
   // SwiftShader draws a frame every second or so; the screenshot waits on two.
   await page.locator('#bevy-canvas').screenshot({ path: file, timeout: 120_000 });
 }

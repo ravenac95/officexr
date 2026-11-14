@@ -11,7 +11,8 @@ use bevy::render::render_resource::{
 };
 use bevy::shader::ShaderRef;
 
-use crate::scene::{BackgroundConfig, LightingConfig, WorldSceneData};
+use crate::scene::{BackgroundConfig, LightingConfig};
+use crate::views::{View, ViewScene};
 
 const SKY_RADIUS: f32 = 1500.0;
 /// Where the two-stop gradient sits at the horizon: smoothstep(-0.2, 1, 0).
@@ -100,59 +101,52 @@ pub(crate) fn sky_bundle(
     )
 }
 
-/// Whether the scene's background, lighting or clear colour differs from what this condition last saw.
-pub(crate) fn background_changed(
-    scene: Option<Res<WorldSceneData>>,
-    mut last: Local<Option<(BackgroundConfig, LightingConfig, Option<Color>)>>,
-) -> bool {
-    let Some(scene) = scene.filter(|s| s.is_changed()) else {
-        return false;
-    };
-    let now = (
-        scene.background.clone(),
-        scene.lighting.clone(),
-        scene.clear_color,
-    );
-    if last.as_ref() == Some(&now) {
-        return false;
-    }
-    *last = Some(now);
-    true
-}
-
-/// Keeps the camera's backdrop in line with the scene: its flat colour, or
-/// else the sky dome as the camera's child.
+/// Keeps each view camera's backdrop in line with its scene: its flat
+/// colour, or else the sky dome as the camera's child.
 pub(crate) fn sync_background(
     mut commands: Commands,
-    scene: Res<WorldSceneData>,
-    mut cameras: Query<(Entity, &mut Camera), With<Camera3d>>,
-    domes: Query<(Entity, &MeshMaterial3d<SkyMaterial>)>,
+    views: Query<(Ref<ViewScene>, &View)>,
+    mut cameras: Query<(Ref<Camera3d>, &mut Camera, Option<&Children>)>,
+    domes: Query<&MeshMaterial3d<SkyMaterial>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut skies: ResMut<Assets<SkyMaterial>>,
 ) {
-    let Ok((camera_entity, mut camera)) = cameras.single_mut() else {
-        return;
-    };
-    let dome = domes.single().ok();
-    match scene.clear_color {
-        // The clear colour skips tonemapping, as three.js's `scene.background` does.
-        Some(color) => {
-            camera.clear_color = ClearColorConfig::Custom(color);
-            if let Some((entity, _)) = dome {
-                commands.entity(entity).despawn();
-            }
+    for (scene, view) in &views {
+        let Some(camera_entity) = view.camera else {
+            continue;
+        };
+        let Ok((added, mut camera, children)) = cameras.get_mut(camera_entity) else {
+            continue;
+        };
+        if !scene.is_changed() && !added.is_added() {
+            continue;
         }
-        None => {
-            camera.clear_color = ClearColorConfig::Default;
-            let sky = SkyMaterial::new(&scene.background, &scene.lighting);
-            if let Some((_, handle)) = dome
-                && let Some(mut material) = skies.get_mut(&handle.0)
-            {
-                *material = sky;
-            } else {
-                commands
-                    .entity(camera_entity)
-                    .with_child(sky_bundle(&mut meshes, &mut skies, sky));
+        let dome = children
+            .into_iter()
+            .flatten()
+            .find_map(|&e| Some((e, domes.get(e).ok()?)));
+        match scene.clear_color {
+            // The clear colour skips tonemapping, as three.js's `scene.background` does.
+            Some(color) => {
+                camera.clear_color = ClearColorConfig::Custom(color);
+                if let Some((entity, _)) = dome {
+                    commands.entity(entity).despawn();
+                }
+            }
+            None => {
+                camera.clear_color = ClearColorConfig::Default;
+                let sky = SkyMaterial::new(&scene.background, &scene.lighting);
+                if let Some((_, handle)) = dome
+                    && let Some(mut material) = skies.get_mut(&handle.0)
+                {
+                    *material = sky;
+                } else {
+                    commands.entity(camera_entity).with_child(sky_bundle(
+                        &mut meshes,
+                        &mut skies,
+                        sky,
+                    ));
+                }
             }
         }
     }

@@ -16,7 +16,24 @@
       "emissive": null,
       "emissiveIntensity": 0,
       "category": "block",
-      "isLayoutObject": true
+      "isLayoutObject": true,
+      "dimensions": {
+        "width": 2,
+        "height": 2,
+        "depth": 2
+      },
+      "localAABB": {
+        "min": {
+          "x": -1,
+          "y": -1,
+          "z": -1
+        },
+        "max": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      }
     },
     {
       "id": "colored_block_green",
@@ -32,7 +49,24 @@
       "emissive": null,
       "emissiveIntensity": 0,
       "category": "block",
-      "isLayoutObject": true
+      "isLayoutObject": true,
+      "dimensions": {
+        "width": 2,
+        "height": 2,
+        "depth": 2
+      },
+      "localAABB": {
+        "min": {
+          "x": -1,
+          "y": -1,
+          "z": -1
+        },
+        "max": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      }
     },
     {
       "id": "colored_block_red",
@@ -48,7 +82,24 @@
       "emissive": null,
       "emissiveIntensity": 0,
       "category": "block",
-      "isLayoutObject": true
+      "isLayoutObject": true,
+      "dimensions": {
+        "width": 2,
+        "height": 2,
+        "depth": 2
+      },
+      "localAABB": {
+        "min": {
+          "x": -1,
+          "y": -1,
+          "z": -1
+        },
+        "max": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      }
     },
     {
       "id": "colored_block_yellow",
@@ -64,7 +115,24 @@
       "emissive": null,
       "emissiveIntensity": 0,
       "category": "block",
-      "isLayoutObject": true
+      "isLayoutObject": true,
+      "dimensions": {
+        "width": 2,
+        "height": 2,
+        "depth": 2
+      },
+      "localAABB": {
+        "min": {
+          "x": -1,
+          "y": -1,
+          "z": -1
+        },
+        "max": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      }
     },
     {
       "id": "stone",
@@ -80,7 +148,24 @@
       "emissive": null,
       "emissiveIntensity": 0,
       "category": "block",
-      "isLayoutObject": true
+      "isLayoutObject": true,
+      "dimensions": {
+        "width": 2,
+        "height": 2,
+        "depth": 2
+      },
+      "localAABB": {
+        "min": {
+          "x": -1,
+          "y": -1,
+          "z": -1
+        },
+        "max": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      }
     },
     {
       "id": "stone_dark",
@@ -96,7 +181,24 @@
       "emissive": null,
       "emissiveIntensity": 0,
       "category": "block",
-      "isLayoutObject": true
+      "isLayoutObject": true,
+      "dimensions": {
+        "width": 2.0500009059906006,
+        "height": 2.0500009059906006,
+        "depth": 2.0500009059906006
+      },
+      "localAABB": {
+        "min": {
+          "x": -1.0250004529953003,
+          "y": -1.0250005722045898,
+          "z": -1.0250004529953003
+        },
+        "max": {
+          "x": 1.0250004529953003,
+          "y": 1.0250003337860107,
+          "z": 1.0250004529953003
+        }
+      }
     },
     {
       "id": "stone_with_gold",
@@ -112,7 +214,24 @@
       "emissive": null,
       "emissiveIntensity": 0,
       "category": "block",
-      "isLayoutObject": true
+      "isLayoutObject": true,
+      "dimensions": {
+        "width": 2.0200001001358032,
+        "height": 2.0199999809265137,
+        "depth": 2.0199999809265137
+      },
+      "localAABB": {
+        "min": {
+          "x": -1.010000228881836,
+          "y": -1.0099998712539673,
+          "z": -1.0100001096725464
+        },
+        "max": {
+          "x": 1.0099998712539673,
+          "y": 1.0100001096725464,
+          "z": 1.0099998712539673
+        }
+      }
     },
     {
       "id": "wood",
@@ -128,7 +247,24 @@
       "emissive": null,
       "emissiveIntensity": 0,
       "category": "block",
-      "isLayoutObject": true
+      "isLayoutObject": true,
+      "dimensions": {
+        "width": 1.9999998807907104,
+        "height": 2.0000001192092896,
+        "depth": 2
+      },
+      "localAABB": {
+        "min": {
+          "x": -1.0000001192092896,
+          "y": -1,
+          "z": -1.0000001192092896
+        },
+        "max": {
+          "x": 0.9999997615814209,
+          "y": 1.0000001192092896,
+          "z": 0.9999998807907104
+        }
+      }
     },
     {
       "id": "bricks_A",
@@ -144,7 +280,24 @@
       "emissive": null,
       "emissiveIntensity": 0,
       "category": "block",
-      "isLayoutObject": true
+      "isLayoutObject": true,
+      "dimensions": {
+        "width": 2,
+        "height": 2,
+        "depth": 2
+      },
+      "localAABB": {
+        "min": {
+          "x": -1,
+          "y": -1,
+          "z": -1
+        },
+        "max": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      }
     },
     {
       "id": "dirt_with_grass",
@@ -160,7 +313,24 @@
       "emissive": null,
       "emissiveIntensity": 0,
       "category": "block",
-      "isLayoutObject": true
+      "isLayoutObject": true,
+      "dimensions": {
+        "width": 2.165984630584717,
+        "height": 2.0443018674850464,
+        "depth": 2.165984630584717
+      },
+      "localAABB": {
+        "min": {
+          "x": -1.0829923152923584,
+          "y": -1.0443018674850464,
+          "z": -1.0829923152923584
+        },
+        "max": {
+          "x": 1.0829923152923584,
+          "y": 1,
+          "z": 1.0829923152923584
+        }
+      }
     },
     {
       "id": "glass",
@@ -176,7 +346,24 @@
       "emissive": null,
       "emissiveIntensity": 0,
       "category": "block",
-      "isLayoutObject": true
+      "isLayoutObject": true,
+      "dimensions": {
+        "width": 2,
+        "height": 2,
+        "depth": 2
+      },
+      "localAABB": {
+        "min": {
+          "x": -1,
+          "y": -1,
+          "z": -1
+        },
+        "max": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      }
     },
     {
       "id": "lava",
@@ -192,7 +379,24 @@
       "emissive": null,
       "emissiveIntensity": 0,
       "category": "block",
-      "isLayoutObject": true
+      "isLayoutObject": true,
+      "dimensions": {
+        "width": 2.0111454725265503,
+        "height": 2.011316418647766,
+        "depth": 2.0113519430160522
+      },
+      "localAABB": {
+        "min": {
+          "x": -1.0054931640625,
+          "y": -1.0056681632995605,
+          "z": -1.0056835412979126
+        },
+        "max": {
+          "x": 1.0056523084640503,
+          "y": 1.0056482553482056,
+          "z": 1.0056684017181396
+        }
+      }
     }
   ]
 }

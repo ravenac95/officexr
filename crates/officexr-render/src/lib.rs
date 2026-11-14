@@ -3,8 +3,9 @@
 //!
 //! Add [`AssetBase`] before `DefaultPlugins` (asset sources must exist
 //! before `AssetPlugin`), then [`OfficeXrRenderPlugin`], and insert a
-//! [`WorldSceneData`] and a [`SceneCamera`]. Changing the first updates the
-//! scene in place, by object id; changing the second only moves the camera.
+//! [`WorldSceneData`] and a [`SceneCamera`], or create [`views`] through the
+//! [`views::ViewHub`]. Changing a scene updates it in place, by object id;
+//! changing a camera only moves it.
 
 mod avatars;
 mod compressed_gltf;
@@ -17,13 +18,12 @@ mod offscreen;
 pub mod placement;
 pub mod scene;
 mod sky;
+pub mod views;
 
 use bevy::asset::embedded_asset;
 use bevy::asset::io::AssetSourceBuilder;
 use bevy::camera::{Exposure, PerspectiveProjection, Projection};
 use bevy::core_pipeline::tonemapping::Tonemapping;
-use bevy::ecs::schedule::SystemCondition;
-use bevy::ecs::schedule::common_conditions::{any_match_filter, resource_exists_and_changed};
 use bevy::gltf::{
     DefaultGltfImageSampler, GltfLoader, GltfPlugin, extensions::GltfExtensionHandlers,
 };
@@ -41,6 +41,7 @@ pub use objects::{ObjectIndex, ObjectKinds, apply_overrides};
 pub use offscreen::{OffscreenTarget, offscreen_app};
 pub use scene::*;
 pub use sky::{SkyMaterial, sun_sky_params};
+use views::{View, ViewCamera, ViewScene};
 
 const CAMERA_FAR: f32 = 2000.0;
 const LOCAL_SOURCE: &str = "officexr";
@@ -142,17 +143,10 @@ fn gltf_loader(app: &App) -> GltfLoader {
     }
 }
 
-/// The systems that turn [`WorldSceneData`] and [`SceneCamera`] into entities.
+/// The systems that turn each view's scene and camera into entities.
 fn scene_systems(app: &mut App) {
-    app.init_resource::<objects::ObjectKinds>()
-        .init_resource::<objects::ObjectIndex>()
-        .init_resource::<layouts::LayoutIndex>()
-        .add_systems(
-            PostUpdate,
-            apply_camera
-                .run_if(resource_exists_and_changed::<SceneCamera>)
-                .before(TransformSystems::Propagate),
-        )
+    app.add_plugins(views::plugin)
+        .add_systems(PostUpdate, apply_camera.before(TransformSystems::Propagate))
         .add_systems(
             Update,
             (
@@ -162,30 +156,19 @@ fn scene_systems(app: &mut App) {
                     objects::sync_objects,
                     layouts::sync_layouts,
                 )
-                    .chain()
-                    .run_if(scene_changed),
+                    .chain(),
                 (
                     objects::load_kinds,
                     objects::attach_models,
                     layouts::spawn_loaded_layouts,
                 )
-                    .chain()
-                    .run_if(resource_exists::<WorldSceneData>),
-                (
-                    spawn_camera.run_if(resource_exists::<SceneCamera>),
-                    sky::sync_background.run_if(
-                        sky::background_changed.or_eager(any_match_filter::<Added<Camera3d>>),
-                    ),
-                )
-                    .chain()
-                    .run_if(resource_exists::<WorldSceneData>),
+                    .chain(),
+                (spawn_camera, sky::sync_background).chain(),
             )
-                .chain(),
+                .chain()
+                .in_set(views::SceneSystems)
+                .after(views::mirror_resources),
         );
-}
-
-fn scene_changed(scene: Option<Res<WorldSceneData>>) -> bool {
-    scene.is_some_and(|s| s.is_changed())
 }
 
 fn camera_projection(camera: &SceneCamera) -> Projection {
@@ -201,36 +184,51 @@ fn camera_transform(camera: &SceneCamera) -> Transform {
     Transform::from_translation(camera.position.into()).looking_at(camera.look_at.into(), Vec3::Y)
 }
 
+/// Each view's camera, once it has a scene and a pose.
 fn spawn_camera(
     mut commands: Commands,
-    camera: Res<SceneCamera>,
-    existing: Query<(), With<Camera3d>>,
+    mut views: Query<(Entity, &mut View, &ViewCamera), With<ViewScene>>,
 ) {
-    if !existing.is_empty() {
-        return;
+    for (entity, mut view, camera) in &mut views {
+        if view.camera.is_some() {
+            continue;
+        }
+        let id = commands
+            .spawn((
+                Camera3d::default(),
+                Camera {
+                    is_active: !view.paused,
+                    ..default()
+                },
+                view.target.clone(),
+                camera_projection(camera),
+                Tonemapping::AcesFitted,
+                // An exposure multiplier of 1 / 0.6: three.js scales by that before its ACES fit.
+                Exposure { ev100: -1.0 },
+                camera_transform(camera),
+                ChildOf(entity),
+            ))
+            .id();
+        view.camera = Some(id);
     }
-    commands.spawn((
-        Camera3d::default(),
-        camera_projection(&camera),
-        Tonemapping::AcesFitted,
-        // An exposure multiplier of 1 / 0.6: three.js scales by that before its ACES fit.
-        Exposure { ev100: -1.0 },
-        camera_transform(&camera),
-    ));
 }
 
 fn apply_camera(
-    camera: Res<SceneCamera>,
-    mut cameras: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
+    views: Query<(&View, &ViewCamera), Changed<ViewCamera>>,
+    mut cameras: Query<(&mut Transform, &mut Projection)>,
 ) {
-    for (mut transform, mut projection) in &mut cameras {
-        *transform = camera_transform(&camera);
-        *projection = camera_projection(&camera);
+    for (view, camera) in &views {
+        if let Some((mut transform, mut projection)) =
+            view.camera.and_then(|c| cameras.get_mut(c).ok())
+        {
+            *transform = camera_transform(camera);
+            *projection = camera_projection(camera);
+        }
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use bevy::asset::AssetPlugin;
     use std::collections::HashMap;
 
@@ -238,7 +236,7 @@ mod tests {
 
     use super::*;
 
-    fn scene(objects: &[(&str, [f32; 3])]) -> WorldSceneData {
+    pub(crate) fn scene(objects: &[(&str, [f32; 3])]) -> WorldSceneData {
         let objects: Vec<_> = objects
             .iter()
             .map(|(id, position)| (*id, "__primitive_blue", *position))
@@ -259,7 +257,7 @@ mod tests {
         serde_json::from_value(json).unwrap()
     }
 
-    fn camera(x: f32) -> SceneCamera {
+    pub(crate) fn camera(x: f32) -> SceneCamera {
         SceneCamera {
             position: [x, 5.0, 5.0],
             look_at: [0.0; 3],
@@ -269,18 +267,22 @@ mod tests {
         }
     }
 
-    fn bare_app() -> App {
+    pub(crate) fn bare_app() -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
-            .init_asset::<Mesh>()
-            .init_asset::<ObjectMaterial>()
-            .init_asset::<SkyMaterial>()
-            .init_asset::<Gltf>()
-            .init_asset::<GltfNode>()
-            .init_asset::<GltfMesh>()
-            .init_asset::<GltfMaterial>()
-            .insert_resource(AssetBase::Path(String::new()))
-            .add_plugins(scene_systems);
+        app.add_plugins((
+            AssetBase::Path(concat!(env!("CARGO_MANIFEST_DIR"), "/examples").into()),
+            MinimalPlugins,
+            AssetPlugin::default(),
+        ))
+        .init_asset::<Mesh>()
+        .init_asset::<ObjectMaterial>()
+        .init_asset::<SkyMaterial>()
+        .init_asset::<Gltf>()
+        .init_asset::<GltfNode>()
+        .init_asset::<GltfMesh>()
+        .init_asset::<GltfMaterial>()
+        .init_asset::<Image>()
+        .add_plugins(scene_systems);
         app
     }
 
@@ -289,6 +291,12 @@ mod tests {
         app.insert_resource(scene).insert_resource(camera(0.0));
         app.update();
         app
+    }
+
+    fn index(app: &mut App) -> HashMap<String, Entity> {
+        let mut views = app.world_mut().query::<&ObjectIndex>();
+        let index = views.single(app.world()).unwrap();
+        index.ids().map(|(id, e)| (id.to_string(), e)).collect()
     }
 
     fn live(app: &App) -> usize {
@@ -307,7 +315,7 @@ mod tests {
         let mut app = app(scene(&[("a", [0.0; 3]), ("b", [4.0, 0.0, 0.0])]));
         let before = transforms(&mut app);
         assert_eq!(before.len(), 2);
-        let b = app.world().resource::<ObjectIndex>().get("b").unwrap();
+        let b = index(&mut app)["b"];
 
         *app.world_mut().resource_mut::<WorldSceneData>() =
             scene(&[("a", [0.0; 3]), ("b", [6.0, 0.0, 0.0])]);
@@ -323,7 +331,7 @@ mod tests {
     #[test]
     fn adding_and_removing_an_object_spawns_and_despawns_one_entity() {
         let mut app = app(scene(&[("a", [0.0; 3])]));
-        let a = app.world().resource::<ObjectIndex>().get("a").unwrap();
+        let a = index(&mut app)["a"];
         let entities = live(&app);
         let before = transforms(&mut app);
 
@@ -331,12 +339,12 @@ mod tests {
             scene(&[("a", [0.0; 3]), ("b", [4.0, 0.0, 0.0])]);
         app.update();
         assert_eq!(live(&app), entities + 1);
-        assert_eq!(app.world().resource::<ObjectIndex>().get("a"), Some(a));
+        assert_eq!(index(&mut app).get("a"), Some(&a));
 
         *app.world_mut().resource_mut::<WorldSceneData>() = scene(&[("a", [0.0; 3])]);
         app.update();
-        assert_eq!(app.world().resource::<ObjectIndex>().len(), 1);
-        assert_eq!(app.world().resource::<ObjectIndex>().get("a"), Some(a));
+        assert_eq!(index(&mut app).len(), 1);
+        assert_eq!(index(&mut app).get("a"), Some(&a));
         assert_eq!(live(&app), entities);
         assert_eq!(transforms(&mut app), before);
     }
@@ -344,7 +352,7 @@ mod tests {
     #[test]
     fn changing_an_objects_kind_keeps_its_entity_and_swaps_the_mesh() {
         let mut app = app(scene_of_kinds(&[("a", "__primitive_blue", [0.0; 3])]));
-        let a = app.world().resource::<ObjectIndex>().get("a").unwrap();
+        let a = index(&mut app)["a"];
         let mesh_of = |app: &App| {
             app.world()
                 .get::<MeshMaterial3d<ObjectMaterial>>(a)
@@ -357,7 +365,7 @@ mod tests {
         app.update();
         app.update();
 
-        assert_eq!(app.world().resource::<ObjectIndex>().get("a"), Some(a));
+        assert_eq!(index(&mut app).get("a"), Some(&a));
         assert_ne!(mesh_of(&app).unwrap(), before);
     }
 

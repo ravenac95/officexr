@@ -87,8 +87,7 @@ fn capture_and_exit(
     time: Res<Time<Real>>,
     target: Res<OffscreenTarget>,
     output: Res<OutputPath>,
-    kinds: Res<ObjectKinds>,
-    layouts: Res<LayoutIndex>,
+    views: Query<(&ObjectKinds, &LayoutIndex)>,
     mut exit: MessageWriter<AppExit>,
 ) {
     *frame += 1;
@@ -97,7 +96,7 @@ fn capture_and_exit(
     }
     if *frame == CAPTURE_AT {
         let mean = *measured / (CAPTURE_AT - MEASURE_FROM);
-        if kinds.is_loading() || layouts.is_loading() {
+        if views.iter().any(|(k, l)| k.pending() + l.pending() > 0) {
             warn!("capturing with models still loading");
         }
         println!("frame_ms={:.2}", mean.as_secs_f64() * 1e3);

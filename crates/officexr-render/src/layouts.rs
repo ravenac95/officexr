@@ -9,6 +9,7 @@ use crate::lighting::{HemisphereFill, ObjectMaterial};
 use crate::objects::{mesh_primitives, standard_material};
 use crate::placement::baked_layout_transform;
 use crate::scene::{BakedLayoutPlacement, WorldSceneData};
+use crate::views::ViewScene;
 
 enum LayoutState {
     Loading,
@@ -25,14 +26,16 @@ struct Layout {
     state: LayoutState,
 }
 
-#[derive(Resource, Default)]
+/// A view's layout placements.
+#[derive(Component, Default)]
 pub struct LayoutIndex(Vec<Layout>);
 
 impl LayoutIndex {
-    pub fn is_loading(&self) -> bool {
+    pub fn pending(&self) -> usize {
         self.0
             .iter()
-            .any(|l| matches!(l.state, LayoutState::Loading))
+            .filter(|l| matches!(l.state, LayoutState::Loading))
+            .count()
     }
 
     /// The GLB paths of the layouts that failed to load.
@@ -48,10 +51,21 @@ impl LayoutIndex {
 /// ones in place, requests the new, and despawns the gone.
 pub(crate) fn sync_layouts(
     mut commands: Commands,
-    scene: Res<WorldSceneData>,
     base: Res<AssetBase>,
     assets: Res<AssetServer>,
-    mut index: ResMut<LayoutIndex>,
+    mut views: Query<(&ViewScene, &mut LayoutIndex), Changed<ViewScene>>,
+) {
+    for (scene, mut index) in &mut views {
+        sync_view_layouts(&mut commands, scene, &base, &assets, &mut index);
+    }
+}
+
+fn sync_view_layouts(
+    commands: &mut Commands,
+    scene: &WorldSceneData,
+    base: &AssetBase,
+    assets: &AssetServer,
+    index: &mut LayoutIndex,
 ) {
     let mut gone = std::mem::take(&mut index.0);
     let exact: Vec<Option<Layout>> = scene
@@ -103,8 +117,7 @@ pub(crate) fn sync_layouts(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_loaded_layouts(
     mut commands: Commands,
-    mut index: ResMut<LayoutIndex>,
-    scene: Res<WorldSceneData>,
+    mut views: Query<(Entity, &mut LayoutIndex, &ViewScene)>,
     assets: Res<AssetServer>,
     gltfs: Res<Assets<Gltf>>,
     nodes: Res<Assets<GltfNode>>,
@@ -112,42 +125,45 @@ pub(crate) fn spawn_loaded_layouts(
     gltf_materials: Res<Assets<GltfMaterial>>,
     mut materials: ResMut<Assets<ObjectMaterial>>,
 ) {
-    for layout in &mut index.0 {
-        if !matches!(layout.state, LayoutState::Loading) {
-            continue;
+    for (view, mut index, scene) in &mut views {
+        for layout in &mut index.0 {
+            if !matches!(layout.state, LayoutState::Loading) {
+                continue;
+            }
+            let handle = &layout.gltf;
+            if assets.load_state(handle).is_failed()
+                || assets.recursive_dependency_load_state(handle).is_failed()
+            {
+                layout.state = LayoutState::Failed;
+                continue;
+            }
+            if !assets.is_loaded_with_dependencies(handle) {
+                continue;
+            }
+            let Some(gltf) = gltfs.get(handle) else {
+                layout.state = LayoutState::Failed;
+                continue;
+            };
+            let root = baked_layout_transform(&layout.placement);
+            let entities = mesh_primitives(gltf, &nodes, &gltf_meshes)
+                .into_iter()
+                .map(|(node_transform, primitive)| {
+                    let material = materials.add(ObjectMaterial {
+                        base: standard_material(&primitive, &gltf_materials),
+                        extension: HemisphereFill::new(&scene.lighting),
+                    });
+                    let entity = commands
+                        .spawn((
+                            Mesh3d(primitive.mesh),
+                            MeshMaterial3d(material),
+                            root.mul_transform(node_transform),
+                            ChildOf(view),
+                        ))
+                        .id();
+                    (entity, node_transform)
+                })
+                .collect();
+            layout.state = LayoutState::Spawned(entities);
         }
-        let handle = &layout.gltf;
-        if assets.load_state(handle).is_failed()
-            || assets.recursive_dependency_load_state(handle).is_failed()
-        {
-            layout.state = LayoutState::Failed;
-            continue;
-        }
-        if !assets.is_loaded_with_dependencies(handle) {
-            continue;
-        }
-        let Some(gltf) = gltfs.get(handle) else {
-            layout.state = LayoutState::Failed;
-            continue;
-        };
-        let root = baked_layout_transform(&layout.placement);
-        let entities = mesh_primitives(gltf, &nodes, &gltf_meshes)
-            .into_iter()
-            .map(|(node_transform, primitive)| {
-                let material = materials.add(ObjectMaterial {
-                    base: standard_material(&primitive, &gltf_materials),
-                    extension: HemisphereFill::new(&scene.lighting),
-                });
-                let entity = commands
-                    .spawn((
-                        Mesh3d(primitive.mesh),
-                        MeshMaterial3d(material),
-                        root.mul_transform(node_transform),
-                    ))
-                    .id();
-                (entity, node_transform)
-            })
-            .collect();
-        layout.state = LayoutState::Spawned(entities);
     }
 }

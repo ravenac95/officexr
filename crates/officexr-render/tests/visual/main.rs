@@ -373,8 +373,7 @@ fn drive(
     mut timeline: ResMut<Timeline>,
     mut players: ResMut<Players>,
     mut camera: ResMut<SceneCamera>,
-    kinds: Res<ObjectKinds>,
-    layouts: Res<LayoutIndex>,
+    views: Query<(&ObjectKinds, &LayoutIndex)>,
     bound: Query<(), With<AvatarBound>>,
     target: Res<OffscreenTarget>,
     mut time_step: ResMut<TimeUpdateStrategy>,
@@ -382,8 +381,8 @@ fn drive(
 ) {
     let t = &mut *timeline;
     if t.ready_for < READY_FRAMES {
-        let ready = !kinds.is_loading()
-            && !layouts.is_loading()
+        let ready = !views.is_empty()
+            && views.iter().all(|(k, l)| k.pending() + l.pending() == 0)
             && bound.iter().count() == players.players.len();
         if ready {
             t.ready_for += 1;
@@ -404,9 +403,13 @@ fn drive(
     let Some(step) = t.steps.get(t.next) else {
         t.done_for += 1;
         if t.done_for == SAVE_FRAMES {
-            let kinds = kinds.failed().map(|id| format!("kind {id}"));
-            let layouts = layouts.failed().map(|path| format!("layout {path}"));
-            *t.failed.lock().unwrap() = kinds.chain(layouts).collect();
+            *t.failed.lock().unwrap() = views
+                .iter()
+                .flat_map(|(kinds, layouts)| {
+                    let kinds = kinds.failed().map(|id| format!("kind {id}"));
+                    kinds.chain(layouts.failed().map(|path| format!("layout {path}")))
+                })
+                .collect();
             exit.write(AppExit::Success);
         }
         return;
