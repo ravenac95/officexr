@@ -92,9 +92,12 @@ export interface RendererModule {
   isReady(id: ViewId): { ready: boolean; pending: number };
   frameStats(id: ViewId): { drawCalls: number; triangles: number };
 
-  // Controls: once any of these is called on a view, its camera follows its controls, not `setCamera`.
-  // Keys reach any view with input enabled; pointer lock, mouse-look and the wheel only a view
-  // drawing into a Bevy window (with WebGL2, the primary canvas's).
+  // Controls: once any of these is called on a view, its controls drive its camera, overriding
+  // `setCamera`, in every frame its mode has something to frame. Top-down and free-fly always do;
+  // first-person, third-person and fixed need a follow target (fixed, or its `lookAt`), and until
+  // then `setCamera` still applies. Keys are heard page-wide and reach every view with input
+  // enabled; pointer lock, mouse-look and the wheel reach only a view drawing into a Bevy window
+  // (with WebGL2, the primary canvas's).
   /** The movement since the last call, to step the sim with. */
   takeIntent(id: ViewId): MoveIntent;
   /** The local player's body root and yaw, after stepping the sim. */

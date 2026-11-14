@@ -7,21 +7,23 @@
 //! [`ViewCamera`]. The caller steps the sim with the intent and hands the
 //! player's new position back with [`Controls::set_follow`].
 //!
-//! Keys are read from Bevy's `ButtonInput<KeyCode>`, which on the web hears
-//! the whole page, so they reach any view whose input is enabled. Pointer lock,
-//! mouse-look and the wheel need the view to draw into a Bevy window; on
-//! WebGL2 only the primary view does.
+//! Keys are read from Bevy's `ButtonInput<KeyCode>` and reach every view
+//! whose input is enabled; the host feeds it the keys the views should hear
+//! (on the web, the whole page's). Pointer lock, mouse-look and the wheel need
+//! the view to draw into a Bevy window; on WebGL2 only the primary view does.
 // ponytail: a WebGL2 image view (non-primary canvas) gets keys but no pointer lock, mouse-look or wheel; feed it from JS if one ever needs them.
 
 mod config;
 pub mod look;
 mod rig;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use bevy::camera::RenderTarget;
+use bevy::ecs::system::SystemParam;
 use bevy::input::ButtonState;
+use bevy::input::keyboard::KeyboardInput;
 use bevy::input::mouse::{AccumulatedMouseMotion, MouseButtonInput, MouseWheel};
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow, WindowRef};
@@ -142,11 +144,16 @@ impl ControlsHub {
 }
 
 /// Set by a picking layer when this frame's mouse press landed on a pickable
-/// target (e.g. a ping bell), so the press doesn't take pointer lock. Set it
-/// in `PreUpdate` (as Bevy's picking observers run) or before
-/// [`ControlsSystems`]; the plugin clears it every frame.
+/// target (e.g. a ping bell), so the press neither takes pointer lock nor
+/// starts a free-fly drag. Set it in `PreUpdate` (as Bevy's picking observers
+/// run) or before [`ControlsSystems`]; the plugin clears it every frame.
 #[derive(Resource, Default)]
 pub struct PointerClaimed(pub bool);
+
+/// Sent by the host when the platform ended pointer lock on its own (Esc, a
+/// tab switch, a refused request): the plugin frees and shows the cursor.
+#[derive(Message, Clone, Copy, Debug, Default)]
+pub struct PointerLockLost;
 
 /// Reads input and moves the views' cameras, before [`SceneSystems`] draws them.
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
@@ -159,10 +166,15 @@ impl Plugin for ControlsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ControlsHub>()
             .init_resource::<PointerClaimed>()
+            .init_resource::<ShortcutKeys>()
+            .init_resource::<WindowInputs>()
+            .add_message::<PointerLockLost>()
             .configure_sets(Update, ControlsSystems.before(SceneSystems))
             .add_systems(
                 Update,
-                (pointer_lock, steer).chain().in_set(ControlsSystems),
+                (track_shortcuts, pointer_lock, gather_mouse, steer)
+                    .chain()
+                    .in_set(ControlsSystems),
             );
     }
 }
@@ -179,12 +191,85 @@ fn is_locked(cursor: &CursorOptions) -> bool {
     cursor.grab_mode != CursorGrabMode::None
 }
 
+/// Held with a key, a shortcut (ctrl+S, cmd+A) rather than movement.
+const COMMAND: [KeyCode; 6] = [
+    KeyCode::ControlLeft,
+    KeyCode::ControlRight,
+    KeyCode::SuperLeft,
+    KeyCode::SuperRight,
+    KeyCode::AltLeft,
+    KeyCode::AltRight,
+];
+
+/// Keys that went down with a command modifier held, ignored until they're
+/// pressed again without one or released. macOS sends no keyup for a key
+/// released while cmd is held, so gating on the modifier being held now would
+/// leave such a key moving the player after cmd comes up.
+#[derive(Resource, Default)]
+struct ShortcutKeys {
+    ignored: HashSet<KeyCode>,
+    /// Held command modifiers, tracked in event order so a key pressed before
+    /// a modifier in the same frame still counts.
+    modifiers: HashSet<KeyCode>,
+}
+
+fn track_shortcuts(
+    mut events: MessageReader<KeyboardInput>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut shortcuts: ResMut<ShortcutKeys>,
+) {
+    let ShortcutKeys { ignored, modifiers } = &mut *shortcuts;
+    for event in events.read() {
+        let pressed = event.state == ButtonState::Pressed;
+        if COMMAND.contains(&event.key_code) {
+            if pressed {
+                modifiers.insert(event.key_code);
+            } else {
+                modifiers.remove(&event.key_code);
+            }
+        } else if event.repeat {
+        } else if pressed && !modifiers.is_empty() {
+            ignored.insert(event.key_code);
+        } else {
+            ignored.remove(&event.key_code);
+        }
+    }
+    // Bevy releases every key when the window loses focus.
+    modifiers.retain(|k| keys.pressed(*k));
+    ignored.retain(|k| keys.pressed(*k));
+}
+
+/// The held keys, less those held for a shortcut.
+#[derive(SystemParam)]
+struct MovementKeys<'w> {
+    keys: Res<'w, ButtonInput<KeyCode>>,
+    shortcuts: Res<'w, ShortcutKeys>,
+}
+
+impl MovementKeys<'_> {
+    fn any(&self, codes: &[KeyCode]) -> bool {
+        codes
+            .iter()
+            .any(|k| self.keys.pressed(*k) && !self.shortcuts.ignored.contains(k))
+    }
+
+    fn just_pressed(&self, code: KeyCode) -> bool {
+        self.keys.just_pressed(code) && !self.shortcuts.ignored.contains(&code)
+    }
+
+    fn axis(&self, plus: &[KeyCode], minus: &[KeyCode]) -> f32 {
+        f32::from(u8::from(self.any(plus))) - f32::from(u8::from(self.any(minus)))
+    }
+}
+
 /// Locks the pointer to a window on a click there while a view on it wants
-/// mouse-look, and frees it on Esc or once none does.
+/// mouse-look, and frees it on Esc, a lost lock, or once none does.
+// Each parameter is one input to the lock decision; bundling them would only rename them.
 #[allow(clippy::too_many_arguments)]
 fn pointer_lock(
     hub: Res<ControlsHub>,
-    mut claimed: ResMut<PointerClaimed>,
+    claimed: Res<PointerClaimed>,
+    mut lost: MessageReader<PointerLockLost>,
     mut presses: MessageReader<MouseButtonInput>,
     keys: Res<ButtonInput<KeyCode>>,
     views: Query<&View>,
@@ -206,15 +291,15 @@ fn pointer_lock(
         .filter(|p| p.button == MouseButton::Left && p.state == ButtonState::Pressed)
         .map(|p| p.window)
         .collect();
-    let claimed = std::mem::take(&mut claimed.0);
+    let lost = lost.read().count() > 0;
     for (window, mut cursor) in &mut cursors {
         let wanted = wants_look.contains(&window);
-        if wanted && !claimed && clicked.contains(&window) {
+        if wanted && !claimed.0 && clicked.contains(&window) {
             // Set even when already locked: the browser frees the lock on its
             // own, and only a changed `CursorOptions` asks for it again.
             cursor.grab_mode = CursorGrabMode::Locked;
             cursor.visible = false;
-        } else if is_locked(&cursor) && (!wanted || keys.just_pressed(KeyCode::Escape)) {
+        } else if is_locked(&cursor) && (lost || !wanted || keys.just_pressed(KeyCode::Escape)) {
             cursor.grab_mode = CursorGrabMode::None;
             cursor.visible = true;
         }
@@ -227,33 +312,36 @@ struct WindowInput {
     locked: bool,
     scale_factor: f32,
     motion: Vec2,
+    /// The left button went down here, on nothing a picker claimed.
     pressed: bool,
+    left_held: bool,
     /// DOM wheel deltas (positive = down), each with its zoom factor.
     wheel: Vec<(f32, f32)>,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn steer(
-    mut commands: Commands,
-    time: Res<Time>,
-    hub: Res<ControlsHub>,
-    keys: Res<ButtonInput<KeyCode>>,
+/// This frame's mouse input per window.
+#[derive(Resource, Default)]
+struct WindowInputs(HashMap<Entity, WindowInput>);
+
+fn gather_mouse(
+    mut inputs: ResMut<WindowInputs>,
+    mut claimed: ResMut<PointerClaimed>,
     buttons: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
     mut presses: MessageReader<MouseButtonInput>,
     mut wheels: MessageReader<MouseWheel>,
     windows: Query<(Entity, &Window, &CursorOptions)>,
-    primary: Option<Single<Entity, With<PrimaryWindow>>>,
-    mut views: Query<(Entity, &View, Option<&mut ViewCamera>)>,
 ) {
-    let primary = primary.map(|p| *p);
-    let mut inputs: HashMap<Entity, WindowInput> = windows
+    let claimed = std::mem::take(&mut claimed.0);
+    let left_held = buttons.pressed(MouseButton::Left);
+    inputs.0 = windows
         .iter()
         .map(|(entity, window, cursor)| {
             let input = WindowInput {
                 locked: is_locked(cursor),
                 scale_factor: window.scale_factor(),
                 motion: motion.delta / window.scale_factor(),
+                left_held,
                 ..default()
             };
             (entity, input)
@@ -262,19 +350,33 @@ fn steer(
     for press in presses.read() {
         if press.button == MouseButton::Left
             && press.state == ButtonState::Pressed
-            && let Some(input) = inputs.get_mut(&press.window)
+            && !claimed
+            && let Some(input) = inputs.0.get_mut(&press.window)
         {
             input.pressed = true;
         }
     }
     for wheel in wheels.read() {
-        if let Some(input) = inputs.get_mut(&wheel.window) {
+        if let Some(input) = inputs.0.get_mut(&wheel.window) {
             let delta = dom_wheel_delta(wheel.y, wheel.unit, input.scale_factor);
             input
                 .wheel
                 .push((delta, wheel_zoom_factor(delta, wheel.unit)));
         }
     }
+}
+
+/// Turns each view's input into its intent and its camera.
+fn steer(
+    mut commands: Commands,
+    time: Res<Time>,
+    hub: Res<ControlsHub>,
+    keys: MovementKeys,
+    inputs: Res<WindowInputs>,
+    primary: Option<Single<Entity, With<PrimaryWindow>>>,
+    mut views: Query<(Entity, &View, Option<&mut ViewCamera>)>,
+) {
+    let primary = primary.map(|p| *p);
     let empty = WindowInput::default();
     let dt = time.delta_secs();
     let mut hub = hub.lock();
@@ -283,10 +385,10 @@ fn steer(
             continue;
         };
         let window = window_of(view, primary)
-            .and_then(|w| inputs.get(&w))
+            .and_then(|w| inputs.0.get(&w))
             .unwrap_or(&empty);
         if controls.input_enabled {
-            mouse(controls, window, buttons.pressed(MouseButton::Left));
+            mouse(controls, window);
             if controls.mode == CameraMode::FreeFly {
                 controls.rig.free_fly.fly(fly_keys(&keys), dt);
             }
@@ -332,14 +434,14 @@ fn steer(
 }
 
 /// Applies a window's mouse input to a view on it.
-fn mouse(controls: &mut Controls, input: &WindowInput, left_held: bool) {
+fn mouse(controls: &mut Controls, input: &WindowInput) {
     let mode = controls.mode;
     if input.locked && is_yaw_pitch_mode(mode) {
         let d = input.motion * controls.look_sign() * MOUSE_SENSITIVITY;
         apply_look_delta(mode, d.x, d.y, &mut controls.look);
     }
     if mode == CameraMode::FreeFly {
-        controls.dragging = (controls.dragging || input.pressed) && left_held;
+        controls.dragging = (controls.dragging || input.pressed) && input.left_held;
         if controls.dragging {
             controls.rig.free_fly.drag(input.motion);
         }
@@ -353,33 +455,15 @@ fn mouse(controls: &mut Controls, input: &WindowInput, left_held: bool) {
     }
 }
 
-fn axis(keys: &ButtonInput<KeyCode>, plus: &[KeyCode], minus: &[KeyCode]) -> f32 {
-    f32::from(u8::from(keys.any_pressed(plus.iter().copied())))
-        - f32::from(u8::from(keys.any_pressed(minus.iter().copied())))
-}
-
 const SHIFT: [KeyCode; 2] = [KeyCode::ShiftLeft, KeyCode::ShiftRight];
 
-/// Held with a key, a shortcut (ctrl+S, cmd+A) rather than movement.
-const COMMAND: [KeyCode; 4] = [
-    KeyCode::ControlLeft,
-    KeyCode::ControlRight,
-    KeyCode::SuperLeft,
-    KeyCode::SuperRight,
-];
-
 /// WASD or the arrows, turned by `yaw`; shift runs and space jumps.
-fn intent(keys: &ButtonInput<KeyCode>, yaw: f32) -> MoveIntent {
-    if keys.any_pressed(COMMAND) {
-        return MoveIntent::default();
-    }
-    let fwd = axis(
-        keys,
+fn intent(keys: &MovementKeys, yaw: f32) -> MoveIntent {
+    let fwd = keys.axis(
         &[KeyCode::KeyW, KeyCode::ArrowUp],
         &[KeyCode::KeyS, KeyCode::ArrowDown],
     );
-    let strafe = axis(
-        keys,
+    let strafe = keys.axis(
         &[KeyCode::KeyD, KeyCode::ArrowRight],
         &[KeyCode::KeyA, KeyCode::ArrowLeft],
     );
@@ -388,23 +472,22 @@ fn intent(keys: &ButtonInput<KeyCode>, yaw: f32) -> MoveIntent {
     let dir = (forward * fwd + right * strafe).normalize_or_zero();
     MoveIntent {
         dir: dir.into(),
-        run: keys.any_pressed(SHIFT),
+        run: keys.any(&SHIFT),
         jump: keys.just_pressed(KeyCode::Space),
     }
 }
 
-fn fly_keys(keys: &ButtonInput<KeyCode>) -> FlyKeys {
+fn fly_keys(keys: &MovementKeys) -> FlyKeys {
     FlyKeys {
         axes: Vec3::new(
-            axis(keys, &[KeyCode::KeyD], &[KeyCode::KeyA]),
-            axis(
-                keys,
+            keys.axis(&[KeyCode::KeyD], &[KeyCode::KeyA]),
+            keys.axis(
                 &[KeyCode::KeyE, KeyCode::Space],
                 &[KeyCode::KeyQ, KeyCode::ControlLeft, KeyCode::ControlRight],
             ),
-            axis(keys, &[KeyCode::KeyW], &[KeyCode::KeyS]),
+            keys.axis(&[KeyCode::KeyW], &[KeyCode::KeyS]),
         ),
-        fast: keys.any_pressed(SHIFT),
+        fast: keys.any(&SHIFT),
     }
 }
 
@@ -413,12 +496,20 @@ mod tests {
     use std::time::Duration;
 
     use bevy::input::InputPlugin;
+    use bevy::input::keyboard::Key;
+    use bevy::input::mouse::{MouseMotion, MouseScrollUnit};
+    use bevy::input::touch::TouchPhase;
     use bevy::time::TimeUpdateStrategy;
+    use bevy::window::WindowResolution;
     use officexr_render::SceneCamera;
     use officexr_render::views::{ViewHub, ViewKind, ViewTarget};
 
+    use super::look::ViewOffsets;
     use super::*;
 
+    const SCALE: f32 = 2.0;
+
+    /// An app with one world view on a primary window at `SCALE`.
     fn app() -> (App, ViewId) {
         let mut app = App::new();
         app.add_plugins((
@@ -432,6 +523,13 @@ mod tests {
         .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
             16,
         )));
+        app.world_mut().spawn((
+            Window {
+                resolution: WindowResolution::default().with_scale_factor_override(SCALE),
+                ..default()
+            },
+            PrimaryWindow,
+        ));
         let id = app
             .world()
             .resource::<ViewHub>()
@@ -448,6 +546,167 @@ mod tests {
         let mut views = app.world_mut().query::<(&View, &ViewCamera)>();
         let (_, camera) = views.iter(app.world()).find(|(v, _)| v.id == id).unwrap();
         camera.0.clone()
+    }
+
+    fn window(app: &mut App) -> Entity {
+        app.world_mut()
+            .query_filtered::<Entity, With<PrimaryWindow>>()
+            .single(app.world())
+            .unwrap()
+    }
+
+    fn cursor(app: &mut App) -> CursorOptions {
+        let window = window(app);
+        app.world().get::<CursorOptions>(window).unwrap().clone()
+    }
+
+    fn click(app: &mut App) {
+        let window = window(app);
+        app.world_mut().write_message(MouseButtonInput {
+            button: MouseButton::Left,
+            state: ButtonState::Pressed,
+            window,
+        });
+    }
+
+    fn key(app: &mut App, key_code: KeyCode, state: ButtonState) {
+        app.world_mut().write_message(KeyboardInput {
+            key_code,
+            logical_key: Key::Unidentified(bevy::input::keyboard::NativeKey::Unidentified),
+            state,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+    }
+
+    /// Counts the frames `CursorOptions` changed in, as bevy_winit sees them.
+    #[derive(Resource, Default)]
+    struct CursorChanges(u32);
+
+    fn count_cursor_changes(
+        changed: Query<(), Changed<CursorOptions>>,
+        mut changes: ResMut<CursorChanges>,
+    ) {
+        changes.0 += u32::try_from(changed.iter().count()).unwrap();
+    }
+
+    #[test]
+    fn a_click_locks_the_pointer_and_a_lost_lock_shows_the_cursor_again() {
+        let (mut app, id) = app();
+        app.init_resource::<CursorChanges>()
+            .add_systems(Last, count_cursor_changes);
+        controls(&app, id, |c| c.mode = CameraMode::FirstPerson);
+
+        click(&mut app);
+        app.update();
+        let locked = cursor(&mut app);
+        assert_eq!(locked.grab_mode, CursorGrabMode::Locked);
+        assert!(!locked.visible);
+
+        let before = app.world().resource::<CursorChanges>().0;
+        app.world_mut().write_message(PointerLockLost);
+        app.update();
+        let freed = cursor(&mut app);
+        assert_eq!(freed.grab_mode, CursorGrabMode::None);
+        assert!(freed.visible);
+        assert!(app.world().resource::<CursorChanges>().0 > before);
+    }
+
+    #[test]
+    fn esc_frees_the_pointer_and_a_claimed_click_doesnt_lock_it() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| c.mode = CameraMode::FirstPerson);
+        click(&mut app);
+        app.update();
+        key(&mut app, KeyCode::Escape, ButtonState::Pressed);
+        app.update();
+        assert_eq!(cursor(&mut app).grab_mode, CursorGrabMode::None);
+
+        app.world_mut().resource_mut::<PointerClaimed>().0 = true;
+        click(&mut app);
+        app.update();
+        assert_eq!(cursor(&mut app).grab_mode, CursorGrabMode::None);
+        assert!(!app.world().resource::<PointerClaimed>().0);
+    }
+
+    #[test]
+    fn mouse_look_is_in_css_px() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| {
+            c.mode = CameraMode::FirstPerson;
+            c.set_follow(Vec3::ZERO, 0.0);
+        });
+        click(&mut app);
+        app.update();
+        let mut expected = controls(&app, id, |c| c.look);
+        app.world_mut().write_message(MouseMotion {
+            delta: Vec2::new(40.0, 20.0),
+        });
+        app.update();
+        let d = Vec2::new(40.0, 20.0) / SCALE * -MOUSE_SENSITIVITY;
+        apply_look_delta(CameraMode::FirstPerson, d.x, d.y, &mut expected);
+        assert_eq!(controls(&app, id, |c| c.look), expected);
+        assert_ne!(expected.yaw, 0.0);
+    }
+
+    #[test]
+    fn the_wheel_zooms_a_view_on_its_window() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| c.mode = CameraMode::FirstPerson);
+        let window = window(&mut app);
+        let wheel = |window| MouseWheel {
+            unit: MouseScrollUnit::Pixel,
+            x: 0.0,
+            y: -100.0,
+            window,
+            phase: TouchPhase::Moved,
+        };
+        app.world_mut().write_message(wheel(Entity::PLACEHOLDER));
+        app.update();
+        assert_eq!(controls(&app, id, |c| c.look.offsets.zoom), 1.0);
+
+        app.world_mut().write_message(wheel(window));
+        app.update();
+        let delta = dom_wheel_delta(-100.0, MouseScrollUnit::Pixel, SCALE);
+        let mut expected = ViewOffsets::default();
+        apply_zoom(
+            wheel_zoom_factor(delta, MouseScrollUnit::Pixel),
+            &mut expected,
+        );
+        assert_eq!(controls(&app, id, |c| c.look.offsets.zoom), expected.zoom);
+        assert_ne!(expected.zoom, 1.0);
+    }
+
+    #[test]
+    fn a_key_pressed_for_a_shortcut_stays_ignored_until_pressed_again() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| c.mode = CameraMode::FirstPerson);
+        let moving = |app: &App| controls(app, id, Controls::take_intent).dir != [0.0, 0.0];
+
+        key(&mut app, KeyCode::KeyW, ButtonState::Pressed);
+        key(&mut app, KeyCode::SuperLeft, ButtonState::Pressed);
+        key(&mut app, KeyCode::KeyA, ButtonState::Pressed);
+        app.update();
+        // W went down before cmd, so it still moves; A, cmd+A, doesn't.
+        let intent = controls(&app, id, Controls::take_intent);
+        assert!((Vec2::from(intent.dir) - Vec2::new(0.0, -1.0)).length() < 1e-5);
+        key(&mut app, KeyCode::KeyW, ButtonState::Released);
+
+        // macOS sends no keyup for A, so it stays held after cmd comes up.
+        key(&mut app, KeyCode::SuperLeft, ButtonState::Released);
+        app.update();
+        assert!(!moving(&app));
+
+        key(&mut app, KeyCode::KeyA, ButtonState::Pressed);
+        app.update();
+        assert!(moving(&app));
+
+        key(&mut app, KeyCode::AltLeft, ButtonState::Pressed);
+        key(&mut app, KeyCode::KeyD, ButtonState::Pressed);
+        key(&mut app, KeyCode::KeyA, ButtonState::Released);
+        app.update();
+        assert!(!moving(&app));
     }
 
     #[test]
