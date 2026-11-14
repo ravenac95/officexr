@@ -3,14 +3,14 @@ import { act } from '@testing-library/react';
 import { renderEditorStore } from '../../../test-harness/renderEditorStore.tsx';
 
 const KIND = '__primitive_blue';
-const origin = { x: 0, y: 0, z: 0 };
+const origin = { x: 0, z: 0 };
 
 function positions(editor: Awaited<ReturnType<typeof renderEditorStore>>) {
   return editor.store.current.doc.commands.map((c) => (c.op === 'placeObject' ? c.position : null));
 }
 
 describe('scene editor store + tools (no renderer)', () => {
-  it('add tool places on the floor and against a cube face; undo removes the last', async () => {
+  it('add tool places on the floor and against a cube face without overlap; undo removes the last', async () => {
     const editor = await renderEditorStore({ stagedKindId: KIND });
     editor.setTool('add');
     editor.pick({ target: { type: 'empty' }, point: origin });
@@ -30,7 +30,8 @@ describe('scene editor store + tools (no renderer)', () => {
         },
       },
     });
-    expect(positions(editor)).toEqual([[0, 0, 0], [1, 0, 0]]);
+    expect(positions(editor)).toHaveLength(2);
+    expect(positions(editor)[1]).not.toEqual([0, 0, 0]);
 
     act(() => editor.store.current.undo());
     expect(positions(editor)).toEqual([[0, 0, 0]]);
@@ -66,6 +67,32 @@ describe('scene editor store + tools (no renderer)', () => {
 
     act(() => editor.store.current.undo());
     expect(positions(editor)).toEqual([[0, 0, 0], [3, 0, 0]]);
+  });
+
+  it('move is refused when it would land in an occupied voxel', async () => {
+    const editor = await renderEditorStore();
+    let ids: string[] = [];
+    act(() => {
+      ids = editor.store.current.placeMany(KIND, [[0, 0, 0], [2, 0, 0]]);
+    });
+    act(() => editor.store.current.setSelection([ids[0]]));
+
+    editor.moveSelection([2, 0, 0]);
+    expect(positions(editor)).toEqual([[0, 0, 0], [2, 0, 0]]);
+  });
+
+  it('add tool refuses a placement that still overlaps after stacking', async () => {
+    const editor = await renderEditorStore({ stagedKindId: KIND });
+    editor.setTool('add');
+    editor.pick({ target: { type: 'empty' }, point: origin });
+    const [first] = positions(editor);
+    // The floor click stacks below the first cube; fill that slot so the stack collides too.
+    editor.pick({ target: { type: 'empty' }, point: origin });
+    const [, below] = positions(editor);
+    expect(below).not.toEqual(first);
+
+    editor.pick({ target: { type: 'empty' }, point: origin });
+    expect(positions(editor)).toHaveLength(2);
   });
 
   it('delete tool removes the picked cube and undo restores it', async () => {

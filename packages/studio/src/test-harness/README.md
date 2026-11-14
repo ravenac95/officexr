@@ -8,14 +8,17 @@ the integration-test roadmap.
 
 - **`createTestApi()`** — composes an `ApplicationApi` via the
   production `createDefaultApi` with `apiPath: ''` (bundled default
-  catalog, no `/api/world-object-kinds` fetch) and a no-op GLTF loader.
+  catalog, no `/api/world-object-kinds` fetch) and the default bake loader, which throws if a test triggers a bake
+  (pass `loadGltf` to opt in).
 - **`StudioHarness`** — wraps children in an `<ApplicationProvider>`
   built from `createTestApi()`. Use as the `wrapper` for `renderHook`
   on any hook that reads `useApplication` (e.g. `useRoomDocument`,
   `useLayoutDocument`).
 - **`renderEditorStore({ stagedKindId? })`** — headless scene editor: the
   Room document store plus tool dispatch, no renderer. Drive it with
-  `setTool`, `pick({ target, point })` and `moveSelection(delta)`.
+  `setTool`, `setBuildHeight`, `pick({ target, point })` and
+  `moveSelection(delta)`. Placement and move occupancy use the same pure
+  functions as the canvas (`resolvePlacement`, `checkMoveOccupancy`).
 - **`seeds/`** — fixture documents (`emptyMapSeed`, `simpleRoomSeed`,
   `twoRoomMapSeed`). Pair with an `InMemory*Storage` (from
   `@officexr/world/scenes`) to seed a hook hermetically.
@@ -40,7 +43,7 @@ with picks expressed as data, no renderer:
 ```ts
 const editor = await renderEditorStore({ stagedKindId: '__primitive_blue' });
 editor.setTool('add');
-editor.pick({ target: { type: 'empty' }, point: { x: 0, y: 0, z: 0 } });
+editor.pick({ target: { type: 'empty' }, point: { x: 0, z: 0 } });
 ```
 
 Use primitive kinds (`__primitive_blue` / `__primitive_stone`) in
@@ -59,8 +62,9 @@ its own r3f harness next to it.
 | E cross-hook desync | `useRoomDocument` (setLayoutName), `useLayoutDocument` (optimizer) |
 | F implicit gating | `mapPointerActions` unit + `MapApp.scenarios` (litmus) |
 
-Tier-3 scenarios currently focus on the Map editor (the c606f10 class).
-Room tile-grouping is covered at Tier 2; the Object-editor Leva
+Tier-3 scenarios: `scene-editor/__tests__/editorStore.test.tsx` covers
+placement, selection, move, delete and undo through `renderEditorStore`;
+`MapApp.scenarios` covers the Map editor (the c606f10 class). Room tile-grouping is covered at Tier 2; the Object-editor Leva
 kind-switch (a DOM concern, not a scene-graph one) is covered by the
 existing `object-editor.spec.ts` at Tier 4.
 

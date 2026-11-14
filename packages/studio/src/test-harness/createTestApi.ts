@@ -3,8 +3,9 @@ import type { ApplicationApi } from '@officexr/world/app';
 import type { GltfLoader } from '@officexr/world/app';
 
 export interface CreateTestApiOptions {
-  /** GLTF loader the BakeService uses. Defaults to one that rejects;
-   *  pass a loader only if a test asserts on bake output. */
+  /** GLTF loader the BakeService uses. When omitted, `createDefaultApi`
+   *  installs one that throws on use; pass a loader only if a test
+   *  asserts on bake output. */
   loadGltf?: GltfLoader;
 }
 
@@ -20,6 +21,6 @@ export interface CreateTestApiOptions {
 export function createTestApi(opts: CreateTestApiOptions = {}): ApplicationApi {
   return createDefaultApi({
     apiPath: '',
-    loadGltf: opts.loadGltf ?? (() => Promise.reject(new Error('createTestApi: no loadGltf provided'))),
+    loadGltf: opts.loadGltf,
   });
 }
