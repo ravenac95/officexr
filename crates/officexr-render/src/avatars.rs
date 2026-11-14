@@ -194,6 +194,7 @@ pub(crate) fn plugin(app: &mut App) {
             Update,
             (build_graph, sync_avatars, bind_avatars, animate, place_tags)
                 .chain()
+                .in_set(crate::views::SceneSystems)
                 .after(crate::views::mirror_resources),
         )
         .add_observer(despawn_tag);
@@ -243,19 +244,20 @@ fn build_graph(
 
 fn sync_avatars(
     mut commands: Commands,
-    views: Query<(Entity, &ViewPlayers), Changed<ViewPlayers>>,
+    views: Query<(Entity, &View, &ViewPlayers), Changed<ViewPlayers>>,
     base: Res<AssetBase>,
     assets: Res<AssetServer>,
     mut avatars: Query<(Entity, &Avatar, &mut Transform, &ChildOf)>,
 ) {
-    for (view, players) in &views {
+    for (entity, view, players) in &views {
+        let view = (entity, view.camera);
         sync_view_avatars(&mut commands, view, players, &base, &assets, &mut avatars);
     }
 }
 
 fn sync_view_avatars(
     commands: &mut Commands,
-    view: Entity,
+    (view, camera): (Entity, Option<Entity>),
     players: &Players,
     base: &AssetBase,
     assets: &AssetServer,
@@ -282,20 +284,22 @@ fn sync_view_avatars(
             *t = transform;
             continue;
         }
-        let tag = commands
-            .spawn((
-                NameTag,
-                Text::new(p.name.clone()),
-                TextFont::from_font_size(14.0),
-                Node {
-                    position_type: PositionType::Absolute,
-                    padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
-                Visibility::Hidden,
-            ))
-            .id();
+        let mut tag = commands.spawn((
+            NameTag,
+            Text::new(p.name.clone()),
+            TextFont::from_font_size(14.0),
+            Node {
+                position_type: PositionType::Absolute,
+                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
+            Visibility::Hidden,
+        ));
+        if let Some(camera) = camera {
+            tag.insert(UiTargetCamera(camera));
+        }
+        let tag = tag.id();
         let path = base.asset_path(&format!("/models/characters/{}.glb", p.character));
         // ponytail: no bind-pose foot anchor; every KayKit character's lowest vertex is within 2 mm of y=0.
         commands.spawn((
@@ -449,7 +453,7 @@ fn place_tags(
             &mut Node,
             &mut Visibility,
             &ComputedNode,
-            Option<&UiTargetCamera>,
+            Has<UiTargetCamera>,
         ),
         With<NameTag>,
     >,
@@ -466,7 +470,8 @@ fn place_tags(
         let Ok((mut node, mut visibility, computed, target)) = tags.get_mut(avatar.tag) else {
             continue;
         };
-        if target.is_none_or(|t| t.0 != camera_entity) {
+        // An avatar spawned before its view's camera.
+        if !target {
             commands
                 .entity(avatar.tag)
                 .insert(UiTargetCamera(camera_entity));

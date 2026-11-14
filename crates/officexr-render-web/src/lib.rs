@@ -2,11 +2,13 @@
 //! `init` once, then `createView` per canvas and `setWorld`, `setCamera`
 //! and `setPlayers` on each.
 //!
-//! With WebGPU each view is a Bevy window on its canvas. WebGL2 can't do
-//! that: wgpu's GL backend binds the device to the first canvas's context,
-//! so a second window draws into the first canvas. There every view renders
-//! to an image instead, read back each frame and painted into its canvas,
-//! and Bevy's own window sits on a hidden 1 px host canvas.
+//! A view on the canvas given to `init` draws straight into Bevy's primary
+//! window. With WebGPU every other view is a Bevy window on its own canvas.
+//! WebGL2 can't do that: wgpu's GL backend binds the device to the primary
+//! canvas's context, so a second window draws into the first canvas. There
+//! each other view renders to an image, read back each frame and painted
+//! into its canvas; without a primary canvas, Bevy's window sits on a
+//! hidden 1 px host canvas.
 #![cfg(target_arch = "wasm32")]
 
 #[cfg(not(any(feature = "webgpu", feature = "webgl2")))]
@@ -27,6 +29,8 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 static HUB: OnceLock<ViewHub> = OnceLock::new();
+/// Marks the canvas Bevy's primary window draws into.
+const PRIMARY_ATTR: &str = "data-officexr-primary";
 
 #[wasm_bindgen]
 extern "C" {
@@ -34,6 +38,8 @@ extern "C" {
     type Canvas;
     #[wasm_bindgen(method, js_name = setAttribute)]
     fn set_attribute(this: &Canvas, name: &str, value: &str);
+    #[wasm_bindgen(method, js_name = hasAttribute)]
+    fn has_attribute(this: &Canvas, name: &str) -> bool;
     #[wasm_bindgen(js_namespace = document, js_name = querySelector)]
     fn query_selector(selector: &str) -> JsValue;
 }
@@ -104,18 +110,40 @@ fn status(id: ViewId) -> Result<ViewStatus, JsError> {
     hub()?.status(id).ok_or_else(|| no_view(id))
 }
 
-/// Boots Bevy once; `origin` serves `/models/...`.
+/// A canvas element, or the canvas a selector matches.
+fn resolve_canvas(canvas: JsValue) -> Result<Canvas, JsError> {
+    let canvas = match canvas.as_string() {
+        Some(selector) => query_selector(&selector),
+        None => canvas,
+    };
+    canvas
+        .dyn_into()
+        .map_err(|_| js_err("expected a canvas element or a selector matching one"))
+}
+
+/// Boots Bevy once; `origin` serves `/models/...`. A view later created on
+/// `primary_canvas` draws into Bevy's primary window directly.
 #[wasm_bindgen]
-pub fn init(origin: String) {
+pub fn init(origin: String, primary_canvas: JsValue) -> Result<(), JsError> {
     if HUB.get().is_some() {
-        return;
+        return Ok(());
     }
+    let primary_window = if primary_canvas.is_undefined() || primary_canvas.is_null() {
+        host_window()
+    } else {
+        resolve_canvas(primary_canvas)?.set_attribute(PRIMARY_ATTR, "");
+        Some(Window {
+            canvas: Some(format!("canvas[{PRIMARY_ATTR}]")),
+            fit_canvas_to_parent: true,
+            ..default()
+        })
+    };
     let mut app = App::new();
     app.add_plugins((
         AssetBase::Http(origin),
         DefaultPlugins
             .set(WindowPlugin {
-                primary_window: host_window(),
+                primary_window,
                 exit_condition: ExitCondition::DontExit,
                 ..default()
             })
@@ -130,6 +158,7 @@ pub fn init(origin: String) {
     image_views::add(&mut app);
     let _ = HUB.set(app.world().resource::<ViewHub>().clone());
     app.run();
+    Ok(())
 }
 
 #[cfg(feature = "webgpu")]
@@ -155,14 +184,11 @@ pub fn create_view(canvas: JsValue, kind: &str) -> Result<ViewId, JsError> {
         "preview" => ViewKind::Preview,
         _ => return Err(js_err(format!("unknown view kind {kind:?}"))),
     };
-    let canvas = match canvas.as_string() {
-        Some(selector) => query_selector(&selector),
-        None => canvas,
-    };
-    let canvas: Canvas = canvas
-        .dyn_into()
-        .map_err(|_| js_err("expected a canvas element or a selector matching one"))?;
+    let canvas = resolve_canvas(canvas)?;
     Ok(hub()?.create(kind, |id| {
+        if canvas.has_attribute(PRIMARY_ATTR) {
+            return ViewTarget::PrimaryWindow;
+        }
         canvas.set_attribute("data-officexr-view", &id.to_string());
         target(id, canvas)
     }))
@@ -178,7 +204,7 @@ fn target(id: ViewId, canvas: Canvas) -> ViewTarget {
     ViewTarget::Image(image_views::register(id, canvas))
 }
 
-/// Despawns the view's window, camera and scene.
+/// Despawns the view's window, camera and scene; Bevy's primary window stays, idle.
 #[wasm_bindgen(js_name = destroyView)]
 pub fn destroy_view(id: ViewId) -> Result<(), JsError> {
     send(id, ViewMsg::Destroy)?;
@@ -269,15 +295,14 @@ mod image_views {
 
     use bevy::prelude::*;
     use bevy::render::gpu_readback::ReadbackComplete;
-    use officexr_render::views::{View, ViewHub, ViewId, ViewMsg};
+    use bevy::render::renderer::RenderDevice;
+    use officexr_render::views::{View, ViewId, ViewMsg};
     use wasm_bindgen::Clamped;
     use wasm_bindgen::prelude::*;
 
-    use super::Canvas;
+    use super::{Canvas, HUB};
 
     const HOST_ID: &str = "officexr-render-host";
-    /// wgpu's `COPY_BYTES_PER_ROW_ALIGNMENT`.
-    const ROW_ALIGNMENT: usize = 256;
 
     #[wasm_bindgen]
     extern "C" {
@@ -289,31 +314,60 @@ mod image_views {
         fn width(this: &Canvas) -> u32;
         #[wasm_bindgen(method, setter)]
         fn set_width(this: &Canvas, width: u32);
-        #[wasm_bindgen(method, setter)]
-        fn set_height(this: &Canvas, height: u32);
         #[wasm_bindgen(method, getter)]
         fn height(this: &Canvas) -> u32;
+        #[wasm_bindgen(method, setter)]
+        fn set_height(this: &Canvas, height: u32);
         #[wasm_bindgen(method, js_name = getContext)]
         fn get_context(this: &Canvas, kind: &str) -> Context2d;
         #[wasm_bindgen(js_namespace = document, js_name = createElement)]
         fn create_element(tag: &str) -> Canvas;
         #[wasm_bindgen(js_namespace = ["document", "body"], js_name = append)]
         fn append_to_body(node: &Canvas);
-        #[wasm_bindgen(js_name = devicePixelRatio, thread_local_v2)]
-        static DEVICE_PIXEL_RATIO: f64;
+
+        type Global;
+        #[wasm_bindgen(thread_local_v2, js_name = globalThis)]
+        static GLOBAL: Global;
+        #[wasm_bindgen(method, getter, js_name = devicePixelRatio)]
+        fn device_pixel_ratio(this: &Global) -> f64;
+
+        type ResizeObserver;
+        #[wasm_bindgen(constructor)]
+        fn new(callback: &Closure<dyn FnMut()>) -> ResizeObserver;
+        #[wasm_bindgen(method)]
+        fn observe(this: &ResizeObserver, target: &Canvas);
+        #[wasm_bindgen(method)]
+        fn disconnect(this: &ResizeObserver);
 
         type Context2d;
         #[wasm_bindgen(method, js_name = putImageData)]
-        fn put_image_data(this: &Context2d, data: &ImageData, x: f64, y: f64);
+        #[allow(clippy::too_many_arguments)]
+        fn put_image_data(
+            this: &Context2d,
+            data: &ImageData,
+            x: f64,
+            y: f64,
+            dirty_x: f64,
+            dirty_y: f64,
+            dirty_width: f64,
+            dirty_height: f64,
+        );
 
         type ImageData;
         #[wasm_bindgen(constructor, catch)]
         fn new(data: Clamped<&[u8]>, width: u32, height: u32) -> Result<ImageData, JsValue>;
     }
 
+    struct ImageView {
+        canvas: Canvas,
+        /// The size last asked of the view.
+        size: UVec2,
+        observer: ResizeObserver,
+        _on_resize: Closure<dyn FnMut()>,
+    }
+
     thread_local! {
-        /// Each image view's canvas and the size last asked of it.
-        static CANVASES: RefCell<HashMap<ViewId, (Canvas, UVec2)>> = RefCell::default();
+        static VIEWS: RefCell<HashMap<ViewId, ImageView>> = RefCell::default();
     }
 
     pub(super) fn host_canvas() -> String {
@@ -328,70 +382,83 @@ mod image_views {
     }
 
     fn css_size(canvas: &Canvas) -> UVec2 {
-        let ratio = DEVICE_PIXEL_RATIO.with(|r| *r);
+        let ratio = GLOBAL.with(Global::device_pixel_ratio);
         UVec2::new(
             (canvas.client_width() * ratio).round() as u32,
             (canvas.client_height() * ratio).round() as u32,
         )
     }
 
+    /// Sizes the view's image to its canvas's CSS size whenever that
+    /// changes; a hidden canvas pauses the view.
+    // ponytail: a devicePixelRatio change alone (browser zoom) isn't seen until the canvas resizes.
     pub(super) fn register(id: ViewId, canvas: Canvas) -> UVec2 {
         let size = css_size(&canvas);
-        CANVASES.with(|c| c.borrow_mut().insert(id, (canvas, size)));
+        let on_resize = Closure::<dyn FnMut()>::new(move || {
+            VIEWS.with(|views| {
+                let mut views = views.borrow_mut();
+                let Some(view) = views.get_mut(&id) else {
+                    return;
+                };
+                let size = css_size(&view.canvas);
+                if size != view.size
+                    && let Some(hub) = HUB.get()
+                {
+                    view.size = size;
+                    hub.send(id, ViewMsg::Resize(size));
+                }
+            });
+        });
+        let observer = ResizeObserver::new(&on_resize);
+        observer.observe(&canvas);
+        let view = ImageView {
+            canvas,
+            size,
+            observer,
+            _on_resize: on_resize,
+        };
+        VIEWS.with(|views| views.borrow_mut().insert(id, view));
         size
     }
 
     pub(super) fn unregister(id: ViewId) {
-        CANVASES.with(|c| c.borrow_mut().remove(&id));
+        if let Some(view) = VIEWS.with(|views| views.borrow_mut().remove(&id)) {
+            view.observer.disconnect();
+        }
     }
 
     pub(super) fn add(app: &mut App) {
-        app.add_systems(First, follow_css_size).add_observer(paint);
+        app.add_observer(paint);
     }
 
-    /// Resizes each view's image to its canvas's CSS size; a hidden canvas pauses it.
-    fn follow_css_size(hub: Res<ViewHub>) {
-        CANVASES.with(|c| {
-            for (id, (canvas, last)) in c.borrow_mut().iter_mut() {
-                let size = css_size(canvas);
-                if size != *last {
-                    *last = size;
-                    hub.send(*id, ViewMsg::Resize(size));
-                }
-            }
-        });
-    }
-
-    /// Copies a view's read-back image, minus wgpu's row padding, into its canvas.
+    /// Paints a view's read-back image into its canvas.
     fn paint(frame: On<ReadbackComplete>, views: Query<&View>) {
         let Ok(view) = views.get(frame.entity) else {
             return;
         };
-        CANVASES.with(|c| {
-            let canvases = c.borrow();
-            let Some((canvas, size)) = canvases.get(&view.id) else {
+        VIEWS.with(|views| {
+            let views = views.borrow();
+            let Some(ImageView { canvas, size, .. }) = views.get(&view.id) else {
                 return;
             };
-            let (width, height) = (size.x as usize, size.y as usize);
-            let stride = (width * 4).next_multiple_of(ROW_ALIGNMENT);
+            let stride = RenderDevice::align_copy_bytes_per_row(size.x as usize * 4);
             // Zero-sized, or read back before the last resize.
-            if width == 0 || frame.data.len() != stride * height {
+            if size.x == 0 || size.y == 0 || frame.data.len() != stride * size.y as usize {
                 return;
             }
-            let pixels: Vec<u8> = frame
-                .data
-                .chunks_exact(stride)
-                .flat_map(|row| &row[..width * 4])
-                .copied()
-                .collect();
-            let Ok(image) = ImageData::new(Clamped(&pixels), size.x, size.y) else {
-                return;
-            };
             if canvas.width() != size.x || canvas.height() != size.y {
                 canvas.set_width(size.x);
                 canvas.set_height(size.y);
             }
-            canvas.get_context("2d").put_image_data(&image, 0.0, 0.0);
+            let context = canvas.get_context("2d");
+            // A view into wasm memory, not a copy, so nothing may allocate before
+            // `putImageData` copies it out. It is as wide as the padded rows; the
+            // dirty rect leaves the padding out.
+            let Ok(image) = ImageData::new(Clamped(&frame.data), stride as u32 / 4, size.y) else {
+                return;
+            };
+            let (w, h) = (size.x as f64, size.y as f64);
+            context.put_image_data(&image, 0.0, 0.0, 0.0, 0.0, w, h);
         });
     }
 }

@@ -33,11 +33,14 @@ const FAR = 2000;
 
 let booted: Promise<RendererModule> | null = null;
 
-/** Bevy owns its event loop for the page's lifetime, so it boots once. */
-function bootBevy(): Promise<RendererModule> {
+/**
+ * Bevy owns its event loop for the page's lifetime, so it boots once, with the first caller's
+ * `primary` canvas, if any, as its primary window.
+ */
+function bootBevy(primary?: HTMLCanvasElement): Promise<RendererModule> {
   booted ??= loadRenderer().then((wasm) => {
     const origin = modelUrl('/models/').replace(/\/models\/$/, '') || window.location.origin;
-    wasm.init(origin);
+    wasm.init(origin, primary);
     return wasm;
   });
   return booted;
@@ -49,10 +52,13 @@ const canvasStyle: React.CSSProperties = { display: 'block', width: '100%', heig
 function BevyCanvas({
   id,
   kind,
+  primary = false,
   onView,
 }: {
   id: string;
   kind: ViewKind;
+  /** Draws into Bevy's primary window; mount it before the page's other canvases. */
+  primary?: boolean;
   onView: (wasm: RendererModule, view: ViewId) => (() => void) | void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -60,7 +66,7 @@ function BevyCanvas({
     let cancelled = false;
     let cleanup: (() => void) | void;
     let view: ViewId | null = null;
-    void bootBevy().then((wasm) => {
+    void bootBevy(primary && canvas.current ? canvas.current : undefined).then((wasm) => {
       if (cancelled || !canvas.current) {
         return;
       }
@@ -130,19 +136,20 @@ export function BevyPage({ mugshot, views }: { mugshot: string | null; views: nu
             : { position: 'absolute', inset: 0 }
         }
       >
-        {mugshot ? <MugshotFeed id="bevy-canvas" character={mugshot} /> : <StoreFeed id="bevy-canvas" />}
+        {mugshot ? <MugshotFeed id="bevy-canvas" character={mugshot} primary /> : <StoreFeed id="bevy-canvas" />}
       </div>
     </div>
   );
 }
 
 /** As `bevy-mugshot-diff.spec.ts`: the Mugshot mode's fixed camera at azimuth 180°. */
-function MugshotFeed({ id, character }: { id: string; character: string }) {
+function MugshotFeed({ id, character, primary = false }: { id: string; character: string; primary?: boolean }) {
   const { catalog } = useApplication();
   return (
     <BevyCanvas
       id={id}
       kind="preview"
+      primary={primary}
       onView={(wasm, view) => {
         const instances = cubesForMode('gltf');
         const kindIds = new Set(instances.map((i) => i.kindId));
@@ -229,7 +236,7 @@ function StoreFeed({ id }: { id: string }) {
     };
   }, [bevy, loaded, local]);
 
-  return <BevyCanvas id={id} kind="world" onView={(wasm, view) => setBevy({ wasm, view })} />;
+  return <BevyCanvas id={id} kind="world" primary onView={(wasm, view) => setBevy({ wasm, view })} />;
 }
 
 const layoutPlacement = (p: BakedLayout) => ({

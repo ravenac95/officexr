@@ -17,11 +17,14 @@ export interface CameraPose {
 }
 
 /**
- * A `setWorld` update. `kinds` and `objects.instances` are upserted by id, `remove` drops objects by
- * id, and every other field present replaces the view's. A full scene is a valid diff; a view's first
- * diff must carry `lighting` and `background`.
+ * A `setWorld` update, applied in order: `replace` clears the kinds and objects, `remove` drops objects
+ * by id, then `kinds` and `objects.instances` are upserted by id. Kinds are only ever dropped by
+ * `replace`. Every other field present replaces the view's. A full scene is a valid diff; a view's
+ * first diff must carry `lighting` and `background`.
  */
 export interface WorldDiff {
+  /** Clears the view's kinds and objects first. */
+  replace?: boolean;
   kinds?: unknown[];
   objects?: { instances: unknown[]; cubeSize?: number };
   remove?: string[];
@@ -34,11 +37,14 @@ export interface WorldDiff {
 
 /** The wasm-bindgen module of one backend, already instantiated by `loadRenderer`. */
 export interface RendererModule {
-  /** Boots Bevy once, loading models from `origin`. */
-  init(origin: string): void;
+  /**
+   * Boots Bevy once, loading models from `origin`. A view later created on `primaryCanvas` draws into
+   * Bevy's primary window directly; with WebGL2 every other view is read back and copied into its canvas.
+   */
+  init(origin: string, primaryCanvas?: HTMLCanvasElement | string): void;
   /** A view drawing into `canvas` (an element, or a selector matching one). */
   createView(canvas: HTMLCanvasElement | string, kind: ViewKind): ViewId;
-  /** Despawns the view's window, camera and scene, freeing its canvas for another view. */
+  /** Despawns the view's window, camera and scene, freeing its canvas for another view. The primary canvas keeps Bevy's window, idle. */
   destroyView(id: ViewId): void;
   /** `diffJson` is a `WorldDiff`; with `mugshot`, that character is settled on its objects and drawn paused. */
   setWorld(id: ViewId, diffJson: string, mugshot?: string | null): void;

@@ -94,7 +94,8 @@ async function renderBrowser(page: Page, scene: string, file: string, position: 
         __officexrBevyViews: number[];
       };
       const view = w.__officexrBevyViews[0];
-      w.__officexrBevy.setWorld(view, json, character);
+      // Replace, not upsert, so the page's own mugshot cubes don't stay underneath.
+      w.__officexrBevy.setWorld(view, JSON.stringify({ ...JSON.parse(json), replace: true }), character);
       w.__officexrBevy.setCamera(view, camera);
     },
     [

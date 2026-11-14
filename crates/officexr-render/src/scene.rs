@@ -23,12 +23,16 @@ pub struct WorldSceneData {
     pub clear_color: Option<Color>,
 }
 
-/// An update to a view's scene. `kinds` and `objects.instances` are upserted
-/// by id, `remove` drops objects by id, and every other field present
-/// replaces the scene's. A full scene is a valid diff.
+/// An update to a view's scene. `replace` first clears its kinds and
+/// objects, then `remove` drops objects by id, then `kinds` and
+/// `objects.instances` are upserted by id; kinds are never dropped
+/// otherwise. Every other field present replaces the scene's. A full scene
+/// is a valid diff.
 #[derive(Deserialize, Default, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct WorldDiff {
+    #[serde(default)]
+    pub replace: bool,
     pub kinds: Option<Vec<WorldObjectKind>>,
     pub objects: Option<WorldObjects>,
     #[serde(default)]
@@ -60,6 +64,10 @@ impl WorldDiff {
             },
             (None, ..) => return None,
         };
+        if self.replace {
+            scene.kinds.clear();
+            scene.objects.instances.clear();
+        }
         upsert(&mut scene.kinds, self.kinds, |k| &k.id);
         let instances = &mut scene.objects.instances;
         instances.retain(|i| !self.remove.contains(&i.id));
@@ -278,6 +286,29 @@ mod tests {
             .unwrap();
         assert_eq!(scene.objects.instances.len(), count);
         assert_eq!(scene.clear_color, None);
+    }
+
+    #[test]
+    fn a_replacing_diff_drops_the_old_objects_and_kinds() {
+        let full: WorldDiff =
+            serde_json::from_str(include_str!("../examples/booper.scene.json")).unwrap();
+        let scene = full.apply(None).unwrap();
+        assert!(!scene.kinds.is_empty());
+
+        let scene = diff(serde_json::json!({
+            "replace": true,
+            "objects": {"instances": [{"id": "only", "kindId": "k", "position": [0, 0, 0]}]},
+        }))
+        .apply(Some(scene))
+        .unwrap();
+        let ids: Vec<_> = scene
+            .objects
+            .instances
+            .iter()
+            .map(|i| i.id.as_str())
+            .collect();
+        assert_eq!(ids, ["only"]);
+        assert!(scene.kinds.is_empty());
     }
 
     #[test]

@@ -1,6 +1,7 @@
 /** `?op=bevy`: the studio boots `crates/officexr-render-web` on the current map. */
 
 import { test, expect } from '@playwright/test';
+import { PNG } from 'pngjs';
 import { forceWebgl2 } from './helpers.ts';
 
 test('op=bevy boots the Bevy renderer', async ({ page }) => {
@@ -31,36 +32,36 @@ test('op=bevy&views=2 draws two live canvases from one Bevy app', async ({ page 
   );
   await Promise.race([ready, pageError]);
   expect(await page.evaluate(() => (window as { __officexrBevyViews?: number[] }).__officexrBevyViews?.length)).toBe(2);
-  // WebGL2 views are painted into 2D canvases a few slow SwiftShader frames after they report
-  // ready; reading them back beats element screenshots, which wait on a compositor frame.
-  const pixels = () =>
-    page.evaluate(() => {
-      const [left, right] = ['bevy-canvas', 'bevy-canvas-2'].map((id) => {
-        const c = document.getElementById(id) as HTMLCanvasElement;
-        return c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
-      });
-      const colours = (d: Uint8ClampedArray) => {
-        const seen = new Set<number>();
-        for (let i = 0; i < d.length; i += 4) {
-          seen.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]);
-        }
-        return seen.size;
-      };
-      let differing = 0;
-      for (let i = 0; i < left.length; i += 4) {
-        if (left[i] !== right[i] || left[i + 1] !== right[i + 1] || left[i + 2] !== right[i + 2]) {
-          differing++;
+  // The left view draws into Bevy's WebGL2 window; the right one is read back a few slow
+  // SwiftShader frames after it reports ready. A page screenshot sees both as composited.
+  const boxes = await page.evaluate(() =>
+    ['bevy-canvas', 'bevy-canvas-2'].map((id) => document.getElementById(id)!.getBoundingClientRect().toJSON() as DOMRect),
+  );
+  const pixels = async () => {
+    const shot = PNG.sync.read(await page.screenshot({ timeout: 120_000 }));
+    const [left, right] = boxes.map((box) => {
+      const out: number[] = [];
+      for (let y = Math.ceil(box.y); y < Math.floor(box.y + box.height); y++) {
+        for (let x = Math.ceil(box.x); x < Math.floor(box.x + box.width); x++) {
+          out.push(shot.data.readUInt32BE((y * shot.width + x) * 4));
         }
       }
-      return { sameSize: left.length === right.length, colours: [colours(left), colours(right)], differing: (differing * 4) / left.length };
+      return out;
     });
+    const differing = left.filter((p, i) => p !== right[i]).length;
+    return {
+      sameSize: left.length === right.length,
+      colours: [new Set(left).size, new Set(right).size],
+      differing: differing / left.length,
+    };
+  };
   await expect
     .poll(
       async () => {
         const { sameSize, colours, differing } = await pixels();
         return sameSize && colours[0] > 16 && colours[1] > 16 && differing > 0.2;
       },
-      { timeout: 240_000, intervals: [2_000] },
+      { timeout: 300_000, intervals: [2_000] },
     )
     .toBe(true);
 });

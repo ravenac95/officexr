@@ -166,6 +166,7 @@ fn scene_systems(app: &mut App) {
                 (spawn_camera, sky::sync_background).chain(),
             )
                 .chain()
+                .in_set(views::SceneSystems)
                 .after(views::mirror_resources),
         );
 }

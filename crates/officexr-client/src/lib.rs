@@ -25,6 +25,7 @@ mod world;
 use bevy::asset::AssetMetaCheck;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+use officexr_render::views::SceneSystems;
 use officexr_render::{AssetBase, OfficeXrRenderPlugin, Players};
 
 #[cfg(target_os = "ios")]
@@ -75,7 +76,8 @@ pub fn main() {
             camera::orbit_camera,
             screenshot_and_exit,
         )
-            .chain(),
+            .chain()
+            .before(SceneSystems),
     )
     .run();
 }

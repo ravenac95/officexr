@@ -122,6 +122,7 @@ fn sync_lights(
 ) {
     let sun = Vec3::from(l.sun_position);
     let at_sun = Transform::from_translation(sun).looking_at(Vec3::ZERO, Vec3::Y);
+    // ponytail: the shadow map size is app-wide; the view re-lit last sets it for all.
     commands.insert_resource(DirectionalLightShadowMap {
         size: l.shadow_map_size as usize,
     });
@@ -270,13 +271,18 @@ fn sun_cascade(rotation: Quat, focus: Vec3, l: &LightingConfig) -> Cascade {
 }
 
 pub(crate) fn plugin(app: &mut App) {
-    app.add_systems(Update, sync_lighting.after(crate::views::mirror_resources))
-        .add_systems(
-            PostUpdate,
-            fit_sun_shadow
-                .after(SimulationLightSystems::UpdateDirectionalLightCascades)
-                .before(SimulationLightSystems::UpdateLightFrusta),
-        );
+    app.add_systems(
+        Update,
+        sync_lighting
+            .in_set(crate::views::SceneSystems)
+            .after(crate::views::mirror_resources),
+    )
+    .add_systems(
+        PostUpdate,
+        fit_sun_shadow
+            .after(SimulationLightSystems::UpdateDirectionalLightCascades)
+            .before(SimulationLightSystems::UpdateLightFrusta),
+    );
 }
 
 #[cfg(test)]

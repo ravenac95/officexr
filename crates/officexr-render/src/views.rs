@@ -2,7 +2,7 @@
 //! `RenderLayers`, and driven through a [`ViewHub`] that any thread can feed.
 //!
 //! The [`WorldSceneData`], [`SceneCamera`] and [`Players`] resources, when
-//! present, drive the primary view (id 0) on the default render target.
+//! present, drive the primary view (id 0, layer 0) on the default render target.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -13,7 +13,7 @@ use bevy::camera::{ImageRenderTarget, RenderTarget};
 use bevy::prelude::*;
 use bevy::render::gpu_readback::Readback;
 use bevy::render::render_resource::{Extent3d, TextureFormat, TextureUsages};
-use bevy::window::{WindowOccluded, WindowRef};
+use bevy::window::{PrimaryWindow, WindowOccluded, WindowRef};
 
 use crate::avatars::Bound;
 use crate::lighting::ObjectMaterial;
@@ -35,6 +35,8 @@ pub enum ViewKind {
 }
 
 pub enum ViewTarget {
+    /// Bevy's primary window. Destroying the view leaves the window, idle.
+    PrimaryWindow,
     /// A window on the canvas this selector matches.
     Window(String),
     /// An image of this physical size, read back every frame; zero pauses the view.
@@ -107,9 +109,17 @@ impl ViewHub {
     }
 }
 
+/// Mirroring the resources into the primary view, then every system that
+/// turns views into entities. Order systems that change those resources
+/// before it to draw the change the same frame.
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SceneSystems;
+
 #[derive(Component)]
 pub struct View {
     pub id: ViewId,
+    /// The lowest render layer free when the view was made, so layers stay few.
+    layer: usize,
     pub(crate) kind: ViewKind,
     pub(crate) target: RenderTarget,
     pub(crate) camera: Option<Entity>,
@@ -129,10 +139,11 @@ pub struct ViewPlayers(pub Players);
 #[derive(Component)]
 pub(crate) struct Lit(pub crate::scene::LightingConfig);
 
-fn view_bundle(id: ViewId, kind: ViewKind, target: RenderTarget) -> impl Bundle {
+fn view_bundle(id: ViewId, layer: usize, kind: ViewKind, target: RenderTarget) -> impl Bundle {
     (
         View {
             id,
+            layer,
             kind,
             target,
             camera: None,
@@ -142,7 +153,7 @@ fn view_bundle(id: ViewId, kind: ViewKind, target: RenderTarget) -> impl Bundle 
         ObjectIndex::default(),
         LayoutIndex::default(),
         ViewPlayers::default(),
-        Propagate(RenderLayers::layer(id as usize)),
+        Propagate(RenderLayers::layer(layer)),
         Transform::default(),
         Visibility::default(),
     )
@@ -157,8 +168,7 @@ pub(crate) fn plugin(app: &mut App) {
             PropagateSet::<RenderLayers>::default().before(VisibilitySystems::CheckVisibility),
         )
         .add_systems(PreUpdate, (drain_hub, pause_occluded))
-        // In `Update`, so resource changes made in `PreUpdate` draw this frame.
-        .add_systems(Update, mirror_resources)
+        .add_systems(Update, mirror_resources.in_set(SceneSystems))
         .add_systems(Last, report_status);
 }
 
@@ -175,7 +185,7 @@ pub(crate) fn mirror_resources(
     let primary = match views.iter().find(|(_, v)| v.id == 0) {
         Some((entity, _)) => entity,
         None => commands
-            .spawn(view_bundle(0, ViewKind::World, RenderTarget::default()))
+            .spawn(view_bundle(0, 0, ViewKind::World, RenderTarget::default()))
             .id(),
     };
     let mut primary = commands.entity(primary);
@@ -229,11 +239,22 @@ fn drain_hub(world: &mut World) {
     }
 }
 
+fn free_layer(world: &mut World) -> usize {
+    let used: HashSet<usize> = world
+        .query::<&View>()
+        .iter(world)
+        .map(|v| v.layer)
+        .collect();
+    (1..).find(|l| !used.contains(l)).unwrap()
+}
+
 fn spawn_view(world: &mut World, id: ViewId, kind: ViewKind, target: ViewTarget) {
+    let layer = free_layer(world);
     let view = world
-        .spawn(view_bundle(id, kind, RenderTarget::default()))
+        .spawn(view_bundle(id, layer, kind, RenderTarget::default()))
         .id();
     let target = match target {
+        ViewTarget::PrimaryWindow => RenderTarget::default(),
         ViewTarget::Window(canvas) => {
             let window = world
                 .spawn((
@@ -265,8 +286,9 @@ fn spawn_view(world: &mut World, id: ViewId, kind: ViewKind, target: ViewTarget)
     world.get_mut::<View>(view).unwrap().target = target;
 }
 
-fn resize(world: &mut World, view: Entity, size: UVec2) {
-    let Some(view) = world.get::<View>(view) else {
+/// Resizes an image view, or pauses it, reading nothing back, at zero size.
+fn resize(world: &mut World, entity: Entity, size: UVec2) {
+    let Some(view) = world.get::<View>(entity) else {
         return;
     };
     let (RenderTarget::Image(ImageRenderTarget { handle, .. }), camera) =
@@ -275,29 +297,37 @@ fn resize(world: &mut World, view: Entity, size: UVec2) {
         return;
     };
     let handle = handle.clone();
-    if size.x > 0
-        && size.y > 0
-        && let Some(mut image) = world.resource_mut::<Assets<Image>>().get_mut(&handle)
-    {
-        image.resize(Extent3d {
-            width: size.x,
-            height: size.y,
-            depth_or_array_layers: 1,
-        });
+    let active = size.x > 0 && size.y > 0;
+    if active {
+        if let Some(mut image) = world.resource_mut::<Assets<Image>>().get_mut(&handle) {
+            image.resize(Extent3d {
+                width: size.x,
+                height: size.y,
+                depth_or_array_layers: 1,
+            });
+        }
+        world.entity_mut(entity).insert(Readback::texture(handle));
+    } else {
+        world.entity_mut(entity).remove::<Readback>();
     }
     // ponytail: a view paused before its camera spawns still draws once at its old size.
     if let Some(mut camera) = camera.and_then(|c| world.get_mut::<Camera>(c)) {
-        camera.is_active = size.x > 0 && size.y > 0;
+        camera.is_active = active;
     }
 }
 
 fn pause_occluded(
     mut occluded: MessageReader<WindowOccluded>,
+    primary: Query<(), With<PrimaryWindow>>,
     views: Query<&View>,
     mut cameras: Query<&mut Camera>,
 ) {
     for event in occluded.read() {
-        let on_window = |v: &&View| matches!(v.target, RenderTarget::Window(WindowRef::Entity(w)) if w == event.window);
+        let on_window = |v: &&View| match v.target {
+            RenderTarget::Window(WindowRef::Entity(w)) => w == event.window,
+            RenderTarget::Window(WindowRef::Primary) => primary.contains(event.window),
+            _ => false,
+        };
         for view in views.iter().filter(on_window) {
             if let Some(mut camera) = view.camera.and_then(|c| cameras.get_mut(c).ok()) {
                 camera.is_active = !event.occluded;
@@ -332,13 +362,12 @@ fn report_status(
         let Some(status) = hub.status.get_mut(&view.id) else {
             continue;
         };
-        let (draw_calls, triangles) = frame_stats(entity, &children, &drawn, &meshes);
-        *status = ViewStatus {
-            ready: view.settled >= SETTLE_FRAMES,
-            pending,
-            draw_calls,
-            triangles,
-        };
+        status.ready = view.settled >= SETTLE_FRAMES;
+        status.pending = pending;
+        // Meshes only come and go while a view loads, so its last count holds once it settles.
+        if view.settled <= SETTLE_FRAMES {
+            (status.draw_calls, status.triangles) = frame_stats(entity, &children, &drawn, &meshes);
+        }
     }
 }
 
@@ -372,8 +401,12 @@ mod tests {
     }
 
     fn world_view(app: &mut App, canvas: &str) -> ViewId {
+        view_on(app, ViewTarget::Window(canvas.into()))
+    }
+
+    fn view_on(app: &mut App, target: ViewTarget) -> ViewId {
         let hub = hub(app);
-        let id = hub.create(ViewKind::World, |_| ViewTarget::Window(canvas.into()));
+        let id = hub.create(ViewKind::World, |_| target);
         let json = include_str!("../examples/booper.scene.json");
         let mut diff: WorldDiff = serde_json::from_str(json).unwrap();
         diff.kinds = Some(vec![]);
@@ -426,9 +459,83 @@ mod tests {
         let layers: Vec<_> = placed.iter(app.world()).cloned().collect();
         assert_eq!(layers.len(), 4);
         for id in [a, b] {
-            let layer = RenderLayers::layer(id as usize);
+            let layer = RenderLayers::layer(layer_of(&mut app, id));
             assert_eq!(layers.iter().filter(|l| **l == layer).count(), 2);
         }
+    }
+
+    fn layer_of(app: &mut App, id: ViewId) -> usize {
+        let mut views = app.world_mut().query::<&View>();
+        views.iter(app.world()).find(|v| v.id == id).unwrap().layer
+    }
+
+    #[test]
+    fn a_destroyed_views_layer_is_reused() {
+        let mut app = bare_app();
+        let a = world_view(&mut app, "#a");
+        let b = world_view(&mut app, "#b");
+        app.update();
+        let freed = layer_of(&mut app, a);
+        hub(&app).send(a, ViewMsg::Destroy);
+        app.update();
+
+        let c = world_view(&mut app, "#c");
+        app.update();
+        assert_eq!(layer_of(&mut app, c), freed);
+        assert_ne!(layer_of(&mut app, b), freed);
+    }
+
+    fn asset_counts(app: &App) -> [usize; 3] {
+        let world = app.world();
+        [
+            world.resource::<Assets<Image>>().len(),
+            world.resource::<Assets<ObjectMaterial>>().len(),
+            world.resource::<Assets<Mesh>>().len(),
+        ]
+    }
+
+    #[test]
+    fn destroying_an_image_view_frees_its_assets() {
+        let mut app = bare_app();
+        // The first view leaves the shared primitive cube behind.
+        let warm = view_on(&mut app, ViewTarget::Image(UVec2::new(8, 8)));
+        app.update();
+        hub(&app).send(warm, ViewMsg::Destroy);
+        for _ in 0..3 {
+            app.update();
+        }
+        let before = asset_counts(&app);
+
+        let id = view_on(&mut app, ViewTarget::Image(UVec2::new(8, 8)));
+        app.update();
+        app.update();
+        assert!(asset_counts(&app).iter().zip(before).all(|(n, b)| *n > b));
+
+        hub(&app).send(id, ViewMsg::Destroy);
+        for _ in 0..3 {
+            app.update();
+        }
+        assert_eq!(asset_counts(&app), before);
+    }
+
+    #[test]
+    fn pausing_an_image_view_stops_its_readback() {
+        let mut app = bare_app();
+        let id = view_on(&mut app, ViewTarget::Image(UVec2::new(8, 8)));
+        app.update();
+        let has_readback = |app: &mut App| {
+            let mut q = app
+                .world_mut()
+                .query_filtered::<(), (With<View>, With<Readback>)>();
+            q.iter(app.world()).count() == 1
+        };
+        assert!(has_readback(&mut app));
+        hub(&app).send(id, ViewMsg::Resize(UVec2::ZERO));
+        app.update();
+        assert!(!has_readback(&mut app));
+        hub(&app).send(id, ViewMsg::Resize(UVec2::new(4, 4)));
+        app.update();
+        assert!(has_readback(&mut app));
     }
 
     #[test]
