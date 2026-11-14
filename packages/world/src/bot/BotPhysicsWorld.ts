@@ -13,7 +13,7 @@ import {
   worldObjectsToColliders,
 } from '../physics/rules.ts';
 import { horizontalProgress } from '../physics/blocking.ts';
-import { tryStepUp, type StepUpProbe } from '../physics/step-up.ts';
+import { StepUpHold, hasSupport, tryStepUp, type StepUpProbe } from '../physics/step-up.ts';
 import { kccStepUpProbe } from '../physics/kcc-step-up-probe.ts';
 import { ColliderSync } from '../physics/collider-sync.ts';
 
@@ -103,6 +103,7 @@ export class BotPhysicsWorld {
    * — we integrate it ourselves and pass into the controller's
    * desired-translation, mirroring `TsSimCore`'s player loop. */
   private verticalVel = 0;
+  private readonly stepUpHold = new StepUpHold();
   /** Own collider handle → tag, for the bridge routing in
    * `drainSensorEvents`. Peer mirrors are tagged via `tagOf`. */
   private tagByHandle = new Map<number, ColliderTag>();
@@ -387,7 +388,7 @@ export class BotPhysicsWorld {
     // Integrate gravity into vertical velocity, then feed the full
     // 3D delta into the controller. Matches TsSimCore's pattern
     // for the local player so bots fall at the same rate.
-    this.verticalVel += GRAVITY * intent.dtSec;
+    this.verticalVel = this.stepUpHold.active ? 0 : this.verticalVel + GRAVITY * intent.dtSec;
     // Explicit BODY_GROUPS filter: ensures the KCC interacts with both the
     // floor (WALL_GROUPS membership=WALL) and peer mirrors (BODY_GROUPS
     // membership=BODY) while skipping uncategorised colliders. Without an
@@ -409,6 +410,7 @@ export class BotPhysicsWorld {
     // layout changes (new group bits, new collision rules), this must also
     // update. Acceptable because step() is the sole physics-integration
     // point in this class and the groups.ts file is the single authority.
+    const holdSupported = !this.stepUpHold.active || hasSupport(this.stepUpProbe);
     this.controller.computeColliderMovement(
       this.bodyCollider,
       {
@@ -420,6 +422,12 @@ export class BotPhysicsWorld {
       BODY_GROUPS,
     );
     const corrected = this.controller.computedMovement();
+    this.stepUpHold.update(
+      Math.hypot(corrected.x, corrected.z),
+      Math.hypot(intent.x, intent.z),
+      this.controller.computedGrounded(),
+      holdSupported,
+    );
 
     // Reset accumulated vertical velocity when the character controller
     // reports it is grounded OR when the corrected movement has a non-negative
@@ -468,6 +476,7 @@ export class BotPhysicsWorld {
       if (hop) {
         finalCorrected = { x: hop.x, y: hop.y, z: hop.z };
         this.verticalVel = 0;
+        this.stepUpHold.begin();
         progress = horizontalProgress(
           { x: hop.x, z: hop.z },
           { x: intent.x, z: intent.z },
@@ -510,6 +519,7 @@ export class BotPhysicsWorld {
     this._lastAppliedPos = { x: pos.x, y: pos.y, z: pos.z };
     this.body.setNextKinematicTranslation({ x: pos.x, y: pos.y, z: pos.z });
     this.verticalVel = 0;
+    this.stepUpHold.reset();
   }
 
   /** Advance the simulation one Rapier step. Must be called every
