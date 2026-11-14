@@ -112,10 +112,10 @@ export function BevyPage({ mugshot, views }: { mugshot: string | null; views: nu
   if (views === 2) {
     return (
       <div style={{ position: 'absolute', inset: 0, display: 'flex', background: '#000' }}>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <StoreFeed id="bevy-canvas" />
         </div>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <MugshotFeed id="bevy-canvas-2" character={PREVIEW_CHARACTER} />
         </div>
       </div>

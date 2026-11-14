@@ -12,7 +12,7 @@ use bevy::camera::visibility::{RenderLayers, VisibilitySystems};
 use bevy::camera::{ImageRenderTarget, RenderTarget};
 use bevy::prelude::*;
 use bevy::render::gpu_readback::Readback;
-use bevy::render::render_resource::{Extent3d, TextureFormat};
+use bevy::render::render_resource::{Extent3d, TextureFormat, TextureUsages};
 use bevy::window::{WindowOccluded, WindowRef};
 
 use crate::avatars::Bound;
@@ -93,9 +93,7 @@ impl ViewHub {
         let known = match msg {
             ViewMsg::Destroy => hub.status.remove(&id).is_some(),
             // Not ready until the new content has loaded, even before the app sees it.
-            ViewMsg::World(_) | ViewMsg::Players(_) => {
-                hub.status.get_mut(&id).map(|s| s.ready = false).is_some()
-            }
+            ViewMsg::World(_) => hub.status.get_mut(&id).map(|s| s.ready = false).is_some(),
             _ => hub.status.contains_key(&id),
         };
         if known {
@@ -250,12 +248,13 @@ fn spawn_view(world: &mut World, id: ViewId, kind: ViewKind, target: ViewTarget)
             RenderTarget::Window(WindowRef::Entity(window))
         }
         ViewTarget::Image(size) => {
-            let image = Image::new_target_texture(
+            let mut image = Image::new_target_texture(
                 size.x.max(1),
                 size.y.max(1),
                 TextureFormat::Rgba8UnormSrgb,
                 None,
             );
+            image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
             let handle = world.resource_mut::<Assets<Image>>().add(image);
             world
                 .entity_mut(view)
