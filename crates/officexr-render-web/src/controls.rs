@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 use bevy::prelude::*;
 use officexr_controls::{CameraConfig, CameraMode, Controls, ControlsHub, ControlsPlugin};
 use officexr_render::views::ViewId;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 use super::{js_err, status};
@@ -101,6 +101,26 @@ pub fn set_camera_config(id: ViewId, config: JsValue) -> Result<(), JsError> {
         .ok_or_else(|| js_err("camera config must be an object"))?;
     let config: CameraConfig = serde_json::from_str(&json).map_err(js_err)?;
     with(id, |c| c.config = config)
+}
+
+/// The point `[x, y, z]` the orbit camera turns around, moved to at once.
+#[wasm_bindgen(js_name = setOrbitTarget)]
+pub fn set_orbit_target(id: ViewId, point: JsValue) -> Result<(), JsError> {
+    let point: [f32; 3] = from_js(point)?;
+    with(id, |c| c.set_orbit_target(point.into()))
+}
+
+#[derive(Deserialize)]
+struct Aabb {
+    min: [f32; 3],
+    max: [f32; 3],
+}
+
+/// Fits the orbit camera to `{ min, max }`, keeping its angles.
+#[wasm_bindgen(js_name = frameBounds)]
+pub fn frame_bounds(id: ViewId, aabb: JsValue) -> Result<(), JsError> {
+    let Aabb { min, max } = from_js(aabb)?;
+    with(id, |c| c.frame_bounds(min.into(), max.into()))
 }
 
 /// Off while the page has keyboard focus elsewhere (a panel, a text field).

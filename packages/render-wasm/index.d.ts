@@ -35,7 +35,7 @@ export interface WorldDiff {
   clearColor?: string | null;
 }
 
-export type CameraMode = 'first-person' | 'third-person' | 'fixed' | 'top-down' | 'free-fly';
+export type CameraMode = 'first-person' | 'third-person' | 'fixed' | 'top-down' | 'free-fly' | 'orbit';
 
 /** A view's camera settings. A field left out takes its default (the TS defaults). */
 export interface CameraConfig {
@@ -52,6 +52,22 @@ export interface CameraConfig {
     distanceM?: number | null;
     /** A world point to orbit and look at instead of the followed player. */
     lookAt?: [number, number, number] | null;
+  };
+  /** The orbit mode. The defaults are the scene editor's. */
+  orbit?: {
+    fov?: number;
+    minDistance?: number;
+    maxDistance?: number;
+    /** Positive looks down on the target from above. */
+    minElevationDeg?: number;
+    maxElevationDeg?: number;
+    /** Drags with it rotate; shift-drags with it, and middle-drags, pan. `left` also pans on a right-drag. */
+    rotateButton?: 'left' | 'right';
+    pan?: boolean;
+    /** Time constant (s) the camera eases toward where input puts it; 0 snaps. */
+    dampingSecs?: number;
+    /** WASD moves the target across the ground and Q/E up and down. */
+    moveKeys?: boolean;
   };
   conversationDistance?: number;
   conversationHeight?: number;
@@ -93,7 +109,7 @@ export interface RendererModule {
   frameStats(id: ViewId): { drawCalls: number; triangles: number };
 
   // Controls: once any of these is called on a view, its controls drive its camera, overriding
-  // `setCamera`, in every frame its mode has something to frame. Top-down and free-fly always do;
+  // `setCamera`, in every frame its mode has something to frame. Top-down, free-fly and orbit always do;
   // first-person, third-person and fixed need a follow target (fixed, or its `lookAt`), and until
   // then `setCamera` still applies. Keys are heard page-wide and reach every view with input
   // enabled; pointer lock, mouse-look and the wheel reach only a view drawing into a Bevy window
@@ -107,6 +123,10 @@ export interface RendererModule {
   setConversationFocus(id: ViewId, point: [number, number, number] | null): void;
   /** Replaces the view's camera settings. */
   setCameraConfig(id: ViewId, config: CameraConfig): void;
+  /** The point the orbit camera turns around, moved to at once. */
+  setOrbitTarget(id: ViewId, point: [number, number, number]): void;
+  /** Fits the orbit camera to the box, keeping its angles, for previews and "focus selection". */
+  frameBounds(id: ViewId, aabb: { min: [number, number, number]; max: [number, number, number] }): void;
   /** Drive from `useWorldFocus` and `isTypingTarget`: off, keys and the mouse are ignored. */
   setInputEnabled(id: ViewId, enabled: boolean): void;
 }
