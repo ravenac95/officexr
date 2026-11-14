@@ -8,8 +8,9 @@ the integration-test roadmap.
 
 - **`createTestApi()`** — composes an `ApplicationApi` via the
   production `createDefaultApi` with `apiPath: ''` (bundled default
-  catalog, no `/api/world-object-kinds` fetch) and the default bake loader, which throws if a test triggers a bake
-  (pass `loadGltf` to opt in).
+  catalog, no `/api/world-object-kinds` fetch) and the default bake
+  loader, which throws if a test triggers a bake (pass `loadGltf` to opt
+  in).
 - **`StudioHarness`** — wraps children in an `<ApplicationProvider>`
   built from `createTestApi()`. Use as the `wrapper` for `renderHook`
   on any hook that reads `useApplication` (e.g. `useRoomDocument`,
@@ -64,8 +65,8 @@ its own r3f harness next to it.
 
 Tier-3 scenarios: `scene-editor/__tests__/editorStore.test.tsx` covers
 placement, selection, move, delete and undo through `renderEditorStore`;
-`MapApp.scenarios` covers the Map editor (the c606f10 class). Room tile-grouping is covered at Tier 2; the Object-editor Leva
-kind-switch (a DOM concern, not a scene-graph one) is covered by the
+`MapApp.scenarios` covers the Map editor (the c606f10 class). Room
+tile-grouping is covered at Tier 2; the Object-editor Leva kind-switch (a DOM concern, not a scene-graph one) is covered by the
 existing `object-editor.spec.ts` at Tier 4.
 
 ## Tier 4 — Playwright hermetic mode (`?test=1`)

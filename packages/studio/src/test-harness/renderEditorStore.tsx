@@ -24,7 +24,14 @@ export interface EditorPick {
  * Headless editor: the Room document store plus the tool dispatch the
  * canvas routes picks through, with no renderer. Drive it with `pick`.
  */
-export async function renderEditorStore(opts: { stagedKindId?: string } = {}) {
+export async function renderEditorStore(
+  opts: {
+    stagedKindId?: string;
+    stagedYawDeg?: number;
+    /** Camera world-Y; stack ties resolve above it. Defaults above the scene. */
+    cameraY?: number;
+  } = {},
+) {
   const api = createTestApi();
   const footprintOf = createFootprintOf(api.geometry);
   const storage = new InMemoryRoomStorage({
@@ -43,16 +50,17 @@ export async function renderEditorStore(opts: { stagedKindId?: string } = {}) {
       return;
     }
     const { compiled } = result.current;
-    const voxel = resolvePlacement(hit, opts.stagedKindId, 0, {
+    const voxel = resolvePlacement(hit, opts.stagedKindId, opts.stagedYawDeg ?? 0, {
       nearbyObjects: nearbyObjectsOf(compiled.instances, footprintOf, api.voxelSize),
       geometry: api.geometry,
       voxelSize: api.voxelSize,
+      cameraY: opts.cameraY ?? 10,
       compiled,
       catalog: api.catalog,
       footprintOf,
     });
     if (voxel) {
-      result.current.placeObject(opts.stagedKindId, voxel);
+      result.current.placeObject(opts.stagedKindId, voxel, opts.stagedYawDeg);
     }
   };
 
@@ -64,7 +72,7 @@ export async function renderEditorStore(opts: { stagedKindId?: string } = {}) {
     setBuildHeight(next: number) {
       buildHeight = next;
     },
-    // ponytail: select/add/delete branching mirrors the canvas pointer handlers; placement itself is the shared resolvePlacement.
+    // ponytail: tool branching duplicates the canvas pointer handlers and drifts if they change; lift a shared dispatcher then.
     pick(p: EditorPick) {
       const doc = result.current;
       act(() => {
