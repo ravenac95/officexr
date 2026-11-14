@@ -8,15 +8,16 @@ the integration-test roadmap.
 
 - **`createTestApi()`** — composes an `ApplicationApi` via the
   production `createDefaultApi` with `apiPath: ''` (bundled default
-  catalog, no `/api/world-object-kinds` fetch) and a no-op GLTF loader.
+  catalog, no `/api/world-object-kinds` fetch).
 - **`StudioHarness`** — wraps children in an `<ApplicationProvider>`
   built from `createTestApi()`. Use as the `wrapper` for `renderHook`
   on any hook that reads `useApplication` (e.g. `useRoomDocument`,
   `useLayoutDocument`).
-- **`renderEditorScene(node, { api? })`** — mounts an R3F scene
-  subtree under a hermetic provider using
-  `@react-three/test-renderer`. Returns the test renderer so you can
-  query the scene graph and `fireEvent`.
+- **`renderEditorStore({ stagedKindId? })`** — headless scene editor: the
+  Room document store plus tool dispatch, no renderer. Drive it with
+  `setTool`, `setBuildHeight`, `pick({ target, point })` and
+  `moveSelection(delta)`. Placement and move occupancy use the same pure
+  functions as the canvas (`resolvePlacement`, `checkMoveOccupancy`).
 - **`seeds/`** — fixture documents (`emptyMapSeed`, `simpleRoomSeed`,
   `twoRoomMapSeed`). Pair with an `InMemory*Storage` (from
   `@officexr/world/scenes`) to seed a hook hermetically.
@@ -33,43 +34,21 @@ await waitFor(() => expect(result.current.doc.name).toBe('default'));
 
 For hooks that read `useApplication`, pass `{ wrapper: StudioHarness }`.
 
-## Tier 3 — editor scene scenarios
+## Tier 3 — editor store and tools
 
-`@react-three/test-renderer` reconciles into a **three.js scene graph,
-not the DOM**. It therefore CANNOT host an editor App (`<MapApp>` is
-DOM chrome wrapped around a `<Canvas>`). Mount the exported **scene
-layers** instead and assert on callbacks / the scene graph:
+`renderEditorStore` drives the scene editor's store and tool dispatch
+with picks expressed as data, no renderer:
 
-```tsx
-const renderer = await renderEditorScene(
-  <RoomsLayer instances={…} rooms={…} tool="spawn" onPlaceSpawn={spy} … />,
-);
-await new Promise((r) => setTimeout(r));      // let catalog-ready settle
-const group = renderer.scene.findAll(
-  (n) => n.type === 'Group' && typeof n.props.onPointerDown === 'function',
-)[0];
-await renderer.fireEvent(group, 'pointerDown', {
-  button: 0, point: { x: 1.5, y: 2.25, z: -3 }, stopPropagation: () => {},
-});
-expect(spy).toHaveBeenCalledWith([1.5, 2.25, -3]);
+```ts
+const editor = await renderEditorStore({ stagedKindId: '__primitive_blue' });
+editor.setTool('add');
+editor.pick({ target: { type: 'empty' }, point: { x: 0, z: 0 } });
 ```
 
-### Gotchas
-
-- **Use primitive kinds** (`__primitive_blue` / `__primitive_stone`) in
-  scene fixtures. Real catalog kinds load a GLTF over HTTP, which fails
-  hermetically. Primitives render as plain `BoxGeometry` instanced
-  meshes — no network.
-- **Canvas 2D stub**: `src/__tests__/setup-canvas.ts` stubs
-  `HTMLCanvasElement.getContext('2d')` because the renderer builds a
-  procedural texture at module-load. Without it, importing the renderer
-  barrel crashes under jsdom.
-- **Synthetic events** need `button: 0`, a `point`, and a
-  `stopPropagation` fn — the editor handlers read all three.
-- Pointer **drag** flows (move-tool snap) attach listeners to
-  `gl.domElement` and read the raycaster/pointer — those are stubbed in
-  the test renderer and are better exercised in Playwright (Tier 4).
-  The snap math itself is unit-tested in `roomBoundarySnap.test.ts`.
+Use primitive kinds (`__primitive_blue` / `__primitive_stone`) in
+fixtures; real catalog kinds load a GLTF over HTTP, which fails
+hermetically. The map editor test (`MapApp.scenarios.test.tsx`) still has
+its own r3f harness next to it.
 
 ## Coverage map (what tests what)
 
@@ -82,9 +61,10 @@ expect(spy).toHaveBeenCalledWith([1.5, 2.25, -3]);
 | E cross-hook desync | `useRoomDocument` (setLayoutName), `useLayoutDocument` (optimizer) |
 | F implicit gating | `mapPointerActions` unit + `MapApp.scenarios` (litmus) |
 
-Tier-3 scenarios currently focus on the Map editor (the c606f10 class).
-Room tile-grouping is covered at Tier 2; the Object-editor Leva
-kind-switch (a DOM concern, not a scene-graph one) is covered by the
+Tier-3 scenarios: `scene-editor/__tests__/editorStore.test.tsx` covers
+placement, selection, move, delete and undo through `renderEditorStore`;
+`MapApp.scenarios` covers the Map editor (the c606f10 class). Room
+tile-grouping is covered at Tier 2; the Object-editor Leva kind-switch (a DOM concern, not a scene-graph one) is covered by the
 existing `object-editor.spec.ts` at Tier 4.
 
 ## Tier 4 — Playwright hermetic mode (`?test=1`)

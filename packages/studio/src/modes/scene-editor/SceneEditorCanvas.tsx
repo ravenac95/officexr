@@ -23,23 +23,16 @@ import type { Tool } from './tools.ts';
 import type { SceneEditorBackend } from './SceneEditorBackend.ts';
 import { GhostLayer, type GhostSpec } from './GhostLayer.tsx';
 import { CanvasFrameStats } from '../../perf/CanvasFrameStats.tsx';
-import {
-  snapToNearestFace,
-  snapToGridOrStack,
-  snapToVoxel,
-  type NearbyObjectInfo,
-  type SnapHit,
-} from '../room/roomSnap.ts';
+import { snapToVoxel, type SnapHit } from '../room/roomSnap.ts';
 import { outlineEdgePositions } from '../room/selectionOutline.ts';
 import { computeMovedPositions } from '../room/moveDelta.ts';
 import { checkMoveOccupancy } from '../room/moveOccupancy.ts';
-import { dropToSurface } from '../room/dropToSurface.ts';
+import { createFootprintOf, type FootprintOf } from '../room/footprint.ts';
 import {
-  createFootprintOf,
-  newObjectShape,
-  overlapsAnyInstance,
-  type FootprintOf,
-} from '../room/footprint.ts';
+  nearbyObjectsOf,
+  resolvePlacement,
+  snapForPlacement as snapForPlacementPure,
+} from './placement.ts';
 import {
   computeTileGhosts,
   resolveAvailableAxes,
@@ -389,82 +382,36 @@ export function SceneEditorCanvas({ backend }: SceneEditorCanvasProps) {
   // AABBs so the snapped face agrees with the overlap guard: grid-snapped
   // for whole-voxel placements, exact for sub-grid ones and thin kinds (a
   // 0.15 m floor tile's top). Recomputed when the compiled scene changes.
-  const nearbyObjects = useMemo(() => {
-    return props.compiled.instances.map((inst) => {
-      const { min, max } = footprintOf(inst.position, inst.kindId, inst.yawDeg);
-      return {
-        position: inst.position,
-        aabb: {
-          min: [min[0] * voxelSize, min[1] * voxelSize, min[2] * voxelSize] as const,
-          max: [max[0] * voxelSize, max[1] * voxelSize, max[2] * voxelSize] as const,
-        },
-      };
-    });
-  }, [props.compiled.instances, footprintOf, voxelSize]);
+  const nearbyObjects = useMemo(
+    () => nearbyObjectsOf(props.compiled.instances, footprintOf, voxelSize),
+    [props.compiled.instances, footprintOf, voxelSize],
+  );
 
-  // Pull radius in metres. Generous enough that the cursor inside
-  // OR within a small buffer around any object's AABB always snaps
-  // flush. Corners of a large tile are √3·gap away from the nearest
-  // face-rectangle, so we want a radius that still catches them when
-  // the cursor floats ~1m off the corner. 2.5m fits 4m-cubes and
-  // smaller without overcommitting on floor clicks 5m+ from a cube.
-  const FACE_SNAP_PULL_RADIUS_M = 2.5;
-
-  // Snap a world-space hit to a voxel position for ORIGIN PLACEMENT
-  // (Add tool, Tile tool click 1, and their hover ghosts).
-  //
-  // Used by both Add and Tile so the two tools place the origin cube
-  // at IDENTICAL positions for the same cursor — this is the contract
-  // the user expects. Previously the Tile tool snapped through plain
-  // `snapToVoxel` while the Add tool went through the proximity-based
-  // face snap, so hovering near an existing cube's face produced two
-  // different ghost positions.
-  //
-  // The kind id is parametrized rather than closed over so callers
-  // can pass `props.stagedKindId` (Add) or the tile's own
-  // `stagedKindId` (Tile) without invalidating the memo.
-  //
-  // Algorithm (single source of truth for placement snap):
-  //   1. Face-snap: if the cursor is within FACE_SNAP_PULL_RADIUS_M
-  //      of an existing object's face, snap flush against that face.
-  //   2. Grid snap: quantize to the placing kind's per-axis stride.
-  //   3. Overlap stack: if the grid snap lands in an existing cube's
-  //      footprint, stack above or below depending on camera angle.
+  // Origin-placement snap shared by Add, Tile click 1 and their ghosts, so
+  // the tools place at identical positions for the same cursor.
   const snapForPlacement = useCallback(
-    (hit: SnapHit, kindId: string | null, yawDeg = 0): [number, number, number] => {
-      if (!kindId) {
-        return snapToVoxel(hit, voxelSize, undefined, targetStrideFor(hit));
-      }
-      const shape = newObjectShape(geomService, kindId, yawDeg);
+    (hit: SnapHit, kindId: string | null, yawDeg = 0): [number, number, number] =>
+      snapForPlacementPure(hit, kindId, yawDeg, {
+        nearbyObjects,
+        geometry: geomService,
+        voxelSize,
+        cameraY: cameraYRef.current,
+      }),
+    [voxelSize, nearbyObjects, geomService],
+  );
 
-      // Always snap from the actual raycast hit point: floor hits carry
-      // it, cube hits carry the point on the clicked face. Snapping from
-      // the cube's anchor instead always reads as its bottom, so the
-      // dominant-axis pick would always choose -Y.
-      //
-      // Face-snap considers ALL nearby objects, including the one the
-      // cursor is on: the dominant-axis face points OUT of that cube,
-      // and if that would overlap a neighbour the snap stacks instead.
-      return (
-        snapToNearestFace(
-          hit.point,
-          shape,
-          nearbyObjects,
-          voxelSize,
-          FACE_SNAP_PULL_RADIUS_M,
-          { cameraY: cameraYRef.current },
-        ) ??
-        snapToGridOrStack(
-          hit,
-          shape,
-          nearbyObjects,
-          voxelSize,
-          targetStrideFor(hit),
-          cameraYRef.current,
-        )
-      );
-    },
-    [voxelSize, nearbyObjects, targetStrideFor, geomService],
+  const placementFor = useCallback(
+    (hit: SnapHit, kindId: string, yawDeg: number) =>
+      resolvePlacement(hit, kindId, yawDeg, {
+        nearbyObjects,
+        geometry: geomService,
+        voxelSize,
+        cameraY: cameraYRef.current,
+        compiled: props.compiled,
+        catalog: catalogService,
+        footprintOf,
+      }),
+    [nearbyObjects, geomService, voxelSize, props.compiled, catalogService, footprintOf],
   );
 
   // Compute the ghost specs the GhostLayer should render this frame.
@@ -575,36 +522,12 @@ export function SceneEditorCanvas({ backend }: SceneEditorCanvasProps) {
   const handleAddClick = useCallback(
     (hit: SnapHit) => {
       if (props.tool !== 'add' || !props.stagedKindId) return;
-      const yawDeg = props.stagedYawDeg;
-      let voxel = snapForPlacement(hit, props.stagedKindId, yawDeg);
-
-      // Gravity: if the staged kind has gravity = true, drop to the
-      // nearest surface below. Reject placement when no support exists.
-      const addKind = catalogService.getKind(props.stagedKindId);
-      if (addKind?.gravity) {
-        const settled = dropToSurface(
-          voxel,
-          { kindId: props.stagedKindId, yawDeg },
-          props.compiled,
-          footprintOf,
-        );
-        if (!settled) return; // No support → reject placement
-        voxel = settled;
+      const voxel = placementFor(hit, props.stagedKindId, props.stagedYawDeg);
+      if (voxel) {
+        props.onPlaceAt(voxel);
       }
-
-      // Overlap guard: if the proposed placement's footprint overlaps
-      // ANY existing instance's footprint, refuse the place. Otherwise
-      // a click slightly off-grid could pile a second cube on top of
-      // the existing one — confusing the user into thinking multiple
-      // cubes were placed per click.
-      const proposed = footprintOf(voxel, props.stagedKindId, yawDeg);
-      if (overlapsAnyInstance(proposed, props.compiled.instances, footprintOf)) {
-        return;
-      }
-
-      props.onPlaceAt(voxel);
     },
-    [props, snapForPlacement, catalogService, footprintOf],
+    [props, placementFor],
   );
 
   // Delete-tool click on a cube routes to the parent's delete (which
@@ -638,26 +561,9 @@ export function SceneEditorCanvas({ backend }: SceneEditorCanvasProps) {
         // The ghost the user saw before clicking was computed with
         // `snapForPlacement` (see the tile ghost branch above), so
         // the commit position is guaranteed to match the preview.
-        let voxel = snapForPlacement(hit, stagedKindId, yawDeg);
-
-        // Gravity: if the staged kind has gravity = true, drop to the
-        // nearest surface below. Reject placement when no support exists.
+        const voxel = placementFor(hit, stagedKindId, yawDeg);
+        if (!voxel) return;
         const tileKind = catalogService.getKind(stagedKindId);
-        if (tileKind?.gravity) {
-          const settled = dropToSurface(
-            voxel,
-            { kindId: stagedKindId, yawDeg },
-            props.compiled,
-            footprintOf,
-          );
-          if (!settled) return; // No support → reject placement
-          voxel = settled;
-        }
-
-        const proposed = footprintOf(voxel, stagedKindId, yawDeg);
-        if (overlapsAnyInstance(proposed, props.compiled.instances, footprintOf)) {
-          return;
-        }
 
         const ids = props.onPlaceMany(stagedKindId, [voxel], null, yawDeg);
         if (ids.length === 0) return;
@@ -818,11 +724,10 @@ export function SceneEditorCanvas({ backend }: SceneEditorCanvasProps) {
       tileState,
       voxelSize,
       yDelta,
-      snapForPlacement,
+      placementFor,
       stepForKind,
       targetStrideFor,
       catalogService,
-      footprintOf,
     ],
   );
 
