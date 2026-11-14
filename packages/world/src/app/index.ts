@@ -1,16 +1,9 @@
 export type {
   ApplicationApi,
-  BakeService,
-  CameraPose,
   CatalogService,
   InstanceGeometryService,
-  KindDimensions,
-  KindLocalAABB,
-  KindMeasurement,
   MeshTransform,
-  ProgrammaticScene,
   RoomService,
-  SceneService,
   Vec3,
   VoxelFootprint,
   WorldAABB,
@@ -22,11 +15,6 @@ export type { CreateCatalogServiceOptions } from './catalog-service.ts';
 export { createInstanceGeometry, seatPoseOf } from './geometry-service.ts';
 
 export { createRoomService } from './room-service.ts';
-
-export { createBakeService } from './bake-service.ts';
-export type { GltfHandle, GltfLoader } from './bake-service.ts';
-
-export { createSceneService } from './scene-service.ts';
 
 export { bakeLayout } from './layout-bake-service.ts';
 export { compressDocument, registerCompressionCodecs } from './glb-compression.ts';

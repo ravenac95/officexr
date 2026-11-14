@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { RoomsLayer } from '../MapEditorCanvas.tsx';
-import { renderEditorScene } from '../../../test-harness/renderEditorScene.tsx';
+import { renderEditorScene } from './renderEditorScene.tsx';
 import {
   emptyMapDocument,
   emptyRoomDocument,

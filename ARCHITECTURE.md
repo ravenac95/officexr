@@ -105,7 +105,6 @@ flowchart TB
     subgraph Inputs["Input sources"]
         KB["Keyboard / mouse<br/>(useKeyboardControls)"]
         Touch["Joystick / gyro<br/>(useMotionControls)"]
-        XR["WebXR controllers"]
         Net["Realtime broadcasts<br/>(remote players,<br/>zombies, strokes, hits)"]
     end
 
@@ -130,7 +129,6 @@ flowchart TB
 
     KB --> Refs
     Touch --> Refs
-    XR --> Refs
     Net --> Refs
     Net --> ReactSt
 
@@ -152,7 +150,7 @@ flowchart TB
     classDef st fill:#312e81,stroke:#a78bfa,color:#ede9fe
     classDef loop fill:#3f1d1d,stroke:#f87171,color:#fee2e2
     classDef ui fill:#064e3b,stroke:#34d399,color:#d1fae5
-    class KB,Touch,XR,Net in
+    class KB,Touch,Net in
     class ReactSt,Refs,SceneGraph,LS st
     class Move,TickP,TickZ,TickB,Render loop
     class HUD ui
@@ -197,8 +195,7 @@ shapes).
   travel, proximity detection) are framerate-dependent. A user on a 30fps
   laptop accumulates damage at a different rate than one on a 144Hz
   display. Network packets arriving between frames mutate the scene graph
-  directly with no interpolation/extrapolation buffer. WebXR (which uses its
-  own animation loop and render targets) is harder to integrate cleanly.
+  directly with no interpolation/extrapolation buffer.
 - **Direction.** Split into three explicit phases:
   1. **Input** (drain ref-buffers, keypresses, joystick, network events).
   2. **Simulate** at a fixed timestep (e.g. 60Hz) operating purely on
