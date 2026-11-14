@@ -32,3 +32,35 @@ describe('studioFetch', () => {
     expect(fetchMock).toHaveBeenLastCalledWith('/x', { credentials: 'omit' });
   });
 });
+
+describe('studioFetch with a preview token', () => {
+  const exp = Date.UTC(2026, 0, 1, 0, 10) / 1000;
+  const token = `h.${btoa(JSON.stringify({ exp })).replace(/=+$/, '')}.s`;
+
+  afterEach(() => {
+    vi.useRealTimers();
+    window.sessionStorage.clear();
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('captures the token from the fragment and sends it as a bearer until it expires', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.UTC(2026, 0, 1));
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response());
+    vi.stubGlobal('fetch', fetchMock);
+    const { studioFetch } = await load('https://studio.example');
+    const { capturePreviewToken } = await import('@officexr/server/preview-token');
+    window.history.replaceState(null, '', `/studio/?a=1#officexr_token=${token}`);
+
+    capturePreviewToken();
+    expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe('/studio/?a=1');
+    await studioFetch('https://studio.example/api/me', { headers: { 'Content-Type': 'application/json' } });
+    const sent = new Headers(fetchMock.mock.calls[0][1]!.headers);
+    expect(sent.get('authorization')).toBe(`Bearer ${token}`);
+    expect(sent.get('content-type')).toBe('application/json');
+
+    vi.setSystemTime(exp * 1000);
+    await studioFetch('https://studio.example/api/me');
+    expect(fetchMock).toHaveBeenLastCalledWith('https://studio.example/api/me', { credentials: 'include' });
+  });
+});
