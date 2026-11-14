@@ -4488,6 +4488,7 @@ dependencies = [
  "bevy",
  "meshopt-rs",
  "officexr-sim",
+ "percent-encoding",
  "serde",
  "serde_json",
 ]
