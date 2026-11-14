@@ -66,7 +66,9 @@ COPY crates crates
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     wasm-pack build crates/officexr-sim-wasm --release --target web --no-pack --out-dir /app/packages/sim-wasm/pkg && \
-    wasm-pack build crates/officexr-render-web --profile wasm-release --target web --no-pack --out-dir /app/packages/render-wasm/pkg
+    for backend in webgpu webgl2; do \
+      wasm-pack build crates/officexr-render-web --profile wasm-release --target web --no-pack --out-dir /app/packages/render-wasm/pkg/$backend -- --features $backend || exit 1; \
+    done
 
 FROM store AS build
 COPY . .

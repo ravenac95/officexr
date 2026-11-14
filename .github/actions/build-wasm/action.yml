@@ -52,8 +52,12 @@ runs:
 
     - name: Check wasm sizes
       shell: bash
-      # Cloudflare Pages rejects any file over 25 MiB.
+      # Cloudflare Pages rejects any file over 25 MiB. The render wasm builds
+      # (pkg/<backend>/) go to R2 instead, so they are only logged.
       run: |
+        for f in packages/render-wasm/pkg/*/*.wasm; do
+          [ -e "$f" ] && echo "$f: $(stat -c %s "$f") bytes"
+        done
         limit=$((25 * 1024 * 1024))
         status=0
         for f in packages/*/pkg/*.wasm; do

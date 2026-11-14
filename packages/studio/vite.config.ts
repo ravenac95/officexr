@@ -39,6 +39,22 @@ export default defineConfig(({ command }) => ({
     //   /api/scenes     → packages/world/scenes/     (legacy back-compat for the
     //                                                 existing Scenes editor until Task 5)
     studioStorage(backend.storageOptions),
+    {
+      // The glue's `new URL(...wasm)` emits the bundled renderer wasm even once `loadRenderer` can't
+      // reach it, so with a remote base URL drop it from the build (it's too big for Pages).
+      name: 'officexr:drop-render-wasm',
+      apply: 'build',
+      generateBundle(_, bundle) {
+        if (!process.env.VITE_RENDER_WASM_BASE_URL) {
+          return;
+        }
+        for (const name of Object.keys(bundle)) {
+          if (/officexr_render_web_bg.*\.wasm$/.test(name)) {
+            delete bundle[name];
+          }
+        }
+      },
+    },
     studioMcp({ modelRoot: PUBLIC_DIR, chromiumPath: process.env.OFFICEXR_RENDER_CHROMIUM_PATH || undefined }),
     {
       name: 'officexr:seed-data-dir',

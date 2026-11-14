@@ -54,9 +54,23 @@ jobs:
       - uses: ./.github/actions/build-wasm
         if: steps.config.outputs.deploy == 'true'
 
+      - name: Upload render wasm to R2
+        if: steps.config.outputs.deploy == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          hash=$(node -e "import('./packages/render-wasm/pkg/hash.js').then((m) => console.log(m.RENDER_WASM_HASH))")
+          for backend in webgpu webgl2; do
+            dir="packages/render-wasm/pkg/$backend"
+            npx --yes wrangler@4.20.0 r2 object put "officexr-assets/wasm/$hash/$backend/officexr_render_web_bg.wasm" --remote --file="$dir/officexr_render_web_bg.wasm" --content-type=application/wasm
+            npx --yes wrangler@4.20.0 r2 object put "officexr-assets/wasm/$hash/$backend/officexr_render_web.js" --remote --file="$dir/officexr_render_web.js" --content-type=text/javascript
+          done
+
       - name: Build
         if: steps.config.outputs.deploy == 'true'
         env:
+          VITE_RENDER_WASM_BASE_URL: ${{ vars.VITE_ASSET_BASE_URL }}/wasm
           VITE_API_ORIGIN: ${{ vars.VITE_API_ORIGIN }}
           VITE_ASSET_BASE_URL: ${{ vars.VITE_ASSET_BASE_URL }}
           VITE_STUDIO_API_ORIGIN: ${{ vars.VITE_STUDIO_API_ORIGIN }}
