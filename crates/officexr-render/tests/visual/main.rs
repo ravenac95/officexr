@@ -8,15 +8,20 @@
 //! maps' prototype models, `pnpm asset-packs:install`. Each scenario writes
 //! its keyframes and `video.mp4` (a `video/` PNG sequence without ffmpeg on
 //! PATH) to `target/tmp/visual-tests/<name>/`. A keyframe with no baseline
-//! becomes its baseline; `OFFICEXR_UPDATE_BASELINES=1` rewrites them all.
-//! Review new baselines by eye: never widen the threshold to pass.
+//! fails; `OFFICEXR_UPDATE_BASELINES=1` writes them all from a run whose
+//! other checks pass. Review new baselines by eye: never widen the
+//! threshold to pass.
+//!
+//! Every camera pose keeps the shadow box centred on the first camera's
+//! `look_at`, so other poses don't exactly match a `render` of that pose.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use bevy::asset::RenderAssetUsages;
+use bevy::asset::{AssetLoadFailedEvent, RenderAssetUsages};
+use bevy::gltf::Gltf;
 use bevy::image::{CompressedImageFormats, ImageSampler, ImageType};
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
@@ -149,6 +154,8 @@ struct Timeline {
     ready_for: u32,
     loading_for: u32,
     done_for: u32,
+    /// Paths of models that failed to load.
+    failed: Vec<String>,
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> T {
@@ -322,6 +329,9 @@ fn check_positions(
 /// One update per sim frame, through the first camera, then one more per
 /// further camera on a capture frame.
 fn plan(scenario: &Scenario, frame_count: usize, out: &Path) -> (Vec<Step>, Vec<PathBuf>) {
+    if let Some(late) = scenario.captures.iter().find(|&&f| f >= frame_count) {
+        panic!("capture frame {late} is past the last move");
+    }
     let mut steps = vec![];
     let mut keyframes = vec![];
     for frame in 0..frame_count {
@@ -366,6 +376,7 @@ fn drive(
     layouts: Res<PendingLayouts>,
     bound: Query<(), With<AvatarBound>>,
     target: Res<OffscreenTarget>,
+    mut time_step: ResMut<TimeUpdateStrategy>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let t = &mut *timeline;
@@ -377,6 +388,10 @@ fn drive(
             kinds.is_empty() && layouts.is_empty() && bound.iter().count() == players.players.len();
         if ready {
             t.ready_for += 1;
+            // Time stands still while loading, so every clip starts at 0 on the first step.
+            if t.ready_for == READY_FRAMES {
+                *time_step = TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(1.0 / 60.0));
+            }
         } else {
             t.loading_for += 1;
             assert!(
@@ -408,13 +423,19 @@ fn drive(
     t.next += 1;
 }
 
+fn record_failed(mut failed: MessageReader<AssetLoadFailedEvent<Gltf>>, mut timeline: ResMut<Timeline>) {
+    timeline
+        .failed
+        .extend(failed.read().map(|e| e.path.path().to_string_lossy().into_owned()));
+}
+
 fn render(
     scenario: &Scenario,
     scene_json: &str,
     frames: Vec<Vec<PlayerRender>>,
     players: Players,
     steps: Vec<Step>,
-) {
+) -> Vec<String> {
     let scene: WorldSceneData = serde_json::from_str(scene_json).expect("scene JSON");
     let first = &scenario.cameras[0];
     let base = AssetBase::parse(format!("{ROOT}/packages/studio/public"));
@@ -422,10 +443,8 @@ fn render(
     let plugins = DefaultPlugins.build().disable::<WinitPlugin>();
     let [w, h] = scenario.size;
     let mut app = offscreen_app(base, plugins, w, h);
-    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
-        1.0 / 60.0,
-    )))
-    .insert_resource(scene)
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO))
+    .insert_resource(scene.clone())
     .insert_resource(SceneCamera {
         position: first.position,
         look_at: first.look_at,
@@ -445,9 +464,22 @@ fn render(
         ready_for: 0,
         loading_for: 0,
         done_for: 0,
+        failed: vec![],
     })
-    .add_systems(PreUpdate, drive);
+    .add_systems(PreUpdate, (record_failed, drive));
     app.run();
+    let failed = &app.world().resource::<Timeline>().failed;
+    failed
+        .iter()
+        .map(|path| {
+            let kind = scene
+                .kinds
+                .iter()
+                .find(|k| path.ends_with(k.gltf_path.trim_start_matches('/')))
+                .map_or("a model", |k| k.id.as_str());
+            format!("{kind} ({path}) failed to load: run `pnpm asset-packs:install`")
+        })
+        .collect()
 }
 
 fn rgba(path: &Path) -> (UVec2, Vec<u8>) {
@@ -471,7 +503,7 @@ fn rgba(path: &Path) -> (UVec2, Vec<u8>) {
 }
 
 /// Fails when more than `MAX_DIFF_FRAC` of the pixels differ by more than
-/// `PIXEL_THRESHOLD`; a missing baseline (or `update`) takes the keyframe.
+/// `PIXEL_THRESHOLD`, or the baseline is missing; `update` takes the keyframes.
 fn check_pixels(name: &str, keyframes: &[PathBuf], update: bool) -> Vec<String> {
     let mut failures = vec![];
     for keyframe in keyframes {
@@ -479,10 +511,18 @@ fn check_pixels(name: &str, keyframes: &[PathBuf], update: bool) -> Vec<String> 
             .join("baselines")
             .join(name)
             .join(keyframe.file_name().unwrap());
-        if update || !baseline.exists() {
+        if update {
             std::fs::create_dir_all(baseline.parent().unwrap()).unwrap();
             std::fs::copy(keyframe, &baseline).unwrap();
             println!("  new baseline {}: review it by eye", baseline.display());
+            continue;
+        }
+        if !baseline.exists() {
+            failures.push(format!(
+                "no baseline {}: review the candidate {} and commit it there, or rerun with OFFICEXR_UPDATE_BASELINES=1",
+                baseline.display(),
+                keyframe.display()
+            ));
             continue;
         }
         let (want_size, want) = rgba(&baseline);
@@ -529,7 +569,10 @@ fn encode_video(out: &Path) {
         .arg(out.join("video.mp4"))
         .status();
     match status {
-        Ok(s) if s.success() => println!("  video {}", out.join("video.mp4").display()),
+        Ok(s) if s.success() => {
+            std::fs::remove_dir_all(out.join("video")).unwrap();
+            println!("  video {}", out.join("video.mp4").display());
+        }
         Ok(s) => println!("  ffmpeg exited {s}; the video stays a PNG sequence"),
         Err(_) => println!("  no ffmpeg; the video stays a PNG sequence"),
     }
@@ -551,19 +594,42 @@ fn run(name: &str, update: bool) -> Vec<String> {
     let frames = simulate(&scenario, &scene, &players);
     let mut failures = check_positions(&scenario, &frames, &players);
     let (steps, keyframes) = plan(&scenario, frames.len(), &out);
-    render(&scenario, &scene, frames, players, steps);
+    failures.extend(render(&scenario, &scene, frames, players, steps));
     let missing: Vec<_> = keyframes.iter().filter(|k| !k.exists()).collect();
     assert!(missing.is_empty(), "never saved: {missing:?}");
     encode_video(&out);
-    failures.extend(check_pixels(name, &keyframes, update));
+    // A failing run's keyframes don't become baselines.
+    if failures.is_empty() || !update {
+        failures.extend(check_pixels(name, &keyframes, update));
+    }
     failures
 }
 
+/// Name filters, as libtest takes them: positional arguments, less the
+/// values of the flags that take one.
+fn filters() -> Vec<String> {
+    const VALUED: [&str; 6] = [
+        "--test-threads",
+        "--skip",
+        "--format",
+        "--color",
+        "--logfile",
+        "-Z",
+    ];
+    let mut args = std::env::args().skip(1);
+    let mut filters = vec![];
+    while let Some(arg) = args.next() {
+        if VALUED.contains(&arg.as_str()) {
+            args.next();
+        } else if !arg.starts_with('-') {
+            filters.push(arg);
+        }
+    }
+    filters
+}
+
 fn main() {
-    let filters: Vec<String> = std::env::args()
-        .skip(1)
-        .filter(|a| !a.starts_with('-'))
-        .collect();
+    let filters = filters();
     let update = std::env::var_os("OFFICEXR_UPDATE_BASELINES").is_some_and(|v| v == "1");
     let mut names: Vec<String> = std::fs::read_dir(Path::new(HERE).join("scenarios"))
         .unwrap()
@@ -574,6 +640,10 @@ fn main() {
         .filter(|n| filters.is_empty() || filters.iter().any(|f| n.contains(f.as_str())))
         .collect();
     names.sort();
+    if names.is_empty() {
+        eprintln!("no scenario matches {filters:?}");
+        std::process::exit(1);
+    }
     let mut failed = vec![];
     for name in &names {
         println!("scenario {name}");
