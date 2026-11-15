@@ -27,6 +27,21 @@ export function rendererOverride(search, storage) {
 }
 
 /**
+ * True on iPhone/iPad, where every browser (Chrome included) runs WebKit, and WebKit's WebGPU
+ * canvas flickers on iOS 26 before 26.4. iPadOS reports a Mac UA, so touch tells it apart.
+ */
+export function isIosWebKit(nav) {
+  const ua = nav?.userAgent ?? '';
+  return /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && (nav?.maxTouchPoints ?? 0) > 1);
+}
+
+/** The backend to use without probing: the user's override, else WebGL2 on iOS WebKit, else none. */
+export function preferredBackend(override, nav) {
+  // ponytail: iOS defaults to WebGL2 on every version; lift once iOS 26.4+ is the floor (`?renderer=webgpu` tests it).
+  return override ?? (isIosWebKit(nav) ? 'webgl2' : undefined);
+}
+
+/**
  * `override` when given, else WebGPU when the browser hands out an adapter that opens a device,
  * else WebGL2. The probe device is destroyed at once; Bevy makes its own.
  */

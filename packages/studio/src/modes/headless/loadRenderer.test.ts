@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { loadRendererFrom, pickBackend, rendererOverride } from '@officexr/render-wasm/load';
+import {
+  isIosWebKit,
+  loadRendererFrom,
+  pickBackend,
+  preferredBackend,
+  rendererOverride,
+} from '@officexr/render-wasm/load';
 
 const destroyed: unknown[] = [];
 const device = { destroy: () => void destroyed.push(device) };
@@ -140,5 +146,40 @@ describe('loadRendererFrom', () => {
       },
     });
     expect(imported).toEqual(['https://cdn.example/wasm/abc123/webgl2/officexr_render_web.js']);
+  });
+});
+
+describe('preferredBackend', () => {
+  const iphoneChrome = {
+    userAgent:
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/142.0 Mobile/15E148 Safari/604.1',
+    maxTouchPoints: 5,
+  };
+  const ipad = {
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15',
+    maxTouchPoints: 5,
+  };
+  const macSafari = { ...ipad, maxTouchPoints: 0 };
+  const androidChrome = {
+    userAgent: 'Mozilla/5.0 (Linux; Android 15; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0 Mobile Safari/537.36',
+    maxTouchPoints: 5,
+  };
+
+  it('defaults every iOS browser, iPadOS included, to WebGL2', () => {
+    expect(isIosWebKit(iphoneChrome)).toBe(true);
+    expect(isIosWebKit(ipad)).toBe(true);
+    expect(preferredBackend(undefined, iphoneChrome)).toBe('webgl2');
+    expect(preferredBackend(undefined, ipad)).toBe('webgl2');
+  });
+
+  it('leaves other platforms to detection', () => {
+    expect(isIosWebKit(macSafari)).toBe(false);
+    expect(preferredBackend(undefined, macSafari)).toBeUndefined();
+    expect(preferredBackend(undefined, androidChrome)).toBeUndefined();
+    expect(preferredBackend(undefined, undefined)).toBeUndefined();
+  });
+
+  it('lets an explicit override win on iOS', () => {
+    expect(preferredBackend('webgpu', iphoneChrome)).toBe('webgpu');
   });
 });
