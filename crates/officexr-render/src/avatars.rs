@@ -268,6 +268,10 @@ pub(crate) struct Avatar {
 
 /// The label a hovered player shows to be pinged; `picking::ping_bell` drives it.
 #[derive(Component, Default)]
+#[cfg_attr(
+    not(feature = "picking"),
+    expect(dead_code, reason = "only `picking::ping_bell` reads the bell's state")
+)]
 pub(crate) struct PingBell {
     /// Seconds the bell stays after the pointer leaves, so it can cross to it.
     pub linger: f32,

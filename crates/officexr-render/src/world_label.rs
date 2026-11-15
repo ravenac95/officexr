@@ -89,6 +89,10 @@ pub(crate) fn icon_badge(
 
 /// Where a placed label is, in its view's logical pixels.
 // ponytail: logical px equal the pointer's CSS px only for the primary window; an image-target view is CSS px times DPR at scale 1.
+#[cfg_attr(
+    not(feature = "picking"),
+    expect(dead_code, reason = "only the ping bell hit-tests labels")
+)]
 pub(crate) fn rect(node: &Node, computed: &ComputedNode) -> Option<Rect> {
     let (Val::Px(left), Val::Px(top)) = (node.left, node.top) else {
         return None;
