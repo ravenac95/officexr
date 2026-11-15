@@ -27,6 +27,7 @@ export default function PlayView3d({
   children: ReactNode;
 }) {
   const [cameraMode, setCameraMode] = useState<CameraMode>('fixed');
+  // ponytail: no Recenter; the Bevy view's motion look doesn't port it yet.
   const [motionLook, setMotionLook] = useState({ enabled: false, recenterKey: 0 });
   const [motionUnsupported, setMotionUnsupported] = useState(false);
   const [invertLook, setInvertLook] = useState(false);
@@ -41,7 +42,6 @@ export default function PlayView3d({
         <MotionLookControl
           enabled={motionLook.enabled}
           onEnabledChange={(enabled) => setMotionLook((m) => ({ ...m, enabled }))}
-          onRecenter={() => setMotionLook((m) => ({ ...m, recenterKey: m.recenterKey + 1 }))}
           unsupported={motionUnsupported}
           onUnsupported={() => setMotionUnsupported(true)}
         />

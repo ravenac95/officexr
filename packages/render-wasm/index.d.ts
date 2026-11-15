@@ -200,7 +200,7 @@ export interface MoveIntent {
   /** The camera yaw `dir` was turned by. */
   yaw: number;
   /** The stick's deflection when it, not the keys, gave `dir`; else 0. */
-  deflection?: number;
+  deflection: number;
 }
 
 /** The wasm-bindgen module of one backend, already instantiated by `loadRenderer`. */
@@ -278,8 +278,11 @@ export interface RendererModule {
   setStick(id: ViewId, stick: [number, number]): void;
   /** A `deviceorientation` event's angles; nulls forget the previous reading, so the next starts afresh. */
   setDeviceOrientation(id: ViewId, reading: { alpha: number | null; beta: number | null; gamma: number | null }): void;
-  /** `'bevy'` shows the view's own touch stick; `'dom'` hides it for the page's, fed by `setStick`. */
-  setJoystickKind(id: ViewId, kind: JoystickKind): void;
+  /**
+   * `'bevy'` shows the view's own touch stick; `'dom'` hides it for the page's, fed by `setStick`.
+   * Returns whether the view can show the Bevy stick: only the primary canvas's view can.
+   */
+  setJoystickKind(id: ViewId, kind: JoystickKind): boolean;
 }
 
 export type JoystickKind = 'bevy' | 'dom';

@@ -39,6 +39,7 @@ export interface BevySceneProps {
   moveInputRef?: React.RefObject<MoveInput>;
   /** Which touch joystick walks: Bevy's own, or the DOM one in `moveInputRef`. */
   joystickKind: JoystickKind;
+  onDomJoystick?: (dom: boolean) => void;
   motionLook?: MotionLookState;
   autoWalk?: AutoWalkSource;
   seating?: SeatingSource;
@@ -248,14 +249,18 @@ export function BevyScene(props: BevySceneProps) {
   }, [bevy, constants, charRadius, invertLook]);
 
   // ponytail: no recenter; `motionLook.recenterKey` is ignored on the Bevy view.
+  // A reading with nulls would reset the view's previous pose, so only the cleanup sends one.
   const motionLook = props.motionLook?.enabled ?? false;
   useEffect(() => {
     if (!bevy || !motionLook) {
       return;
     }
     const { wasm, view } = bevy;
-    const onOrientation = ({ alpha, beta, gamma }: DeviceOrientationEvent) =>
-      wasm.setDeviceOrientation(view, { alpha, beta, gamma });
+    const onOrientation = ({ alpha, beta, gamma }: DeviceOrientationEvent) => {
+      if (alpha !== null && beta !== null && gamma !== null) {
+        wasm.setDeviceOrientation(view, { alpha, beta, gamma });
+      }
+    };
     window.addEventListener('deviceorientation', onOrientation);
     return () => {
       window.removeEventListener('deviceorientation', onOrientation);
@@ -290,6 +295,7 @@ export function BevyScene(props: BevySceneProps) {
 
   const onProgress = useEffectEvent((percent: number) => props.onLoadProgress?.(percent));
   const onModelsReady = useEffectEvent(() => props.onModelsReady?.());
+  const onDomJoystick = useEffectEvent((dom: boolean) => props.onDomJoystick?.(dom));
   const onFrameStats = useEffectEvent((sample: FrameStatsSample | null) => props.onFrameStats?.(sample));
   const { actions, rules, bus, handshake, bots, viewYaw } = props;
   useEffect(() => {
@@ -306,6 +312,7 @@ export function BevyScene(props: BevySceneProps) {
         selfId,
         view: roomView(wasm, view),
         onViewYaw: (yaw) => viewYaw?.set(yaw),
+        onDomJoystick: (dom) => onDomJoystick(dom),
       },
       options,
     );

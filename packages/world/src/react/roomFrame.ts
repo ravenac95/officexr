@@ -39,7 +39,8 @@ export interface RoomView {
   takeIntent(): MoveIntent;
   setInputEnabled(enabled: boolean): void;
   setStick(stick: [number, number]): void;
-  setJoystickKind(kind: JoystickKind): void;
+  /** Whether the view can show its Bevy stick. */
+  setJoystickKind(kind: JoystickKind): boolean;
   setWorld(diff: WorldDiff): void;
   setPlayers(players: PlayersInput): void;
   setFollowTarget(pos: Xyz, yaw: number): void;
@@ -53,6 +54,8 @@ export interface RoomFrameDeps {
   bots?: BotPool;
   selfId: string;
   view: RoomView;
+  /** Whether the page's DOM joystick walks: picked, or standing in for a view without a Bevy stick. */
+  onDomJoystick?(dom: boolean): void;
   /** Receives the camera yaw each frame. */
   onViewYaw?(yaw: number): void;
 }
@@ -96,6 +99,7 @@ export class RoomFrame {
   options: RoomFrameOptions;
   private inputEnabled: boolean | null = null;
   private joystickKind: JoystickKind | null = null;
+  private domJoystick = false;
   private wasMoving = false;
   private airborne = false;
   private proximity: TrackerOutput | null = null;
@@ -125,9 +129,10 @@ export class RoomFrame {
     const { joystickKind, moveInput } = this.options;
     if (joystickKind !== this.joystickKind) {
       this.joystickKind = joystickKind;
-      view.setJoystickKind(joystickKind);
+      this.domJoystick = !view.setJoystickKind(joystickKind) || joystickKind === 'dom';
+      this.deps.onDomJoystick?.(this.domJoystick);
     }
-    if (joystickKind === 'dom' && moveInput) {
+    if (this.domJoystick && moveInput) {
       view.setStick([moveInput.current.x, moveInput.current.z]);
     }
   }
@@ -150,7 +155,7 @@ export class RoomFrame {
     // Free-fly flies the camera on the movement keys, and nothing walks the player.
     const freeFly = this.options.cameraMode === 'free-fly';
     const hasMoveInput = !freeFly && (intent.dir[0] !== 0 || intent.dir[1] !== 0);
-    const deflection = hasMoveInput ? (intent.deflection ?? 0) : 0;
+    const deflection = hasMoveInput ? intent.deflection : 0;
     const jump = !freeFly && intent.jump;
     if (hasMoveInput) {
       autoWalk?.cancel();

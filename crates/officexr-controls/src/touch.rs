@@ -1,6 +1,9 @@
 //! Touch input, as the web's `VirtualJoystick.tsx` and `useTouchCameraGestures.ts`: a fixed
 //! bottom-left Bevy UI stick walks, one finger elsewhere looks and two pinch-zoom.
 
+use std::collections::HashMap;
+
+use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use officexr_render::views::View;
@@ -28,9 +31,18 @@ pub enum JoystickKind {
     Dom,
 }
 
-/// The primary window's touches the plugin is tracking.
+/// A finger down on a window, where it was last frame and now.
+#[derive(Clone, Copy)]
+struct Finger {
+    id: u64,
+    prev: Vec2,
+    pos: Vec2,
+}
+
+/// The fingers down on each window, and the one holding the primary window's Bevy stick.
 #[derive(Resource, Default)]
 pub(crate) struct TouchState {
+    fingers: HashMap<Entity, Vec<Finger>>,
     stick_touch: Option<u64>,
 }
 
@@ -84,68 +96,100 @@ pub(crate) fn spawn_stick(mut commands: Commands) {
     commands.spawn((circle(KNOB_SIZE, 0.5), StickPart::Knob));
 }
 
-/// Applies the primary window's touches to the views on it with input enabled.
+/// Applies each window's touches to the views on it with input enabled. Only the primary window
+/// draws the Bevy stick.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn read_touches(
-    touches: Res<Touches>,
-    window: Option<Single<(Entity, &Window), With<PrimaryWindow>>>,
+    mut events: MessageReader<TouchInput>,
+    primary: Option<Single<(Entity, &Window), With<PrimaryWindow>>>,
     views: Query<&View>,
     hub: Res<ControlsHub>,
     mut state: ResMut<TouchState>,
     mut parts: Query<(&StickPart, &mut Node, &mut Visibility)>,
 ) {
-    let Some(window) = window else {
-        return;
-    };
-    let (primary, size) = (window.0, window.1.size());
+    let (primary, size) = primary.map_or((None, Vec2::ZERO), |p| (Some(p.0), p.1.size()));
     let mut hub = hub.lock();
-    let on_window: Vec<_> = views
+    let views: Vec<_> = views
         .iter()
-        .filter(|v| window_of(v, Some(primary)) == Some(primary))
-        .map(|v| v.id)
-        .filter(|id| hub.get(id).is_some_and(|c| c.input_enabled))
+        .filter_map(|v| Some((v.id, window_of(v, primary)?)))
+        .filter(|(id, _)| hub.get(id).is_some_and(|c| c.input_enabled))
         .collect();
-    let bevy_stick = on_window
+    let bevy_stick = views
         .iter()
-        .any(|id| hub[id].joystick == JoystickKind::Bevy);
+        .any(|(id, w)| Some(*w) == primary && hub[id].joystick == JoystickKind::Bevy);
 
-    for touch in touches.iter_just_pressed() {
-        if bevy_stick && state.stick_touch.is_none() && on_stick(touch.position(), size) {
-            state.stick_touch = Some(touch.id());
+    let state = &mut *state;
+    for fingers in state.fingers.values_mut() {
+        for f in fingers.iter_mut() {
+            f.prev = f.pos;
         }
     }
-    if let Some(id) = state.stick_touch
-        && (!bevy_stick || touches.get_pressed(id).is_none())
-    {
+    for event in events.read() {
+        let fingers = state.fingers.entry(event.window).or_default();
+        let at = event.position;
+        match event.phase {
+            TouchPhase::Started => {
+                fingers.push(Finger {
+                    id: event.id,
+                    prev: at,
+                    pos: at,
+                });
+                if bevy_stick
+                    && Some(event.window) == primary
+                    && state.stick_touch.is_none()
+                    && on_stick(at, size)
+                {
+                    state.stick_touch = Some(event.id);
+                }
+            }
+            TouchPhase::Moved => {
+                if let Some(f) = fingers.iter_mut().find(|f| f.id == event.id) {
+                    f.pos = at;
+                }
+            }
+            TouchPhase::Ended | TouchPhase::Canceled => {
+                fingers.retain(|f| f.id != event.id);
+                if Some(event.window) == primary && state.stick_touch == Some(event.id) {
+                    state.stick_touch = None;
+                }
+            }
+        }
+    }
+    if !bevy_stick {
         state.stick_touch = None;
     }
-    let stick_touch = state.stick_touch;
-    let stick = stick_touch
-        .and_then(|id| touches.get_pressed(id))
-        .map_or(Vec2::ZERO, |t| {
-            joystick_vector(t.position() - stick_centre(size), TRAVEL, DEAD_ZONE)
+    let no_fingers = Vec::new();
+    let on_primary = primary
+        .and_then(|w| state.fingers.get(&w))
+        .unwrap_or(&no_fingers);
+    let stick = state
+        .stick_touch
+        .and_then(|id| on_primary.iter().find(|f| f.id == id))
+        .map_or(Vec2::ZERO, |f| {
+            joystick_vector(f.pos - stick_centre(size), TRAVEL, DEAD_ZONE)
         });
 
-    let gesture: Vec<_> = touches
-        .iter()
-        .filter(|t| Some(t.id()) != stick_touch)
-        .collect();
-    for id in &on_window {
+    for (id, window) in &views {
         let Some(controls) = hub.get_mut(id) else {
             continue;
         };
-        if controls.joystick == JoystickKind::Bevy {
+        if Some(*window) == primary && controls.joystick == JoystickKind::Bevy {
             controls.stick = stick;
         }
         if !is_look_mode(controls.mode) {
             continue;
         }
+        let gesture: Vec<_> = state
+            .fingers
+            .get(window)
+            .unwrap_or(&no_fingers)
+            .iter()
+            .filter(|f| Some(f.id) != state.stick_touch)
+            .collect();
         match gesture.as_slice() {
-            [t] => controls.touch_look(t.delta()),
+            [f] => controls.look_by(f.pos - f.prev, TOUCH_SENSITIVITY),
             [a, b] => apply_zoom(
-                pinch_factor(
-                    a.previous_position().distance(b.previous_position()),
-                    a.position().distance(b.position()),
-                ),
+                pinch_factor(a.prev.distance(b.prev), a.pos.distance(b.pos)),
                 &mut controls.look.offsets,
             ),
             _ => {}
@@ -153,7 +197,7 @@ pub(crate) fn read_touches(
     }
 
     // Stays shown once a touch device has revealed it.
-    let show = bevy_stick && touches.iter().next().is_some();
+    let show = bevy_stick && !on_primary.is_empty();
     let centre = stick_centre(size);
     let knob_at = centre + Vec2::new(stick.x, -stick.y) * TRAVEL;
     for (part, mut node, mut visibility) in &mut parts {
@@ -208,6 +252,15 @@ mod tests {
         assert!(on_stick(stick_centre(window), window));
         assert!(on_stick(Vec2::new(20.0, 540.0), window));
         assert!(!on_stick(Vec2::new(400.0, 300.0), window));
+    }
+
+    #[test]
+    fn a_ten_px_drag_looks_a_twentieth_of_a_radian() {
+        use crate::look::drag_look_delta;
+        let d = drag_look_delta(Vec2::new(10.0, 0.0), TOUCH_SENSITIVITY, -1.0);
+        assert!((d - Vec2::new(-0.05, 0.0)).length() < 1e-6);
+        let inverted = drag_look_delta(Vec2::new(10.0, 0.0), TOUCH_SENSITIVITY, 1.0);
+        assert!((inverted - Vec2::new(0.05, 0.0)).length() < 1e-6);
     }
 
     #[test]

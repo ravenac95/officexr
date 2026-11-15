@@ -89,6 +89,7 @@ export function PlayView(props: PlayViewProps) {
   const moveInputRef = useRef<MoveInput>(NO_MOVE);
   const coarsePointer = useCoarsePointer();
   const joystickKind = props.joystickKind ?? 'bevy';
+  const [domJoystick, setDomJoystick] = useState(false);
   const [viewYaw] = useState(createViewYaw);
   const worldConstants = useWorldConstants(props.store);
   const navGrid = useBuildNavGrid(props.store);
@@ -141,6 +142,7 @@ export function PlayView(props: PlayViewProps) {
           worldFocused={worldFocused}
           moveInputRef={moveInputRef}
           joystickKind={joystickKind}
+          onDomJoystick={setDomJoystick}
           motionLook={props.motionLook}
           autoWalk={autoWalk}
           seating={seating}
@@ -164,7 +166,7 @@ export function PlayView(props: PlayViewProps) {
       )}
       <TeleportFlash seating={seating} />
       <SeatRefusalToast seating={seating} />
-      {coarsePointer && joystickKind === 'dom' && <VirtualJoystick inputRef={moveInputRef} />}
+      {coarsePointer && domJoystick && <VirtualJoystick inputRef={moveInputRef} />}
       {props.error ? (
         <ErrorBanner message={props.error} onDismiss={() => props.onDismissError?.()} />
       ) : (

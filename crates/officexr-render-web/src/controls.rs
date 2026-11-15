@@ -178,11 +178,14 @@ pub fn set_device_orientation(id: ViewId, reading: JsValue) -> Result<(), JsErro
 }
 
 /// `'bevy'` shows the view's own touch stick; `'dom'` hides it for the host's, fed by `setStick`.
+/// Returns whether the view can show the Bevy stick at all: only the primary canvas's view can,
+/// as Bevy UI draws on the primary window; the host's stick stands in on any other.
 #[wasm_bindgen(js_name = setJoystickKind)]
-pub fn set_joystick_kind(id: ViewId, kind: JsValue) -> Result<(), JsError> {
+pub fn set_joystick_kind(id: ViewId, kind: JsValue) -> Result<bool, JsError> {
     let kind: JoystickKind = from_js(kind)?;
     with(id, |c| {
         c.joystick = kind;
         c.stick = Vec2::ZERO;
-    })
+    })?;
+    Ok(super::PRIMARY_VIEW.get() == Some(id))
 }

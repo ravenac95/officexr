@@ -35,12 +35,13 @@ use serde::{Deserialize, Serialize};
 pub use config::{CameraConfig, FixedCamera, OrbitCamera, RotateButton};
 use look::{
     Drag, Look, MOUSE_SENSITIVITY, Modifiers, Orbit, apply_look_delta, apply_zoom, dom_wheel_delta,
-    drag_for, fixed_movement_yaw, is_look_mode, is_yaw_pitch_mode, wheel_zoom_factor,
+    drag_for, drag_look_delta, fixed_movement_yaw, is_look_mode, is_yaw_pitch_mode,
+    wheel_zoom_factor,
 };
 use motion::{DeviceReading, MotionPose, look_delta, to_pose};
 use rig::{FlyKeys, Rig};
 pub use touch::JoystickKind;
-use touch::{TOUCH_SENSITIVITY, TouchState, read_touches, spawn_stick};
+use touch::{TouchState, read_touches, spawn_stick};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -162,14 +163,9 @@ impl Controls {
         intent
     }
 
-    /// Turns the view by a mouse move of `delta` px.
-    pub fn look_by(&mut self, delta: Vec2) {
-        let d = delta * self.look_sign() * MOUSE_SENSITIVITY;
-        apply_look_delta(self.mode, d.x, d.y, &mut self.look);
-    }
-
-    fn touch_look(&mut self, delta: Vec2) {
-        let d = delta * self.look_sign() * TOUCH_SENSITIVITY;
+    /// Turns the view by a drag of `delta` px at `sensitivity` radians per px.
+    pub fn look_by(&mut self, delta: Vec2, sensitivity: f32) {
+        let d = drag_look_delta(delta, sensitivity, self.look_sign());
         apply_look_delta(self.mode, d.x, d.y, &mut self.look);
     }
 
@@ -540,7 +536,7 @@ fn steer(
 fn mouse(controls: &mut Controls, input: &WindowInput, held: Modifiers) {
     let mode = controls.mode;
     if input.locked && is_yaw_pitch_mode(mode) {
-        controls.look_by(input.motion);
+        controls.look_by(input.motion, MOUSE_SENSITIVITY);
     }
     let orbit = &controls.config.orbit;
     let rig = &mut controls.rig;
@@ -631,7 +627,7 @@ mod tests {
     use bevy::input::InputPlugin;
     use bevy::input::keyboard::Key;
     use bevy::input::mouse::{MouseMotion, MouseScrollUnit};
-    use bevy::input::touch::TouchPhase;
+    use bevy::input::touch::{TouchInput, TouchPhase};
     use bevy::time::TimeUpdateStrategy;
     use bevy::window::WindowResolution;
     use officexr_render::SceneCamera;
@@ -1124,5 +1120,95 @@ mod tests {
         c.orient(motion::DeviceReading::default());
         c.orient(reading(20.0));
         assert!((c.look.yaw - 10f32.to_radians()).abs() < 1e-5);
+    }
+
+    fn touch(app: &mut App, window: Entity, id: u64, phase: TouchPhase, at: Vec2) {
+        app.world_mut().write_message(TouchInput {
+            phase,
+            position: at,
+            window,
+            force: None,
+            id,
+        });
+    }
+
+    #[test]
+    fn one_finger_looks_two_pinch_and_the_stick_finger_does_neither() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| c.mode = CameraMode::FirstPerson);
+        let window = window(&mut app);
+        let size = app.world().get::<Window>(window).unwrap().size();
+        let stick = Vec2::new(12.0 + 55.0, size.y - 12.0 - 55.0);
+        touch(&mut app, window, 0, TouchPhase::Started, stick);
+        touch(
+            &mut app,
+            window,
+            1,
+            TouchPhase::Started,
+            Vec2::new(400.0, 200.0),
+        );
+        app.update();
+        touch(
+            &mut app,
+            window,
+            0,
+            TouchPhase::Moved,
+            stick + Vec2::new(32.0, 0.0),
+        );
+        touch(
+            &mut app,
+            window,
+            1,
+            TouchPhase::Moved,
+            Vec2::new(410.0, 200.0),
+        );
+        app.update();
+        let (yaw, stick_x) = controls(&app, id, |c| (c.look.yaw, c.stick.x));
+        assert!((yaw - -0.05).abs() < 1e-6);
+        assert_eq!(stick_x, 1.0);
+
+        touch(
+            &mut app,
+            window,
+            2,
+            TouchPhase::Started,
+            Vec2::new(510.0, 200.0),
+        );
+        app.update();
+        touch(
+            &mut app,
+            window,
+            2,
+            TouchPhase::Moved,
+            Vec2::new(610.0, 200.0),
+        );
+        app.update();
+        let (zoom, after) = controls(&app, id, |c| (c.look.offsets.zoom, c.look.yaw));
+        assert!((zoom - 2.0).abs() < 1e-5);
+        assert_eq!(after, yaw);
+    }
+
+    #[test]
+    fn touches_on_another_window_leave_the_view_alone() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| c.mode = CameraMode::FirstPerson);
+        let other = app.world_mut().spawn(Window::default()).id();
+        touch(
+            &mut app,
+            other,
+            1,
+            TouchPhase::Started,
+            Vec2::new(400.0, 200.0),
+        );
+        app.update();
+        touch(
+            &mut app,
+            other,
+            1,
+            TouchPhase::Moved,
+            Vec2::new(410.0, 200.0),
+        );
+        app.update();
+        assert_eq!(controls(&app, id, |c| c.look.yaw), 0.0);
     }
 }
