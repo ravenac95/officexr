@@ -553,6 +553,7 @@ fn fan(points: &[[f32; 2]], y: f32) -> Mesh {
 }
 
 /// Swaps each newly drawn ghost object's kind material for its ghost's translucent copy.
+#[allow(clippy::type_complexity)]
 pub(crate) fn dress_ghosts(
     mut drawn: Query<
         (&mut MeshMaterial3d<ObjectMaterial>, &ChildOf),

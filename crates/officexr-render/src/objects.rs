@@ -93,6 +93,7 @@ impl ObjectIndex {
 pub(crate) struct Placed(pub(crate) ObjectInstance);
 
 /// Loads the kinds the instances reference, and reloads the ones whose definition changed.
+#[allow(clippy::type_complexity)]
 pub(crate) fn sync_kinds(
     mut commands: Commands,
     base: Res<AssetBase>,
@@ -175,6 +176,7 @@ fn sync_view_kinds(
 }
 
 /// Registers a ready-made cuboid model for each `__primitive_<colour>` kind the instances use.
+#[allow(clippy::type_complexity)]
 pub(crate) fn register_primitives(
     mut views: Query<
         (&ViewScene, Option<&ViewOverlays>, &mut ObjectKinds),
