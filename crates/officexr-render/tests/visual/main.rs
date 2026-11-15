@@ -551,7 +551,11 @@ fn render(
                 .map(|p| serde_json::from_value(p).expect("proximity")),
             scenario.proximity_from,
         ))
-        .add_systems(PreUpdate, (drive, add_overlays, add_proximity));
+        // Before `drive` moves on, so it sees the step about to render.
+        .add_systems(
+            PreUpdate,
+            (drive, add_overlays, add_proximity.before(drive)),
+        );
     app.run();
     let failed = failed.lock().unwrap();
     failed

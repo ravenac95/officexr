@@ -283,7 +283,14 @@ export class RoomFrame {
         self && this.options.cameraMode === 'first-person'
           ? { [selfId]: xyz(feetPosition(self.pos, state.worldSettings.charRadius)) }
           : {};
-      view.setProximity(proximityInput(this.proximity, state.worldConstants.proximity, undrawn));
+      view.setProximity(
+        proximityInput(this.proximity, state.worldConstants.proximity, {
+          undrawn,
+          selfId,
+          // The fixed camera sits far above the floor, where stock bubbles would be specks.
+          sizeMul: this.options.cameraMode === 'fixed' ? 5 : 1,
+        }),
+      );
     }
   }
 
@@ -343,9 +350,18 @@ export class RoomFrame {
 function proximityInput(
   output: TrackerOutput,
   style: ProximityConstants,
-  undrawn: Record<string, Xyz>,
+  { undrawn, selfId, sizeMul }: { undrawn: Record<string, Xyz>; selfId: string; sizeMul: number },
 ): ProximityInput {
   const { discRadius, pulseSpeed, intensity, enteringColor, enteredColor, exitingColor } = style;
+  const { meetingBorderInset, meetingBorderOutset, sparkleSpeed, sparkleFloatHeight, sparkleSize } = style;
+  // Bubbles rise around both ends of the local player's approaches, as ProximityGlow's.
+  const bubbles = new Set<string>();
+  for (const [key, pair] of output.pairStates) {
+    const [a, b] = key.split('|');
+    if (pair === 'entering' && (a === selfId || b === selfId) && a && b) {
+      bubbles.add(a).add(b);
+    }
+  }
   return {
     players: Object.fromEntries(output.playerStates),
     areas: output.areas.map((a) => ({
@@ -355,7 +371,20 @@ function proximityInput(
       members: [...a.members],
     })),
     undrawn,
-    style: { discRadius, pulseSpeed, intensity, enteringColor, enteredColor, exitingColor },
+    bubbles: [...bubbles],
+    style: {
+      discRadius,
+      pulseSpeed,
+      intensity,
+      enteringColor,
+      enteredColor,
+      exitingColor,
+      meetingBorderInset,
+      meetingBorderOutset,
+      sparkleSpeed,
+      sparkleFloatHeight,
+      sparkleSize: sparkleSize * sizeMul,
+    },
   };
 }
 
