@@ -1,14 +1,11 @@
 /**
- * Debug mode smoke tests: the play view renders through Bevy, the local
- * player walks on the keyboard, the free-fly toggle frees the camera from
- * the player, and switching maps loads the new map's baked layout. Pixels
- * are only checked for "not blank"; the renderer's visual contract lives in
- * `crates/officexr-render`'s visual tests.
+ * Debug mode: the local player walks on the keyboard, the free-fly toggle
+ * frees the camera from the player, and switching maps loads the new map's
+ * baked layout. That it draws is `rendering-smoke.spec.ts`'s.
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { distinctColorsInCanvas, forceWebgl2, waitForBevyReady } from './helpers.ts';
-import { goToDebugWithMap } from './motion-helpers.ts';
+import { forceWebgl2, goToDebugWithMap, waitForBevyReady } from './helpers.ts';
 
 const SELF_ID = 'local-player';
 
@@ -39,7 +36,7 @@ async function walkForward(page: Page): Promise<number> {
   return Math.hypot(after.x - before.x, after.z - before.z);
 }
 
-test('Debug mode renders through Bevy; the player walks, and stays put in free-fly', async ({ page }) => {
+test('Debug mode: the player walks, and stays put in free-fly', async ({ page }) => {
   test.setTimeout(240_000);
   await forceWebgl2(page);
   await goToDebugWithMap(page, 'default');
@@ -48,7 +45,6 @@ test('Debug mode renders through Bevy; the player walks, and stays put in free-f
   const summary = await storeSummary(page);
   expect(summary.self, 'local player').not.toBeNull();
   expect(summary.playerCount, 'self + at least one bot').toBeGreaterThan(1);
-  await expect.poll(() => distinctColorsInCanvas(page.locator('canvas').first()), { timeout: 30_000 }).toBeGreaterThan(8);
 
   expect(await walkForward(page), 'walked on W').toBeGreaterThan(0.5);
 

@@ -5,15 +5,12 @@
  *   - the hermetic catalog api mounts (no /api/world-object-kinds fetch),
  *   - the in-memory MapStorage loads the seeded `default` map,
  *   - the editor reflects the seeded room instances,
- *   - the canvas renders real geometry.
- *
- * This is the Tier 4 backstop for the c606f10 class: a real browser, a
- * real renderer, no backend.
+ *   - the tools edit the map through the canvas.
  */
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
-import { distinctColorsInCanvas, forceWebgl2, goToModeHermetic, waitForBevyReady } from './helpers.ts';
+import { forceWebgl2, goToModeHermetic, waitForBevyReady } from './helpers.ts';
 
 const blueBlock = (id: string, position: number[]) => ({
   id,
@@ -136,21 +133,9 @@ async function voiceZoneOverlay(page: Page, canvas: Locator) {
   };
 }
 
-test('hermetic mode loads a seeded map and renders it', async ({ page }) => {
-  const canvas = await openMap(page);
-
-  // The seeded `default` map carries three room placements.
-  await expect(page.getByText(/Placed rooms \(3\)/)).toBeVisible({
-    timeout: 8_000,
-  });
-
-  // The canvas renders real geometry (not a frozen/empty buffer).
-  const colors = await distinctColorsInCanvas(canvas);
-  expect(colors).toBeGreaterThan(3);
-});
-
-test('hermetic mode exposes the explicit tool model', async ({ page }) => {
+test('hermetic mode loads the seeded map and exposes the explicit tool model', async ({ page }) => {
   await openMap(page);
+  await expect(page.getByText(/Placed rooms \(3\)/)).toBeVisible({ timeout: 8_000 });
   for (const label of ['Select', 'Move', 'Spawn']) {
     await expect(
       page.getByRole('button', { name: label, exact: true }),

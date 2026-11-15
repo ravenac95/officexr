@@ -2,8 +2,7 @@
 
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { forceWebgl2, waitForBevyReady } from './helpers.ts';
-import { goToDebugWithMap, setFixedCamera } from './motion-helpers.ts';
+import { forceWebgl2, goToDebugWithMap, waitForBevyReady } from './helpers.ts';
 
 const SELF_ID = 'local-player';
 
@@ -27,7 +26,6 @@ test('sim=rust: the local player walks under keyboard input', async ({ page }) =
   await goToDebugWithMap(page, 'default', 'rust');
   await wasmLoaded;
   await waitForBevyReady(page);
-  await setFixedCamera(page, { azimuthDeg: 90, movementYawOffsetDeg: 0 });
 
   const before = await selfPos(page);
   expect(before).not.toBeNull();

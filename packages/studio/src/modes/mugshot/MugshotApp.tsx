@@ -99,7 +99,7 @@ export interface MugshotManifest {
  * (`manualPlacement === false`) gravity owns the body. Once the human
  * drags the slider (or a test calls `__OFFICE_MUGSHOT_SET_Y_OFFSET__`)
  * the body is pinned at the slider value instead; "Auto (gravity)"
- * drops it back under gravity. See `tests/playwright/CLAUDE.md`.
+ * drops it back under gravity.
  */
 export function MugshotApp() {
   const { catalog } = useApplication();
@@ -156,7 +156,7 @@ export function MugshotApp() {
     };
   }, [catalog]);
 
-  // Readiness, and the view for drivers that capture it (`captureBevyView`).
+  // Readiness, and the view for drivers that capture it.
   useEffect(() => {
     if (!bevy) return;
     const sentinels = bevySentinels();
@@ -267,8 +267,7 @@ export function MugshotApp() {
       // The PNGs keep whatever Y the user tuned; only the manifest leaves it out.
       const zip = new JSZip();
       const angles: AzimuthDeg[] = [0, 90, 180, 270];
-      // Both cube modes, so the ZIP carries the GLB / primitive A/B pair under `ideal/`,
-      // which unzips over `tests/playwright/mugshot-baselines/<Character>/`.
+      // Both cube modes, so the ZIP carries the GLB / primitive A/B pair under `ideal/`.
       for (const mode of ['gltf', 'primitive'] as const) {
         setCubeMode(mode);
         await waitFrames(2);
