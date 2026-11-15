@@ -8,7 +8,8 @@
 //! shows). WASD or the arrows walk, shift runs, space jumps, Alt+P cycles the camera; on a touch
 //! screen the bottom-left stick walks and dragging elsewhere looks. On iOS the env vars come from
 //! the Xcode scheme, with an in-app screen as the fallback (see `ios/README.md`). With
-//! `OFFICEXR_SCREENSHOT=out.png` it saves one frame after `OFFICEXR_SCREENSHOT_FRAME` (default 600) frames, then exits.
+//! `OFFICEXR_SCREENSHOT=out.png` it saves one frame after `OFFICEXR_SCREENSHOT_FRAME` (default
+//! 600) frames, then exits.
 
 mod baked_colliders;
 mod broadcaster;
