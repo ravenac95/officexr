@@ -89,7 +89,7 @@ struct SeatInput {
     yaw: f32,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct BumpInput {
     count: u32,
     normal: [f32; 2],
@@ -106,7 +106,9 @@ struct PlayerInput {
     airborne: bool,
     #[serde(default)]
     animation: Option<PlayerAnimation>,
+    #[serde(default)]
     seat: Option<SeatInput>,
+    #[serde(default)]
     bump: BumpInput,
 }
 

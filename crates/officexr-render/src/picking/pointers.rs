@@ -802,6 +802,8 @@ mod tests {
     fn a_press_and_release_on_the_bell_pings_once_and_claims_the_press() {
         let (mut app, id, bell) = view_with_bell();
         lay_out_bell(&mut app, bell);
+        // The play view's configuration: only a bell's press is announced.
+        app.world().resource::<PickHub>().claim_only_bells(id, true);
         send(&app, id, PointerMsgAction::Move, CENTRE);
         app.update();
         app.update();
