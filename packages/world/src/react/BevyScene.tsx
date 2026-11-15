@@ -2,7 +2,7 @@ import React, { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, use
 import type { CameraConfig, JoystickKind, RendererModule, ViewId } from '@officexr/render-wasm';
 import type { Actions, Bus, PlayerState, RuleRegistry, SnapshotHandshake, Store, SyncEngine, Vec3, WorldConstants } from '@officexr/sdk';
 import type { BotPool } from '../bot/BotPool.ts';
-import { pickCharacterForPlayer } from '../characters/registry.ts';
+import { resolveCharacter } from '../characters/registry.ts';
 import type { CameraMode } from '../renderer/config.ts';
 import type { FrameStatsSample } from '../renderer/FrameStatsProbe.tsx';
 import type { MotionLookState } from '../renderer/motionLook.ts';
@@ -256,7 +256,8 @@ export function BevyScene(props: BevySceneProps) {
     joystickKind: props.joystickKind,
     autoWalk: props.autoWalk,
     seating,
-    characterOf: (p: PlayerState) => pickCharacterForPlayer(p.id, p.avatar.model, characters),
+    // The model's URL, not its id: a catalog character's id names no `/models/characters/` file.
+    characterOf: (p: PlayerState) => resolveCharacter(p.id, p.avatar.model, characters).url,
     kinds,
     bakedLayouts: bakedLayoutDiffs,
     excludeInstance,

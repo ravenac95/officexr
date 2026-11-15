@@ -23,9 +23,7 @@ export {
   type LightingSettings,
 } from './LightingRig.tsx';
 export { DEFAULT_EDITOR_LIGHTING } from '../app/editor-lighting.ts';
-// Renderer-side helpers re-exported for editor overlays (e.g. the
-// Room editor's GhostLayer needs to build a transparent material from
-// the same GLTF geometry the opaque InstancedMesh uses).
+// Renderer-side helpers re-exported for editor overlays.
 // `hasMaterialOverrides` stays internal to `cube-material.ts` (its
 // test reaches in directly) — no external editor consumes it.
 export {

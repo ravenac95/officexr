@@ -90,7 +90,7 @@ export interface RoomFrameOptions {
   joystickKind: JoystickKind;
   autoWalk?: AutoWalkSource;
   seating?: SeatingSource;
-  /** The character model `setPlayers` draws for a player. */
+  /** The character model `setPlayers` draws for a player: a built-in's name, or a model's path or URL. */
   characterOf(player: PlayerState): string;
   kinds: readonly unknown[];
   bakedLayouts: readonly BakedLayoutDiff[];

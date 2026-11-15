@@ -459,8 +459,9 @@ struct WindowInput {
 #[derive(Resource, Default)]
 struct WindowInputs {
     windows: HashMap<Entity, WindowInput>,
-    /// Their held buttons carry over from frame to frame.
     views: HashMap<ViewId, WindowInput>,
+    /// Each fed view's buttons held now, carried from frame to frame.
+    view_buttons: HashMap<ViewId, Vec<MouseButton>>,
 }
 
 impl WindowInputs {
@@ -486,7 +487,12 @@ fn gather_mouse(
     views: Query<&View>,
 ) {
     let claimed = std::mem::take(&mut claimed.0);
-    gather_view_pointers(&mut inputs.views, &mut fed, claimed, &views);
+    let WindowInputs {
+        views: view_inputs,
+        view_buttons,
+        ..
+    } = &mut *inputs;
+    gather_view_pointers(view_inputs, view_buttons, &mut fed, claimed, &views);
     let held: Vec<MouseButton> = buttons.get_pressed().copied().collect();
     inputs.windows = windows
         .iter()
@@ -519,23 +525,24 @@ fn gather_mouse(
     }
 }
 
+/// This frame's input for each view the host feeds. The host's events can
+/// hold a whole drag, press to release, when a frame is slow: a button let go
+/// this frame still counts as held for it, and only moves made while a button
+/// was down count as drag motion.
 fn gather_view_pointers(
     inputs: &mut HashMap<ViewId, WindowInput>,
+    buttons: &mut HashMap<ViewId, Vec<MouseButton>>,
     fed: &mut MessageReader<ViewPointerInput>,
     claimed: bool,
     views: &Query<&View>,
 ) {
-    inputs.retain(|id, _| views.iter().any(|v| v.id == *id));
-    for input in inputs.values_mut() {
-        *input = WindowInput {
-            scale_factor: 1.0,
-            held: std::mem::take(&mut input.held),
-            ..default()
-        };
-    }
+    buttons.retain(|id, _| views.iter().any(|v| v.id == *id));
+    inputs.clear();
     for ViewPointerInput { view, pointer } in fed.read().copied() {
+        let down = buttons.entry(view).or_default();
         let input = inputs.entry(view).or_insert_with(|| WindowInput {
             scale_factor: 1.0,
+            held: down.clone(),
             ..default()
         });
         match pointer {
@@ -543,18 +550,29 @@ fn gather_view_pointers(
                 if !claimed {
                     input.pressed.push(button);
                 }
-                if !input.held.contains(&button) {
-                    input.held.push(button);
+                for held in [&mut input.held, &mut *down] {
+                    if !held.contains(&button) {
+                        held.push(button);
+                    }
                 }
             }
-            ViewPointer::Release(button) => input.held.retain(|b| *b != button),
-            ViewPointer::Move(delta) => input.motion += delta,
+            ViewPointer::Release(button) => down.retain(|b| *b != button),
+            ViewPointer::Move(delta) if !down.is_empty() => input.motion += delta,
+            ViewPointer::Move(_) => {}
             ViewPointer::Wheel(y, unit) => {
                 let delta = dom_wheel_delta(y, unit, 1.0);
                 input.wheel.push((delta, wheel_zoom_factor(delta, unit)));
             }
-            ViewPointer::Lost => input.held.clear(),
+            ViewPointer::Lost => down.clear(),
         }
+    }
+    // A view with no events this frame keeps its buttons held.
+    for (view, down) in buttons.iter() {
+        inputs.entry(*view).or_insert_with(|| WindowInput {
+            scale_factor: 1.0,
+            held: down.clone(),
+            ..default()
+        });
     }
 }
 
@@ -1104,6 +1122,39 @@ mod tests {
         feed(&mut app, ViewPointer::Wheel(1.0, MouseScrollUnit::Line));
         app.update();
         assert!(orbit(&app, id).distance < expected.distance);
+    }
+
+    #[test]
+    fn a_drag_that_starts_and_ends_within_one_frame_still_orbits_an_image_view() {
+        let (mut app, _) = app();
+        app.init_asset::<Image>();
+        let id = app
+            .world()
+            .resource::<ViewHub>()
+            .create(ViewKind::Preview, |_| ViewTarget::Image(UVec2::new(8, 8)));
+        app.update();
+        controls(&app, id, |c| c.mode = CameraMode::Orbit);
+        let orbit = |app: &App| controls(app, id, |c| c.rig.orbit_goal);
+        let feed = |app: &mut App, pointer| {
+            app.world_mut()
+                .write_message(ViewPointerInput { view: id, pointer });
+        };
+
+        // A slow frame: the whole drag arrives before the app sees any of it.
+        feed(&mut app, ViewPointer::Press(MouseButton::Right));
+        feed(&mut app, ViewPointer::Move(Vec2::new(30.0, 0.0)));
+        feed(&mut app, ViewPointer::Release(MouseButton::Right));
+        // Moved after letting go: not part of the drag.
+        feed(&mut app, ViewPointer::Move(Vec2::new(500.0, 0.0)));
+        app.update();
+        let mut expected = look::Orbit::default();
+        expected.rotate(Vec2::new(30.0, 0.0), &OrbitCamera::default());
+        assert_eq!(orbit(&app), expected);
+
+        // The button is let go by the next frame.
+        feed(&mut app, ViewPointer::Move(Vec2::new(30.0, 0.0)));
+        app.update();
+        assert_eq!(orbit(&app), expected);
     }
 
     #[test]
