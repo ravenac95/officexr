@@ -25,6 +25,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Lint (no three.js)
+        run: pnpm lint:no-three
+
       - uses: ./.github/actions/build-wasm
 
       - name: Typecheck

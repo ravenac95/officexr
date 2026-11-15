@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import JSZip from 'jszip';
 import { CHARACTERS, isCharacterName } from '@officexr/world';
 import type { CharacterName } from '@officexr/world';
-import type { BackgroundViewConfig, LightingViewConfig } from '@officexr/world/renderer';
+import type { BackgroundViewConfig, LightingViewConfig } from '@officexr/world/app';
 import { createPersistentLocalState } from '@officexr/core-refactor';
 import { bodyPosition, setBevyReady, useApplication, usePrimaryBevyView, type BevyView } from '@officexr/world/react';
 import { downloadBlob } from '../../lib/utils.ts';

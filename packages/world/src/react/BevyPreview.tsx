@@ -4,13 +4,22 @@ import { DEFAULT_WORLD_CONSTANTS } from '@officexr/sdk';
 import { assertNever } from '../renderer/assertNever.ts';
 import { DEFAULT_EDITOR_LIGHTING } from '../app/editor-lighting.ts';
 import { BODY_Y } from '../physics/rules.ts';
-import type { AnimationState } from '../renderer/Adventurer.tsx';
-import type { FrameStatsSample } from '../renderer/FrameStatsProbe.tsx';
 import type { WorldObjectKind } from '../scenes/world-object-kinds-schema.ts';
 import { bootBevy } from './bevyRenderer.ts';
-import { frameStatsMeter } from './frameStatsMeter.ts';
+import { frameStatsMeter, type FrameStatsSample } from './frameStatsMeter.ts';
 
 type Vec3 = [number, number, number];
+
+/** A character clip the preview can play; the renderer maps each to a clip in the rig. */
+export type AnimationState =
+  | 'idle'
+  | 'walking'
+  | 'running'
+  | 'jumping'
+  | 'shooting'
+  | 'throwing'
+  | 'hit'
+  | 'sitting';
 
 export interface PreviewAnimation {
   state: AnimationState;
@@ -76,7 +85,6 @@ const CHAR_RADIUS = 0.4;
 const VOXEL_SIZE = 0.5;
 const SPIN_RAD_PER_SEC = 0.4;
 const INSTANCE_ID = 'preview';
-/** `EndlessGrid`'s defaults. */
 const GRID: Overlay = { tag: 'grid', kind: 'grid', y: 0, cellSize: 1, fade: 80 };
 
 const ORBIT_LIMITS = { pan: false, minDistance: 1.5, maxDistance: 40 };
@@ -91,7 +99,7 @@ const CHARACTER_CAMERA: CameraConfig = {
   },
 };
 
-/** drei `OrbitControls`', as the object preview had. */
+/** Left-drag orbits, with a third of a second of damping. */
 const KIND_CAMERA: CameraConfig = { orbit: { ...ORBIT_LIMITS, rotateButton: 'left', dampingSecs: 0.33 } };
 
 /** The orbit putting the camera at `eye`, looking at `target`. */

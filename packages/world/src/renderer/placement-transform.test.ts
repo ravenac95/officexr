@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { createInstanceGeometry } from '../app/geometry-service.ts';
 import { compileMap } from '../scenes/compile-map.ts';
@@ -8,11 +7,20 @@ import type { WorldObjectKind } from '../scenes/world-object-kinds-schema.ts';
 import { VOXEL_SIZE } from './config.ts';
 import { placementTransform } from './placement-transform.ts';
 
+type Vec = readonly [number, number, number];
+
+/** `v` turned `yaw` radians about +Y, in the sense of a Bevy or glTF `rotation.y`. */
+const rotateY = ([x, y, z]: Vec, yaw: number): Vec => [
+  x * Math.cos(yaw) + z * Math.sin(yaw),
+  y,
+  -x * Math.sin(yaw) + z * Math.cos(yaw),
+];
+const add = (a: Vec, b: Vec): Vec => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const near = (v: readonly number[]) => v.map((x) => expect.closeTo(x, 9));
+
 describe('placementTransform', () => {
   const room = emptyRoomDocument('room');
   room.commands.push(newPlaceObject({ kindId: 'k', position: [2, 1, 3] }));
-  const localMin = new THREE.Vector3(2, 1, 3).multiplyScalar(VOXEL_SIZE);
-  const localMax = new THREE.Vector3(3, 2, 4).multiplyScalar(VOXEL_SIZE);
 
   it.each([0, 1, 2, 3] as const)('moves a cube onto its compileMap AABB at rotationY %i', (rotationY) => {
     const placement = { position: [7, 2, -5] as [number, number, number], rotationY };
@@ -21,20 +29,16 @@ describe('placementTransform', () => {
     const [inst] = compileMap(map, new Map([['room', room]]), VOXEL_SIZE).instances;
 
     const { position, rotation } = placementTransform(placement);
-    const matrix = new THREE.Matrix4().compose(
-      new THREE.Vector3(...position),
-      new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotation)),
-      new THREE.Vector3(1, 1, 1),
+    const corners = [2, 3].flatMap((cx) =>
+      [1, 2].flatMap((cy) => [3, 4].map((cz): Vec => [cx * VOXEL_SIZE, cy * VOXEL_SIZE, cz * VOXEL_SIZE])),
     );
-    const world = new THREE.Box3(localMin.clone(), localMax.clone()).applyMatrix4(matrix);
+    const world = corners.map((c) => add(position, rotateY(c, rotation[1])));
+    const min = [0, 1, 2].map((i) => Math.min(...world.map((c) => c[i])) / VOXEL_SIZE);
+    const max = [0, 1, 2].map((i) => Math.max(...world.map((c) => c[i])) / VOXEL_SIZE);
 
     const [x, y, z] = inst.position;
-    expect(world.min.toArray().map((v) => v / VOXEL_SIZE)).toEqual(
-      [x, y, z].map((v) => expect.closeTo(v, 9)),
-    );
-    expect(world.max.toArray().map((v) => v / VOXEL_SIZE)).toEqual(
-      [x + 1, y + 1, z + 1].map((v) => expect.closeTo(v, 9)),
-    );
+    expect(min).toEqual(near([x, y, z]));
+    expect(max).toEqual(near([x + 1, y + 1, z + 1]));
   });
 
   describe('compiled yaw matches the rigid room transform', () => {
@@ -47,12 +51,6 @@ describe('placementTransform', () => {
       catalog: { getKind: (id) => (id === 'k' ? kind : undefined) },
       voxelSize: VOXEL_SIZE,
     });
-    const matrix = (position: readonly number[], rotationY: number) =>
-      new THREE.Matrix4().compose(
-        new THREE.Vector3(...position),
-        new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rotationY, 0)),
-        new THREE.Vector3(1, 1, 1),
-      );
 
     const cases = [0, 90, 45].flatMap((yawDeg) =>
       ([0, 1, 2, 3] as const).map((rotationY) => ({ yawDeg, rotationY })),
@@ -74,12 +72,12 @@ describe('placementTransform', () => {
 
       const room = placementTransform(placement);
       const local = geom.meshTransform([3, 1, 5], 'k', yawDeg);
-      const rigid = matrix(room.position, room.rotation[1]).multiply(
-        matrix(local.position, local.rotationY),
-      );
+      const rigidPosition = add(room.position, rotateY(local.position, room.rotation[1]));
+      const rigidYaw = room.rotation[1] + local.rotationY;
       const compiled = geom.meshTransform(inst.position, 'k', inst.yawDeg);
-      expect(matrix(compiled.position, compiled.rotationY).elements).toEqual(
-        rigid.elements.map((v) => expect.closeTo(v, 9)),
+      expect(compiled.position).toEqual(near(rigidPosition));
+      expect([Math.cos(compiled.rotationY), Math.sin(compiled.rotationY)]).toEqual(
+        near([Math.cos(rigidYaw), Math.sin(rigidYaw)]),
       );
     });
   });

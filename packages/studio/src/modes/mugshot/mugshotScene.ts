@@ -1,6 +1,6 @@
 import { DEFAULT_WORLD_CONSTANTS } from '@officexr/sdk';
 import type { CameraPose, WorldDiff } from '@officexr/render-wasm';
-import type { BackgroundViewConfig, LightingViewConfig } from '@officexr/world/renderer';
+import type { BackgroundViewConfig, LightingViewConfig } from '@officexr/world/app';
 
 export type CubeMode = 'gltf' | 'primitive';
 

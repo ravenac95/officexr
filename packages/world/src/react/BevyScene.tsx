@@ -4,7 +4,7 @@ import type { Actions, Bus, PlayerState, RuleRegistry, SnapshotHandshake, Store,
 import type { BotPool } from '../bot/BotPool.ts';
 import { resolveCharacter } from '../characters/registry.ts';
 import type { CameraMode } from '../renderer/config.ts';
-import type { FrameStatsSample } from '../renderer/FrameStatsProbe.tsx';
+import type { FrameStatsSample } from './frameStatsMeter.ts';
 import type { MotionLookState } from '../renderer/motionLook.ts';
 import type { AutoWalkSource, MoveInput } from '../renderer/moveIntent.ts';
 import { placementTransform } from '../renderer/placement-transform.ts';

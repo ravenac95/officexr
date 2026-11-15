@@ -13,7 +13,7 @@ import {
   LocalStorageMapStorage,
   LocalStorageRoomStorage,
 } from '@officexr/world/scenes';
-import type { CameraMode } from '@officexr/world/renderer';
+import type { CameraMode } from '@officexr/world/react';
 import { SidePanel } from '../../ui/SidePanel.tsx';
 import { Section, Toggle } from '../../ui/controls/index.ts';
 import { SaveStatus, WorldPanels } from '../../panels/world/WorldPanels.tsx';

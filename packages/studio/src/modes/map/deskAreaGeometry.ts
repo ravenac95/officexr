@@ -1,5 +1,5 @@
 import type { DeskArea, SerializedMap } from '@officexr/world/scenes';
-import { VOXEL_SIZE } from '@officexr/world/renderer';
+import { VOXEL_SIZE } from '@officexr/world';
 
 type Bounds = Pick<DeskArea, 'min' | 'max'>;
 

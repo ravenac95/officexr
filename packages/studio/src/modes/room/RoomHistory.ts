@@ -15,7 +15,7 @@ function mintNodeId(): string {
  * in `useRoomDocument` so its mutable linked-list state survives
  * React re-renders without triggering extra renders itself.
  *
- * No imports from `react`, `three`, or `@officexr/world/renderer`.
+ * No imports from `react` or the renderer.
  */
 export class RoomHistory {
   /** The document used as the base for replay. Cleared on reset(). */

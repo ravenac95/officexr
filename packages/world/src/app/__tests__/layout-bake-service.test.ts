@@ -351,7 +351,7 @@ describe('bakeLayout', () => {
   it('positions instances via geometry.meshTransform (matches runtime renderer)', async () => {
     // The bake must not reimplement the voxel→world transform: every
     // command's (position, kindId, yawDeg) goes through geometry.meshTransform,
-    // so baked meshes land exactly where <ObjectInstances> draws them. The
+    // so baked meshes land exactly where the renderer draws instances. The
     // optimizer can collapse wrapper nodes, hence the spy rather than reading
     // node transforms back.
     const blockBytes = await makeTrivialGlb('cube');

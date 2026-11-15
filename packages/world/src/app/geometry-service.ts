@@ -52,12 +52,11 @@ interface LocalAABB {
 }
 
 /** Magic kind-id prefix for the Mugshot's primitive-box diagnostic
- * (rendered by ObjectInstances' `PrimitiveInstanceGroup`). These ids
+ * (drawn as plain cuboids by the Bevy renderer's `objects.rs`). These ids
  * are NOT in the catalog, so without the special-case in `worldAABB`
  * below they'd fall back to a one-voxel cube and the collider would be
  * far smaller than the 2 m visible box — under gravity the character
- * falls straight through it. Single source of truth; ObjectInstances
- * imports these. */
+ * falls straight through it. */
 export const PRIMITIVE_KIND_PREFIX = '__primitive_';
 /** Physical size (m) of a primitive diagnostic box — mirrors the 2 m
  * KayKit blocks (`colored_block_blue` / `stone`) it stands in for, so

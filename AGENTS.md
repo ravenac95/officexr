@@ -27,7 +27,7 @@ officexr/
 │   │   ├── src/          # main.ts (entrypoint), backend.ts (createBackend: db + realtime + app, shared with `pnpm dev`), app.ts (createApp), api.ts (/api/*), auth.ts (Google login, logout), db.ts (pg),
 │   │   │                 # jaasToken.ts (server-side JaaS JWT signing), runtimeConfig.ts (/config.js), staticDir.ts (/models), listen.ts, shared.ts (browser-safe types/limits); vitest specs
 │   │   └── .env.example  # SUPABASE_DB_URL, GOOGLE_*, SESSION_SECRET, PUBLIC_URL, PORT, ADMIN_PORT, OFFICEXR_DEV_USER_*, VITE_JAAS_APP_ID, OFFICEXR_JAAS_* (server-only), OFFICEXR_ASSET_BASE_URL
-│   ├── world/            # @officexr/world — renderer, physics, bots, maps/rooms/cube kinds
+│   ├── world/            # @officexr/world — Bevy views (react/), physics, bots, maps/rooms/cube kinds
 │   ├── studio/           # @officexr/studio — map/room/object/character/debug editors
 │   ├── studio-server/    # @officexr/studio-server — studio backend: main.ts (entrypoint), app.ts (internal + public servers), studio-gate.ts (public-port sign-in gate),
 │   │                     # studio-backend.ts (storage hooks + R2 sync, shared with the Vite studio), r2-publisher.ts, push-world-constants.ts
@@ -114,6 +114,7 @@ pnpm --filter @officexr/studio-server start   # Studio backend: internal :5174, 
 pnpm typecheck    # Typecheck every package
 pnpm test         # Unit tests for every package
 pnpm test:e2e:ci  # Hermetic Playwright suite run in CI
+pnpm lint:no-three  # Fails on any three.js, @react-three/* or Leva import or dependency (CI)
 pnpm --filter @officexr/realtime-server start   # Realtime server on :8787
 ```
 
@@ -214,8 +215,8 @@ Key controls:
 
 Every value is fully controlled — there is no module-level store
 backing any of the panels. The previous Leva-based stack has been
-removed entirely; `pnpm --filter @officexr/studio lint:leva-free`
-runs four greps and fails CI if any Leva references leak back in.
+removed entirely; `pnpm lint:no-three` fails CI if Leva, three.js or
+react-three-fiber references leak back in.
 
 The Debug tuning panels (Bot, Animation, Jump, Proximity, Lighting,
 Background, FixedCamera, Settings) live at
@@ -243,9 +244,8 @@ This downloads the three zip files, unzips them into
 the `.gltf` files, and appends any not-yet-known entries to
 `cube-kinds.json`. Re-running with no new packs is a no-op.
 
-If you skip the install step, the catalog still loads but
-`useGLTF(...)` will 404 on any furniture / prototype / restaurant kind your
-scene references. The original 12 KayKit BlockBits ship in-repo so the
+If you skip the install step, the catalog still loads but the renderer
+will 404 on any furniture / prototype / restaurant kind your scene references. The original 12 KayKit BlockBits ship in-repo so the
 default Scenes / Debug paths work without the install step.
 
 ## Database Migrations

@@ -11,10 +11,10 @@ import { paths, studioApiOptions } from '../../apiOrigin.ts';
  * Studio-side wrapper around the world's catalog store. Adds:
  *   - A selected-kind state (drives the Object editor's preview +
  *     Leva binding).
- *   - `applyPatch(partial)` — applies a Leva slider tweak to the
+ *   - `applyPatch(partial)` — applies a slider tweak to the
  *     currently-selected kind via `patchKind`, which mutates the
  *     in-memory store + notifies subscribers (so the Room editor's
- *     palette + ObjectInstances re-render live).
+ *     palette and views re-render live).
  *   - Auto-save to /api/world-object-kinds via FilesystemCatalogStorage,
  *     debounced 500ms so a slider drag doesn't fire one PUT per
  *     frame.

@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { useWorldFocus } from '@officexr/world/react';
-import type { CameraMode } from '@officexr/world/renderer';
+import type { CameraMode } from '@officexr/world/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CameraModeControl } from './CameraModeControl';
 import { KeybindsTab } from './KeybindsTab';

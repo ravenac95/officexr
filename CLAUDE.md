@@ -40,12 +40,12 @@ not aspirational rules — they're the baseline the existing
   CollisionSettings` instead of the whole bag.
 - **Dependency Inversion.** High-level modules don't depend on
   low-level details. `@officexr/sdk` and `@officexr/core-refactor` know
-  nothing about `three` or `react`; `@officexr/world` (renderer +
+  nothing about the renderer or `react`; `@officexr/world` (Bevy views +
   physics + bots) depends on the SDK, never the reverse.
   This is enforced by greps that should stay clean:
 
   ```bash
-  grep -rn "from 'three'" packages/sdk packages/realtime-server packages/core-refactor
+  grep -rn "@officexr/render-wasm" packages/sdk packages/realtime-server packages/core-refactor
   grep -rn "from 'react'" packages/sdk packages/realtime-server packages/core-refactor
   ```
 
@@ -66,12 +66,10 @@ above, leave a comment at the violation site that says:
 Example shape (don't copy verbatim, adapt to the situation):
 
 ```ts
-// SRP violation: this hook owns both the Leva controls AND the
-// mirror into actions.setWorldSettings. The panels SDK boundary
-// forces this — Leva's `useControls` must be called from the same
-// component that renders the panel root, so splitting "panel UI" and
-// "broadcast" into two modules would require a Leva fork. Acceptable
-// scope for a single per-panel file.
+// SRP violation: this view both feeds the Bevy renderer AND turns
+// its picks into edits. `onPick` keeps one callback per view, so
+// splitting "rendering" and "picking" into two modules would have
+// them fight over it. Acceptable scope for a single editor view.
 ```
 
 Comments like that turn a code smell into a reviewed, traceable
@@ -89,25 +87,28 @@ escape hatch is for genuine constraints, not for skipping refactors.
   add an integration test against the in-memory channel hub
   (`createInMemoryChannelHub`) — that's the convergence-test pattern
   the SDK already uses.
-- **No new `import * as THREE` outside `packages/*/renderer/**`.**
-  Hooks and SDK code stay headless. This is the same constraint
-  spelled out in `refactor-plan/00-overview.md §"Hard rules"`.
+- **No three.js, react-three-fiber or Leva.** Every surface renders
+  through Bevy: `crates/officexr-render`, loaded in the browser as
+  `@officexr/render-wasm` and mounted by the views in
+  `packages/world/src/react/` (`BevyScene`, `BevyPreview`, `bootBevy`).
+  Hooks and SDK code stay headless; rendering logic belongs in Rust.
+  `pnpm lint:no-three` (run in CI) fails on any `three`,
+  `@react-three/*` or `leva` import or dependency.
 - **No new `useRef + setStateSync` mirror pairs.** They were the
   load-bearing footgun that ARCHITECTURE.md observation O3 calls out.
   Use the store or a `subscribeAll` listener instead.
-- **Editor canvases compose renderer primitives; they don't
-  re-implement them.** World objects render via
-  `<ObjectInstances worldObjects={…} />`; lighting via
-  `<LightingRig lighting={…} />`; character and kind previews
-  via `<BevyPreview />`. Editor-specific overlays (selection
-  outlines, tool ghosts, hover tooltips, command-tree picking)
-  layer ON TOP of those primitives — they don't replace them.
-  The `lint:no-bespoke-renderer` script enforces the headline
-  cases: no `SEAM_OVERLAP` anywhere, no inline `<directionalLight>`
-  / `<hemisphereLight>` / `<ambientLight>` / etc. outside the
-  renderer package. If you need a new primitive, add it to
-  `packages/world/src/renderer/` and export it — don't fork
-  it inside an editor.
+- **Editor views compose `officexr-render` primitives; they don't
+  re-implement them.** An editor mounts a Bevy view and drives it
+  through `@officexr/render-wasm`: the world (instances, baked
+  layouts, lighting, sky) through `setWorld`, editor-only drawing
+  (selection outlines, tool ghosts, grids, gizmos, markers, zones,
+  labels) through `setOverlays`, and hit-testing through picking
+  (`onPick`, `rayAtScreen`, `intersectPlane`). Character and kind
+  previews mount `<BevyPreview />`. DOM UI (toolbars, tooltips,
+  menus) sits beside the canvas. If you need a new primitive, add
+  it to `crates/officexr-render` (a new `Overlay` kind, say) and
+  expose it through `officexr-render-web` — don't draw it in a
+  second canvas inside an editor.
 - **Hermetic studio test mode (`?test=1`).** `packages/studio/src/App.tsx`
   has a startup branch: when the URL carries `?test=1`, the studio boots
   with a bundled-catalog `ApplicationApi` (no `/api/world-object-kinds`
