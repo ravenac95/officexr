@@ -14,7 +14,7 @@ import {
   type SentWorld,
 } from '@officexr/world/react';
 import { DEFAULT_EDITOR_LIGHTING } from '@officexr/world/renderer';
-import { studioFetch } from '../../apiOrigin.ts';
+import { useBakedLayoutBlobs } from '../useBakedLayoutBlobs.ts';
 import { publishFrameStats } from '../../perf/frame-stats.ts';
 import type { SceneEditorBackend } from './SceneEditorBackend.ts';
 import { editorOverlays } from './editorOverlays.ts';
@@ -32,33 +32,6 @@ function screenRay({ wasm, view }: BevyView, [x, y]: readonly [number, number]):
     origin: () => wasm.rayAtScreen(view, x, y).origin,
     intersect: (plane) => wasm.intersectPlane(view, x, y, plane),
   };
-}
-
-/**
- * The baked layout GLB as a `blob:` URL Bevy can load: the studio API wants its session cookie or
- * preview token, which Bevy's own fetch doesn't send.
- */
-function useBakedLayoutBlob(path: string | undefined): string | null {
-  const [blob, setBlob] = useState<string | null>(null);
-  useEffect(() => {
-    if (!path) return;
-    let url: string | null = null;
-    let cancelled = false;
-    studioFetch(bakedLayoutGlbUrl(path))
-      .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(`baked layout: HTTP ${r.status}`))))
-      .then((b) => {
-        if (cancelled) return;
-        url = URL.createObjectURL(b);
-        setBlob(url);
-      })
-      .catch((e: unknown) => console.warn(e));
-    return () => {
-      cancelled = true;
-      setBlob(null);
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [path]);
-  return blob;
 }
 
 /**
@@ -97,7 +70,8 @@ export function SceneEditorView({ backend }: { backend: SceneEditorBackend }) {
     };
   }, [bevy]);
 
-  const layoutBlob = useBakedLayoutBlob(backend.bakedLayoutPath);
+  const layoutGlb = backend.bakedLayoutPath ? bakedLayoutGlbUrl(backend.bakedLayoutPath) : null;
+  const layoutBlob = useBakedLayoutBlobs(layoutGlb ? [layoutGlb] : []).get(layoutGlb ?? '') ?? null;
   const { bakedLayoutName } = backend;
   const bakedLayouts = useMemo(
     () =>

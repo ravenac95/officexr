@@ -27,8 +27,8 @@ import { useMapRoomLibrary } from './useMapRoomLibrary.ts';
  *
  * Layout:
  *   - LeftPanel:  RoomPalette (saved rooms) + MapPicker (load/new).
- *   - Main:       MapEditorCanvas (free-fly + per-room groups + spawn
- *                 markers + desk-area rectangles + selection outline)
+ *   - Main:       MapEditorCanvas (a Bevy world view: rooms, spawn
+ *                 markers, desk areas, voice zones, selection outline)
  *                 with a top-right MapToolbar overlay (Select / Move /
  *                 Spawn / Desk area).
  *   - SidePanel:  RoomInstanceList, SpawnList, DeskAreaList.

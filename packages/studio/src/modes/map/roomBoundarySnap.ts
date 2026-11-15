@@ -113,3 +113,34 @@ function snapAxis(
   }
   return best?.delta ?? 0;
 }
+
+/**
+ * Where a Move drag puts a room: the floor `point` under the pointer, less the press's `offset` from
+ * the room's anchor, snapped to the voxel grid and then to a neighbour within `thresholdVoxels`.
+ * `self` is the room's AABB at `current`. Null when the room stays put.
+ */
+export function dragRoomTo(
+  point: { x: number; z: number },
+  offset: { x: number; z: number },
+  current: readonly [number, number, number],
+  self: RoomAABBVoxel | null,
+  neighbors: readonly RoomAABBVoxel[],
+  voxelSize: number,
+  thresholdVoxels: number,
+): [number, number, number] | null {
+  let vx = Math.round((point.x - offset.x) / voxelSize);
+  let vz = Math.round((point.z - offset.z) / voxelSize);
+  if (self && neighbors.length > 0) {
+    const tx = vx - current[0];
+    const tz = vz - current[2];
+    const proposed: RoomAABBVoxel = {
+      id: self.id,
+      min: [self.min[0] + tx, self.min[1], self.min[2] + tz],
+      max: [self.max[0] + tx, self.max[1], self.max[2] + tz],
+    };
+    const { dx, dz } = snapRoomToNeighbors(proposed, neighbors, thresholdVoxels);
+    vx += dx;
+    vz += dz;
+  }
+  return vx === current[0] && vz === current[2] ? null : [vx, current[1], vz];
+}

@@ -11,13 +11,19 @@
  * real renderer, no backend.
  */
 
+test.setTimeout(240_000);
+
+/** The map editor on the seeded `default` map, once Bevy has loaded it. */
+async function openMap(page: Page): Promise<Locator> {
+  await forceWebgl2(page);
+  await goToModeHermetic(page, 'map', SEED);
+  await waitForBevyReady(page);
+  return page.locator('main canvas');
+}
+
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
-import {
-  goToModeHermetic,
-  waitForCanvasReady,
-  distinctColorsInCanvas,
-} from './helpers.ts';
+import { distinctColorsInCanvas, forceWebgl2, goToModeHermetic, waitForBevyReady } from './helpers.ts';
 
 const blueBlock = (id: string, position: number[]) => ({
   id,
@@ -131,8 +137,7 @@ async function voiceZoneOverlay(page: Page, canvas: Locator) {
 }
 
 test('hermetic mode loads a seeded map and renders it', async ({ page }) => {
-  await goToModeHermetic(page, 'map', SEED);
-  const canvas = await waitForCanvasReady(page);
+  const canvas = await openMap(page);
 
   // The seeded `default` map carries three room placements.
   await expect(page.getByText(/Placed rooms \(3\)/)).toBeVisible({
@@ -145,8 +150,7 @@ test('hermetic mode loads a seeded map and renders it', async ({ page }) => {
 });
 
 test('hermetic mode exposes the explicit tool model', async ({ page }) => {
-  await goToModeHermetic(page, 'map', SEED);
-  await waitForCanvasReady(page);
+  await openMap(page);
   for (const label of ['Select', 'Move', 'Spawn']) {
     await expect(
       page.getByRole('button', { name: label, exact: true }),
@@ -157,8 +161,7 @@ test('hermetic mode exposes the explicit tool model', async ({ page }) => {
 test('voice zone toggle previews the footprint, follows rotate and move, and survives a map switch', async ({
   page,
 }) => {
-  await goToModeHermetic(page, 'map', SEED);
-  const canvas = await waitForCanvasReady(page);
+  const canvas = await openMap(page);
   const zoneSwitch = (id: string) =>
     page.getByTestId(`room-row-${id}`).getByRole('switch', { name: 'Voice zone' });
   const overlay = () => voiceZoneOverlay(page, canvas);
@@ -204,4 +207,25 @@ test('voice zone toggle previews the footprint, follows rotate and move, and sur
   await expect(zoneSwitch('inst-a')).toBeChecked();
   await expect(zoneSwitch('inst-c')).not.toBeChecked();
   await expect.poll(async () => (await overlay()).count).toBeGreaterThan(100);
+});
+
+test('the Spawn tool drops a spawn on a room, and the Desk area tool draws an area', async ({ page }) => {
+  const canvas = await openMap(page);
+  await expect(page.getByText(/Placed rooms \(3\)/)).toBeVisible();
+  // A room's voice zone marks where it is on screen.
+  await page.getByTestId('room-row-inst-a').getByRole('switch', { name: 'Voice zone' }).click();
+  await expect.poll(async () => (await voiceZoneOverlay(page, canvas)).count).toBeGreaterThan(100);
+  const room = await voiceZoneOverlay(page, canvas);
+
+  await page.getByRole('button', { name: 'Spawn', exact: true }).click();
+  await page.mouse.click(room.x, room.y);
+  await expect(page.getByText(/Spawn points \(1\)/)).toBeVisible();
+
+  const box = (await canvas.boundingBox())!;
+  await page.getByRole('button', { name: 'Desk area', exact: true }).click();
+  await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.75);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.85, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.getByText(/Desk areas \(1\)/)).toBeVisible();
 });

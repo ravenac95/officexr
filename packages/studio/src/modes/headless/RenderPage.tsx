@@ -10,7 +10,8 @@ import {
 } from '@officexr/world/scenes';
 import { useTestStorages } from '../../test-harness/TestStorageContext.tsx';
 import type { RoomPlacements } from '../map/roomPlacements.ts';
-import { layoutUrl, loadRenderContent, type RenderContent, type RenderStorages } from './renderContent.ts';
+import { studioBakedLayoutUrl } from '../useBakedLayoutBlobs.ts';
+import { loadRenderContent, type RenderContent, type RenderStorages } from './renderContent.ts';
 import { cameraPose, frameCamera, type Bounds, type CameraSetup } from './renderFraming.ts';
 import { parseRenderParams, type RenderParams } from './renderParams.ts';
 import { paths, studioApiOptions, studioFetch } from '../../apiOrigin.ts';
@@ -179,7 +180,7 @@ function renderWorld(api: ApplicationApi, content: RenderContent): WorldDiff {
           instances: content.worldObjects.instances,
           bakedLayouts:
             content.type === 'room' && content.layoutName
-              ? [{ gltfPath: layoutUrl(content.layoutName), position: [0, 0, 0], rotationY: 0, layoutName: content.layoutName }]
+              ? [{ gltfPath: studioBakedLayoutUrl(content.layoutName), position: [0, 0, 0], rotationY: 0, layoutName: content.layoutName }]
               : [],
         };
   const kindIds = new Set(placed.instances.map((i) => i.kindId));
