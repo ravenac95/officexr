@@ -139,12 +139,11 @@ cube surface for any character regardless of rig conventions.
   diagnostic only**: it does not flow into the export because
   doing so would let the human "cheat" the placement test by
   baking a manual lift into the baseline.
-- **Mugshot baselines** —
-  `tests/playwright/mugshot-baselines/<Character>/`. PNGs +
-  manifest captured by the in-app Export button (Barbarian only).
-  Pinned manifest schema (`schemaVersion: 2`) deliberately omits
-  Y; the test reproduces at the system's default Y so the baseline
-  preserves whatever the placement chain currently produces.
+- **Placement baselines** — the native harness
+  (`crates/officexr-render/tests/visual/`) renders every character
+  on the cubes and asserts its feet within 10 cm of the surface.
+  The in-app Export button still downloads PNGs + a manifest
+  (`schemaVersion: 2`), which deliberately omits Y.
 
 ## Adding a new character
 
@@ -157,11 +156,9 @@ cube surface for any character regardless of rig conventions.
    `__OFFICE_MESH_DEBUG__` — but for any conventional
    humanoid-rig GLB the chain above handles it without per-rig
    tuning.
-4. Click Export to produce a baseline set, drop into
-   `tests/playwright/mugshot-baselines/<NewName>/`, commit. The
-   `mugshot-baseline-compare.spec.ts` spec picks it up
-   automatically (it iterates the CHARACTERS array, skipping any
-   character without a baseline directory).
+4. Add the character to the native harness's character-on-surface
+   scenario and write its baselines (`OFFICEXR_UPDATE_BASELINES=1`;
+   see the repo-root `CLAUDE.md`).
 
 ## What NOT to do
 

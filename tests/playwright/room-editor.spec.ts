@@ -8,7 +8,7 @@
  */
 
 import { expect, test } from '@playwright/test';
-import { forceWebgl2, goToModeHermetic, waitForBevyReady } from './helpers.ts';
+import { forceWebgl2, goToModeHermetic, pageErrors, waitForBevyReady } from './helpers.ts';
 
 // SwiftShader draws the Bevy page a frame or two a second, and each real input waits on one.
 test.use({ actionTimeout: 30_000 });
@@ -25,8 +25,9 @@ const EMPTY_ROOM = {
 test('a canvas click with the Add tool places a block', async ({ page }) => {
   test.setTimeout(240_000);
   await forceWebgl2(page);
+  const errors = pageErrors(page);
   await goToModeHermetic(page, 'room', EMPTY_ROOM);
-  await waitForBevyReady(page);
+  await waitForBevyReady(page, errors);
   await expect(page.getByText('History (0)')).toBeVisible();
 
   await page.check('#room-show-layout-objects');

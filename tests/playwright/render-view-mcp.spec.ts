@@ -65,29 +65,27 @@ test.afterAll(async ({ request }) => {
   await mcp(request, 'delete_room', { name: EMPTY_ROOM });
 });
 
-const CAMERAS: Array<[string, unknown]> = [
-  ['top', 'top'],
-  ['iso', 'iso'],
-  ['custom', { position: [3, 8, 12], lookAt: [3, 1, 1] }],
+// The cameras' parsing and framing are unit-tested; this checks the tool end to end, once per target.
+const RENDERS: Array<[string, string, unknown]> = [
+  ['map', MAP, 'top'],
+  ['room', ROOM, { position: [3, 8, 12], lookAt: [3, 1, 1] }],
 ];
 
-for (const [targetType, name] of [['map', MAP], ['room', ROOM]]) {
-  for (const [cameraLabel, camera] of CAMERAS) {
-    test(`renders the ${targetType} from the ${cameraLabel} camera`, async ({ request }) => {
-      const result = await mcp(request, 'render_view', { target: { type: targetType, name }, camera, width: 320, height: 240 });
-      expect(result.isError).toBeFalsy();
+for (const [targetType, name, camera] of RENDERS) {
+  test(`renders the ${targetType}`, async ({ request }) => {
+    const result = await mcp(request, 'render_view', { target: { type: targetType, name }, camera, width: 320, height: 240 });
+    expect(result.isError).toBeFalsy();
 
-      const image = result.content.find((c) => c.type === 'image')!;
-      expect(image.mimeType).toBe('image/png');
-      const png = PNG.sync.read(Buffer.from(image.data!, 'base64'));
-      expect([png.width, png.height]).toEqual([320, 240]);
-      expect(countBlue(png)).toBeGreaterThan(50);
+    const image = result.content.find((c) => c.type === 'image')!;
+    expect(image.mimeType).toBe('image/png');
+    const png = PNG.sync.read(Buffer.from(image.data!, 'base64'));
+    expect([png.width, png.height]).toEqual([320, 240]);
+    expect(countBlue(png)).toBeGreaterThan(50);
 
-      const info = JSON.parse(result.content.find((c) => c.type === 'text')!.text!);
-      expect(info.bounds.max[0]).toBeGreaterThan(info.bounds.min[0]);
-      expect(info.metresPerPixel !== undefined).toBe(cameraLabel === 'top');
-    });
-  }
+    const info = JSON.parse(result.content.find((c) => c.type === 'text')!.text!);
+    expect(info.bounds.max[0]).toBeGreaterThan(info.bounds.min[0]);
+    expect(info.metresPerPixel !== undefined).toBe(camera === 'top');
+  });
 }
 
 test('an unknown document is a tool error', async ({ request }) => {
