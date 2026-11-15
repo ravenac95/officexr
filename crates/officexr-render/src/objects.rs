@@ -10,6 +10,7 @@ use bevy::prelude::*;
 
 use crate::AssetBase;
 use crate::lighting::{HemisphereFill, ObjectMaterial};
+use crate::overlays::ViewOverlays;
 use crate::picking::PickTarget;
 use crate::placement::mesh_transform;
 use crate::scene::{LocalAabb, ObjectInstance, WorldObjectKind, WorldSceneData, Xyz};
@@ -42,18 +43,23 @@ struct KindModel {
 
 /// A view's kinds and their models.
 #[derive(Component, Default)]
-pub struct ObjectKinds(HashMap<String, KindModel>);
+pub struct ObjectKinds {
+    models: HashMap<String, KindModel>,
+    /// Kinds a ghost overlay has drawn, kept loaded while the catalog has
+    /// them, so a tool's ghost shows at once when it comes back.
+    ghosted: HashSet<String>,
+}
 
 impl ObjectKinds {
     pub fn pending(&self) -> usize {
-        self.0
+        self.models
             .values()
             .filter(|m| matches!(m.state, ModelState::Loading))
             .count()
     }
 
     pub(crate) fn materials(&self) -> impl Iterator<Item = &Handle<ObjectMaterial>> {
-        self.0.values().filter_map(|m| match &m.state {
+        self.models.values().filter_map(|m| match &m.state {
             ModelState::Ready(model) => Some(&model.material),
             _ => None,
         })
@@ -61,14 +67,14 @@ impl ObjectKinds {
 
     /// The ids of the kinds whose model failed to load.
     pub fn failed(&self) -> impl Iterator<Item = &str> {
-        self.0
+        self.models
             .iter()
             .filter(|(_, m)| matches!(m.state, ModelState::Failed))
             .map(|(id, _)| id.as_str())
     }
 
     fn placed(&self, inst: &ObjectInstance) -> Option<(&Model, Transform)> {
-        let kind = self.0.get(&inst.kind_id)?;
+        let kind = self.models.get(&inst.kind_id)?;
         let ModelState::Ready(model) = &kind.state else {
             return None;
         };
@@ -89,23 +95,34 @@ impl ObjectIndex {
 
 /// The instance an object entity draws, kept to diff against the next scene.
 #[derive(Component)]
-pub(crate) struct Placed(ObjectInstance);
+pub(crate) struct Placed(pub(crate) ObjectInstance);
 
 /// Loads the kinds the instances reference, and reloads the ones whose definition changed.
+#[allow(clippy::type_complexity)]
 pub(crate) fn sync_kinds(
     mut commands: Commands,
     base: Res<AssetBase>,
     assets: Res<AssetServer>,
-    mut views: Query<(&ViewScene, &mut ObjectKinds, Option<&Children>), Changed<ViewScene>>,
-    placed: Query<&Placed>,
+    mut views: Query<
+        (Entity, &ViewScene, Option<&ViewOverlays>, &mut ObjectKinds),
+        Or<(Changed<ViewScene>, Changed<ViewOverlays>)>,
+    >,
+    placed: Query<(Entity, &Placed)>,
+    parents: Query<&ChildOf>,
 ) {
-    for (scene, mut kinds, children) in &mut views {
-        let redefined = sync_view_kinds(scene, &mut kinds, &base, &assets);
-        // The entities keep their place; `attach_models` redraws them once the new model is ready.
-        for &entity in children.into_iter().flatten() {
-            if placed
-                .get(entity)
-                .is_ok_and(|p| redefined.contains(&p.0.kind_id))
+    for (view, scene, overlays, mut kinds) in &mut views {
+        let ghosts = overlays.into_iter().flat_map(ViewOverlays::ghost_objects);
+        kinds.ghosted.extend(ghosts.map(|g| g.kind_id.clone()));
+        let used = used_kinds(scene, overlays).collect();
+        let redefined = sync_view_kinds(scene, used, &mut kinds, &base, &assets);
+        if redefined.is_empty() {
+            continue;
+        }
+        // The entities, ghosts included, keep their place; `attach_models`
+        // redraws them once the new model is ready.
+        for (entity, placed) in &placed {
+            if redefined.contains(&placed.0.kind_id)
+                && parents.iter_ancestors(entity).any(|e| e == view)
             {
                 commands
                     .entity(entity)
@@ -115,35 +132,48 @@ pub(crate) fn sync_kinds(
     }
 }
 
+/// The kind ids of the scene's objects and its ghost overlays' objects.
+fn used_kinds<'a>(
+    scene: &'a WorldSceneData,
+    overlays: Option<&'a ViewOverlays>,
+) -> impl Iterator<Item = &'a str> {
+    let ghosts = overlays.into_iter().flat_map(ViewOverlays::ghost_objects);
+    scene
+        .objects
+        .instances
+        .iter()
+        .chain(ghosts)
+        .map(|i| i.kind_id.as_str())
+}
+
 /// The ids of the kinds (re)requested.
 fn sync_view_kinds(
     scene: &WorldSceneData,
+    used: HashSet<&str>,
     kinds: &mut ObjectKinds,
     base: &AssetBase,
     assets: &AssetServer,
 ) -> HashSet<String> {
-    let used: HashSet<&str> = scene
-        .objects
-        .instances
-        .iter()
-        .map(|i| i.kind_id.as_str())
-        .collect();
     let wanted: Vec<&WorldObjectKind> = scene
         .kinds
         .iter()
         .filter(|k| used.contains(k.id.as_str()))
         .collect();
     let wanted_ids: HashSet<&str> = wanted.iter().map(|k| k.id.as_str()).collect();
-    kinds
-        .0
-        .retain(|id, m| m.gltf.is_none() || wanted_ids.contains(id.as_str()));
+    let catalog: HashSet<&str> = scene.kinds.iter().map(|k| k.id.as_str()).collect();
+    let ObjectKinds { models, ghosted } = kinds;
+    models.retain(|id, m| {
+        m.gltf.is_none()
+            || wanted_ids.contains(id.as_str())
+            || (ghosted.contains(id) && catalog.contains(id.as_str()))
+    });
     let mut redefined = HashSet::new();
     for kind in wanted {
-        if kinds.0.get(&kind.id).is_some_and(|m| m.kind == *kind) {
+        if models.get(&kind.id).is_some_and(|m| m.kind == *kind) {
             continue;
         }
         redefined.insert(kind.id.clone());
-        kinds.0.insert(
+        models.insert(
             kind.id.clone(),
             KindModel {
                 kind: kind.clone(),
@@ -156,18 +186,22 @@ fn sync_view_kinds(
 }
 
 /// Registers a ready-made cuboid model for each `__primitive_<colour>` kind the instances use.
+#[allow(clippy::type_complexity)]
 pub(crate) fn register_primitives(
-    mut views: Query<(&ViewScene, &mut ObjectKinds), Changed<ViewScene>>,
+    mut views: Query<
+        (&ViewScene, Option<&ViewOverlays>, &mut ObjectKinds),
+        Or<(Changed<ViewScene>, Changed<ViewOverlays>)>,
+    >,
     mut cuboid: Local<Option<Handle<Mesh>>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ObjectMaterial>>,
 ) {
-    for (scene, mut kinds) in &mut views {
-        for inst in &scene.objects.instances {
-            let Some(colour) = inst.kind_id.strip_prefix(PRIMITIVE_KIND_PREFIX) else {
+    for (scene, overlays, mut kinds) in &mut views {
+        for kind_id in used_kinds(scene, overlays) {
+            let Some(colour) = kind_id.strip_prefix(PRIMITIVE_KIND_PREFIX) else {
                 continue;
             };
-            if kinds.0.contains_key(&inst.kind_id) {
+            if kinds.models.contains_key(kind_id) {
                 continue;
             }
             let mesh = cuboid
@@ -182,10 +216,10 @@ pub(crate) fn register_primitives(
                 },
                 extension: HemisphereFill::new(&scene.lighting),
             });
-            kinds.0.insert(
-                inst.kind_id.clone(),
+            kinds.models.insert(
+                kind_id.to_string(),
                 KindModel {
-                    kind: primitive_kind(&inst.kind_id),
+                    kind: primitive_kind(kind_id),
                     gltf: None,
                     state: ModelState::Ready(Model {
                         mesh,
@@ -255,7 +289,7 @@ fn sync_view_objects(
         .objects
         .instances
         .iter()
-        .filter(|i| kinds.0.contains_key(&i.kind_id))
+        .filter(|i| kinds.models.contains_key(&i.kind_id))
     {
         if wanted.insert(inst.id.as_str(), inst).is_some() {
             warn!("duplicate object id {}", inst.id);
@@ -309,7 +343,7 @@ pub(crate) fn load_kinds(
         if kinds.pending() == 0 {
             continue;
         }
-        for model in kinds.0.values_mut() {
+        for model in kinds.models.values_mut() {
             let Some(handle) = model
                 .gltf
                 .clone()
@@ -347,16 +381,18 @@ pub(crate) fn load_kinds(
     }
 }
 
-/// Draws every object whose model is ready and which isn't drawn yet.
+/// Draws every object whose model is ready and which isn't drawn yet, with
+/// the kinds of the view it is in.
 pub(crate) fn attach_models(
     mut commands: Commands,
     views: Query<&ObjectKinds>,
-    undrawn: Query<(Entity, &Placed, &ChildOf), Without<Mesh3d>>,
+    parents: Query<&ChildOf>,
+    undrawn: Query<(Entity, &Placed), Without<Mesh3d>>,
 ) {
-    for (entity, placed, view) in &undrawn {
-        if let Some((model, transform)) = views
-            .get(view.parent())
-            .ok()
+    for (entity, placed) in &undrawn {
+        if let Some((model, transform)) = parents
+            .iter_ancestors(entity)
+            .find_map(|e| views.get(e).ok())
             .and_then(|kinds| kinds.placed(&placed.0))
         {
             commands.entity(entity).insert((

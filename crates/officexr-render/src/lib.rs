@@ -15,14 +15,17 @@ mod lighting;
 mod mugshot;
 mod objects;
 mod offscreen;
+pub mod overlays;
 pub mod picking;
 pub mod placement;
 pub mod scene;
 mod sky;
 pub mod views;
+mod world_label;
 
 use bevy::asset::embedded_asset;
 use bevy::asset::io::AssetSourceBuilder;
+use bevy::camera::visibility::VisibilitySystems;
 use bevy::camera::{Exposure, PerspectiveProjection, Projection};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::gltf::{
@@ -32,6 +35,7 @@ use bevy::image::CompressedImageFormatSupport;
 use bevy::light::GlobalAmbientLight;
 use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
+use bevy::ui::UiSystems;
 
 pub use avatars::{Bound as AvatarBound, Motion, PlayerRender, Players, next_motion};
 pub use layouts::LayoutIndex;
@@ -106,9 +110,13 @@ impl Plugin for OfficeXrRenderPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "hemisphere.wesl");
         embedded_asset!(app, "sky.wesl");
+        embedded_asset!(app, "overlay.wesl");
+        embedded_asset!(app, "grid.wesl");
         app.add_plugins((
             MaterialPlugin::<ObjectMaterial>::default(),
             MaterialPlugin::<SkyMaterial>::default(),
+            MaterialPlugin::<overlays::OverlayMaterial>::default(),
+            MaterialPlugin::<overlays::GridMaterial>::default(),
             lighting::plugin,
             avatars::plugin,
             scene_systems,
@@ -150,6 +158,14 @@ fn gltf_loader(app: &App) -> GltfLoader {
 fn scene_systems(app: &mut App) {
     app.add_plugins(views::plugin)
         .add_systems(PostUpdate, apply_camera.before(TransformSystems::Propagate))
+        // With this frame's camera and anchor poses, before the UI lays the labels out.
+        .add_systems(
+            PostUpdate,
+            world_label::place_labels
+                .after(TransformSystems::Propagate)
+                .before(VisibilitySystems::VisibilityPropagate)
+                .before(UiSystems::Layout),
+        )
         .add_systems(
             Update,
             (
@@ -158,15 +174,23 @@ fn scene_systems(app: &mut App) {
                     objects::register_primitives,
                     objects::sync_objects,
                     layouts::sync_layouts,
+                    overlays::sync_overlays,
                 )
                     .chain(),
                 (
                     objects::load_kinds,
                     objects::attach_models,
+                    overlays::dress_ghosts,
+                    overlays::pulse_ghosts,
                     layouts::spawn_loaded_layouts,
                 )
                     .chain(),
-                (spawn_camera, sky::sync_background).chain(),
+                (
+                    spawn_camera,
+                    sky::sync_background,
+                    world_label::target_labels,
+                )
+                    .chain(),
             )
                 .chain()
                 .in_set(views::SceneSystems)
@@ -280,6 +304,9 @@ pub(crate) mod tests {
         .init_asset::<Mesh>()
         .init_asset::<ObjectMaterial>()
         .init_asset::<SkyMaterial>()
+        .init_asset::<StandardMaterial>()
+        .init_asset::<overlays::OverlayMaterial>()
+        .init_asset::<overlays::GridMaterial>()
         .init_asset::<Gltf>()
         .init_asset::<GltfNode>()
         .init_asset::<GltfMesh>()

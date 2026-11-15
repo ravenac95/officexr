@@ -12,15 +12,9 @@ use officexr_render::views::ViewId;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-use super::{js_err, status};
+use super::{js_err, status, to_json};
 
 static HUB: OnceLock<ControlsHub> = OnceLock::new();
-
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = JSON, catch)]
-    fn stringify(value: &JsValue) -> Result<JsValue, JsValue>;
-}
 
 pub(super) fn add(app: &mut App) {
     app.add_plugins(ControlsPlugin);
@@ -102,13 +96,7 @@ pub fn set_conversation_focus(id: ViewId, point: JsValue) -> Result<(), JsError>
 /// default, and an unknown field is an error.
 #[wasm_bindgen(js_name = setCameraConfig)]
 pub fn set_camera_config(id: ViewId, config: JsValue) -> Result<(), JsError> {
-    // Through JSON, which drops `undefined` fields: serde-wasm-bindgen hands
-    // them to the field's type, and never reports a field it wasn't asked for.
-    // JSON also turns NaN and infinities into `null`, which a number field rejects.
-    let json = stringify(&config)
-        .ok()
-        .and_then(|json| json.as_string())
-        .ok_or_else(|| js_err("camera config must be an object"))?;
+    let json = to_json(&config).ok_or_else(|| js_err("camera config must be an object"))?;
     let config: CameraConfig = serde_json::from_str(&json).map_err(js_err)?;
     with(id, |c| c.config = config)
 }
