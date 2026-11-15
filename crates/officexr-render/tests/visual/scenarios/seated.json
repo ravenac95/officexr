@@ -1,0 +1,25 @@
+{
+  "size": [640, 480],
+  "instances": [
+    { "kindId": "stone", "position": [-4, -4, -4] },
+    { "kindId": "stone", "position": [0, -4, -4] },
+    { "kindId": "stone", "position": [-4, -4, 0] },
+    { "kindId": "stone", "position": [0, -4, 0] },
+    { "kindId": "furniture_chair_a", "position": [0, 0, 0] }
+  ],
+  "characters": [
+    {
+      "character": "Knight",
+      "name": "Ada",
+      "spawn": [0.375, 0, 0.423],
+      "moves": [{ "frames": 60 }],
+      "seat": { "pos": [0.375, -0.3397, 0.423], "yaw": -3.14159265 }
+    }
+  ],
+  "cameras": [
+    { "name": "side", "position": [5.5, 1.3, 0.4], "lookAt": [0.375, 0.7, 0.4], "fov": 40 },
+    { "name": "front", "position": [1.8, 1.6, 5.0], "lookAt": [0.375, 0.7, 0.4], "fov": 40 }
+  ],
+  "captures": [59],
+  "assert": []
+}

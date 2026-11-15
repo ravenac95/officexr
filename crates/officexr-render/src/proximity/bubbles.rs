@@ -281,7 +281,7 @@ mod tests {
                 vel: Vec3::ZERO,
                 name: String::new(),
                 airborne: false,
-                animation: None,
+                ..default()
             })
             .collect();
         hub.send(
@@ -355,7 +355,7 @@ mod tests {
             vel: Vec3::ZERO,
             name: String::new(),
             airborne: false,
-            animation: None,
+            ..default()
         });
         for (key, center, r) in [("player:a", 0.0, style.disc_radius), ("area:m", 4.0, 2.5)] {
             let bubbles = &rings[key];

@@ -39,8 +39,8 @@ use bevy::prelude::*;
 use bevy::ui::UiSystems;
 
 pub use avatars::{
-    AnimationState, Bound as AvatarBound, Motion, PlayerAnimation, PlayerRender, Players,
-    next_motion,
+    AnimationState, Bound as AvatarBound, Bump, Motion, PlayerAnimation, PlayerRender, Players,
+    Seat, next_motion,
 };
 pub use layouts::LayoutIndex;
 pub use lighting::{HemisphereFill, ObjectMaterial, snap_to_shadow_texel};
@@ -119,6 +119,7 @@ impl Plugin for OfficeXrRenderPlugin {
         embedded_asset!(app, "sky.wesl");
         embedded_asset!(app, "overlay.wesl");
         embedded_asset!(app, "grid.wesl");
+        embedded_asset!(app, "bell.png");
         embedded_asset!(app, "proximity.wesl");
         app.add_plugins((
             MaterialPlugin::<ObjectMaterial>::default(),

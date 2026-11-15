@@ -49,6 +49,8 @@ export type PickTarget =
   | { type: 'object'; id: string }
   | { type: 'layout'; name: string; roomInstanceId: string }
   | { type: 'player'; id: string }
+  /** The bell shown over a hovered player; only `click` is reported on it. */
+  | { type: 'pingBell'; id: string }
   | { type: 'overlay'; tag: string }
   /** The infinite floor plane at y = 0. */
   | { type: 'ground' };
@@ -247,9 +249,11 @@ export interface RendererModule {
    */
   setWorld(id: ViewId, diffJson: string, mugshot?: string | null): number | undefined;
   /**
-   * `players`: `{ players, charRadius, playerSpeed, runSpeed, paused? }`. A player's `animation`, when set,
-   * plays that state's clip at that time scale instead of the one its velocity implies. `paused` draws
-   * every player in its bind pose without name tags, as a `setWorld` mugshot does.
+   * `players`: `{ players, charRadius, playerSpeed, runSpeed, bumpEasingMs?, paused? }`. A player's `animation`, when set,
+   * plays that state's clip at that time scale instead of the one its velocity implies. A player's optional
+   * `seat` (`{ pos, yaw }`) sits it there; a change of its `bump.count` plays the hit reaction and a kick along
+   * `bump.normal`, eased over `bumpEasingMs`. `paused` draws every player in its bind pose without name tags,
+   * as a `setWorld` mugshot does.
    */
   setPlayers(id: ViewId, players: unknown): void;
   setCamera(id: ViewId, pose: CameraPose): void;
@@ -262,9 +266,10 @@ export interface RendererModule {
    * Sends `callback` the view's pick events, from pointer events on its canvas, replacing any callback
    * it had; `null` stops them. A view without a callback does no picking. A throwing callback is logged
    * with `console.error` and the frame's other events are still delivered. Throws for a destroyed view.
-   * A left press on any target but the ground doesn't take the controls' pointer lock.
+   * A left press on any target but the ground doesn't take the controls' pointer lock,
+   * unless `bellClaimsOnly`: then only a press on a ping bell doesn't.
    */
-  onPick(id: ViewId, callback: ((event: PickEvent) => void) | null): void;
+  onPick(id: ViewId, callback: ((event: PickEvent) => void) | null, options?: { bellClaimsOnly?: boolean }): void;
   /**
    * The view camera's ray through `(x, y)`, in CSS pixels from its canvas's top left, from the pose last
    * drawn (the controls' when they drive it) or a `setCamera` since.

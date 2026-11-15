@@ -40,6 +40,14 @@ describe('catalogCharacters', () => {
   });
 });
 
+describe('resolveCharacter', () => {
+  it("gives a catalog character's model URL, which the room view loads, not its id", () => {
+    const { id, url } = resolveCharacter('alice@example.com', NECRO, catalog);
+    expect(id).toBe(NECRO);
+    expect(url).toBe(`/models/packs/${NECRO}.glb`);
+  });
+});
+
 describe('pickCharacterForPlayer', () => {
   it('uses the player model when it names a character', () => {
     expect(pickCharacterForPlayer('alice@example.com', 'Mage')).toBe('Mage');

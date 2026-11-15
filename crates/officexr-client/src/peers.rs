@@ -84,7 +84,7 @@ pub fn update_peers(
                     peer.name.clone()
                 },
                 airborne: p.is_airborne,
-                animation: None,
+                ..default()
             })
         })
         .collect();

@@ -1,0 +1,18 @@
+{
+  "size": [640, 480],
+  "hover": [320, 330],
+  "instances": [
+    { "kindId": "stone", "position": [-4, -4, -4] },
+    { "kindId": "stone", "position": [0, -4, -4] },
+    { "kindId": "stone", "position": [-4, -4, 0] },
+    { "kindId": "stone", "position": [0, -4, 0] }
+  ],
+  "characters": [
+    { "character": "Knight", "name": "Ada", "spawn": [0.5, 0, 0.5], "moves": [{ "frames": 60 }] }
+  ],
+  "cameras": [
+    { "name": "front", "position": [0.5, 1.8, 6.5], "lookAt": [0.5, 1.4, 0.5], "fov": 40 }
+  ],
+  "captures": [59],
+  "assert": [{ "type": "feetOn", "frame": 59, "surfaceY": 0 }]
+}

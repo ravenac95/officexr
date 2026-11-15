@@ -162,7 +162,7 @@ pub fn step_player(
         vel: at(pose.vel),
         name: String::new(),
         airborne: pose.is_airborne,
-        animation: None,
+        ..default()
     });
     controls.with(VIEW, |c| c.set_follow(at(pose.pos), pose.yaw as f32));
 }
