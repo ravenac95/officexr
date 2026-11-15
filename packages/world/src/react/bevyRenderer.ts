@@ -24,10 +24,21 @@ export function bootBevy(primary?: HTMLCanvasElement): Promise<RendererModule> {
 }
 
 /**
- * The play view's canvas, one per page: Bevy draws its primary window straight into the canvas
- * it booted with, so a remounted play view moves this element instead of making a new one.
+ * Bevy's primary canvas, one per page, shared by the play view and the studio's scene editor (one
+ * mounted at a time): Bevy draws its primary window straight into the canvas it booted with, so a
+ * remounted view moves this element instead of making a new one.
  */
 export function playCanvas(): HTMLCanvasElement {
   playCanvasElement ??= document.createElement('canvas');
   return playCanvasElement;
+}
+
+/** The URL Bevy loads a baked layout from: absolute, as Bevy resolves relative paths against the model origin. */
+export function bakedLayoutGlbUrl(path: string): string {
+  return new URL(path.endsWith('.glb') ? path : `${path}.glb`, window.location.href).href;
+}
+
+/** The renderer's `blob://` asset path for one of this page's `blob:` URLs; `ext` picks Bevy's loader. */
+export function blobAssetPath(blobUrl: string, ext: string): string {
+  return `blob://${blobUrl.slice(blobUrl.lastIndexOf('/') + 1)}.${ext}`;
 }

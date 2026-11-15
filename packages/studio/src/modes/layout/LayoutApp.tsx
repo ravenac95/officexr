@@ -18,7 +18,7 @@ import { CommandHistory } from '../scene-editor/CommandHistory.tsx';
 import { ContextMenu, type ContextMenuItem } from '../room/ContextMenu.tsx';
 import { Toolbar } from '../scene-editor/Toolbar.tsx';
 import type { Tool } from '../scene-editor/tools.ts';
-import { SceneEditorCanvas } from '../scene-editor/SceneEditorCanvas.tsx';
+import { SceneEditorView } from '../scene-editor/SceneEditorView.tsx';
 import type { SceneEditorBackend } from '../scene-editor/SceneEditorBackend.ts';
 import { useEditorShortcuts } from '../scene-editor/useEditorShortcuts.ts';
 import { useStagedObject } from '../scene-editor/useStagedObject.ts';
@@ -281,7 +281,7 @@ export function LayoutApp() {
     setStagedYawDeg,
   });
 
-  // Canvas backend: every field SceneEditorCanvas needs, sourced from
+  // Canvas backend: every field SceneEditorView needs, sourced from
   // useLayoutDocument + the editor's UI state. Mirrors how RoomApp
   // builds its backend — both editors satisfy the same
   // `SceneEditorBackend` contract.
@@ -369,7 +369,7 @@ export function LayoutApp() {
           overflow: 'hidden',
         }}
       >
-        <SceneEditorCanvas backend={backend} />
+        <SceneEditorView backend={backend} />
         <BakeStatusPill layoutName={layoutDoc.layoutName} />
         <Toolbar
           active={tool}
