@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 bevy = { version = "=0.20.1", default-features = false, features = ["bevy_winit"] }
+officexr-controls = { path = "../officexr-controls" }
 officexr-protocol = { path = "../officexr-protocol" }
 officexr-render = { path = "../officexr-render" }
 officexr-sim = { path = "../officexr-sim" }
