@@ -136,6 +136,18 @@ async function voiceZoneOverlay(page: Page, canvas: Locator) {
   };
 }
 
+/** On a failed Move check: the editor's picks, inst-a's row and the overlay centroids, in the report and the job log. */
+async function attachMoveEvidence(page: Page, centroids: Record<string, unknown>) {
+  const evidence = {
+    ...centroids,
+    instARow: await page.getByTestId('room-row-inst-a').innerText(),
+    picks: await page.evaluate(() => (globalThis as { __OFFICEXR_TEST_API__?: { mapPicks: unknown[] } }).__OFFICEXR_TEST_API__?.mapPicks ?? null),
+  };
+  const body = JSON.stringify(evidence, null, 2);
+  console.log(`[map-editor move evidence] ${body}`);
+  await test.info().attach('map-editor-move-evidence', { body, contentType: 'text/plain' });
+}
+
 test('hermetic mode loads a seeded map and renders it', async ({ page }) => {
   const canvas = await openMap(page);
 
@@ -193,12 +205,17 @@ test('voice zone toggle previews the footprint, follows rotate and move, and sur
   await page.mouse.down();
   await page.mouse.move(before.x + 60, before.y + 30, { steps: 10 });
   await page.mouse.up();
-  await expect
-    .poll(async () => {
-      const o = await overlay();
-      return Math.hypot(o.x - before.x, o.y - before.y);
-    })
-    .toBeGreaterThan(20);
+  try {
+    await expect
+      .poll(async () => {
+        const o = await overlay();
+        return Math.hypot(o.x - before.x, o.y - before.y);
+      })
+      .toBeGreaterThan(20);
+  } catch (error) {
+    await attachMoveEvidence(page, { before, after: await overlay() });
+    throw error;
+  }
 
   await page.locator('select').selectOption('other');
   await expect(page.getByText(/Placed rooms \(0\)/)).toBeVisible();
