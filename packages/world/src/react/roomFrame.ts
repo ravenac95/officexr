@@ -1,5 +1,14 @@
-import type { Actions, Bus, OfficeState, PlayerState, Store, TrackerOutput, Vec3 } from '@officexr/sdk';
-import type { MoveIntent, WorldDiff } from '@officexr/render-wasm';
+import type {
+  Actions,
+  Bus,
+  OfficeState,
+  PlayerState,
+  ProximityConstants,
+  Store,
+  TrackerOutput,
+  Vec3,
+} from '@officexr/sdk';
+import type { MoveIntent, ProximityInput, WorldDiff } from '@officexr/render-wasm';
 import type { BotPool } from '../bot/BotPool.ts';
 import { resolveCharacterTunables } from '../characters/resolve.ts';
 import { feetPosition } from '../physics/rules.ts';
@@ -47,6 +56,7 @@ export interface RoomView {
   setPlayers(players: PlayersInput): void;
   setFollowTarget(pos: Xyz, yaw: number): void;
   setConversationFocus(point: Xyz | null): void;
+  setProximity(proximity: ProximityInput): void;
 }
 
 export interface RoomFrameDeps {
@@ -265,6 +275,14 @@ export class RoomFrame {
     view.setConversationFocus(
       focus && self ? [focus.x, feetPosition(self.pos, state.worldSettings.charRadius).y, focus.z] : null,
     );
+    if (this.proximity) {
+      // `setPlayers` leaves the first-person player out; its disc still shows at its feet.
+      const undrawn =
+        self && this.options.cameraMode === 'first-person'
+          ? { [selfId]: xyz(feetPosition(self.pos, state.worldSettings.charRadius)) }
+          : {};
+      view.setProximity(proximityInput(this.proximity, state.worldConstants.proximity, undrawn));
+    }
   }
 
   /** Sends the world when one of its sources changed since the last frame. */
@@ -325,6 +343,25 @@ export class RoomFrame {
       bumpEasingMs: ws.bumpEasingMs,
     };
   }
+}
+
+function proximityInput(
+  output: TrackerOutput,
+  style: ProximityConstants,
+  undrawn: Record<string, Xyz>,
+): ProximityInput {
+  const { discRadius, pulseSpeed, intensity, enteringColor, enteredColor, exitingColor } = style;
+  return {
+    players: Object.fromEntries(output.playerStates),
+    areas: output.areas.map((a) => ({
+      id: a.id,
+      center: [a.center.x, a.center.z],
+      radius: a.radius,
+      members: [...a.members],
+    })),
+    undrawn,
+    style: { discRadius, pulseSpeed, intensity, enteringColor, enteredColor, exitingColor },
+  };
 }
 
 /** A stick's deflection turned into world space by the camera's yaw; unit length. */

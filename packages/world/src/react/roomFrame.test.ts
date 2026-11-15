@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import { createMultiClientHarness } from '@officexr/sdk/test-harness';
-import type { MoveIntent } from '@officexr/render-wasm';
+import type { MoveIntent, ProximityInput } from '@officexr/render-wasm';
 import type { TrackerOutput, Vec3 } from '@officexr/sdk';
 import type { BotPool } from '../bot/BotPool.ts';
 import type { SimCore, SimInput, SimStepResult } from '../sim/SimCore.ts';
@@ -19,6 +19,8 @@ function fakeSim(log: string[], start: Vec3) {
       return {
         events: [{ kind: 'proximity:entering', a: 'alice', b: 'bob' }],
         conversationFocus: { x: 3, y: 0, z: 4 },
+        playerStates: new Map([['alice', 'entered']]),
+        areas: [{ id: 'm', members: new Set(['alice', 'bob']), center: { x: 3, z: 4 }, radius: 2 }],
       } as unknown as TrackerOutput;
     },
     extrapolatePeer: (p: { pos: Vec3 }) => p.pos,
@@ -46,6 +48,7 @@ function fakeSim(log: string[], start: Vec3) {
 function fakeView(log: string[], intent: MoveIntent = STILL) {
   const players: PlayersInput[] = [];
   const inputEnabled: boolean[] = [];
+  const proximity: ProximityInput[] = [];
   const state = { intent };
   const view: RoomView = {
     takeIntent: () => {
@@ -63,8 +66,12 @@ function fakeView(log: string[], intent: MoveIntent = STILL) {
     },
     setFollowTarget: () => log.push('view.setFollowTarget'),
     setConversationFocus: () => log.push('view.setConversationFocus'),
+    setProximity: (p) => {
+      log.push('view.setProximity');
+      proximity.push(p);
+    },
   };
-  return { view, players, inputEnabled, state };
+  return { view, players, inputEnabled, proximity, state };
 }
 
 async function setup(opts: { intent?: MoveIntent; options?: Partial<RoomFrameOptions> } = {}) {
@@ -73,7 +80,7 @@ async function setup(opts: { intent?: MoveIntent; options?: Partial<RoomFrameOpt
   alice.actions.upsertPlayer({ id: 'bob', name: 'Bob', pos: { x: 5, y: 0, z: 5 } });
   const log: string[] = [];
   const { sim, steps } = fakeSim(log, alice.store.getState().players.alice!.pos);
-  const { view, players, inputEnabled, state: viewState } = fakeView(log, opts.intent);
+  const { view, players, inputEnabled, proximity, state: viewState } = fakeView(log, opts.intent);
   const setSelfPosition = alice.actions.setSelfPosition.bind(alice.actions);
   vi.spyOn(alice.actions, 'setSelfPosition').mockImplementation((...args) => {
     log.push('actions.setSelfPosition');
@@ -102,6 +109,7 @@ async function setup(opts: { intent?: MoveIntent; options?: Partial<RoomFrameOpt
     sim,
     players,
     inputEnabled,
+    proximity,
     actions: alice.actions,
     bus: alice.bus,
     store: alice.store,
@@ -130,7 +138,35 @@ describe('RoomFrame', () => {
       'view.setPlayers',
       'view.setFollowTarget',
       'view.setConversationFocus',
+      'view.setProximity',
     ]);
+  });
+
+  it('sends the proximity output with the world constants\' glow tunables', async () => {
+    const { frame, proximity, store } = await setup();
+
+    frame.step(0.016, 1000);
+
+    const { discRadius, enteredColor } = store.getState().worldConstants.proximity;
+    expect(proximity).toEqual([
+      {
+        players: { alice: 'entered' },
+        areas: [{ id: 'm', center: [3, 4], radius: 2, members: ['alice', 'bob'] }],
+        undrawn: {},
+        style: expect.objectContaining({ discRadius, enteredColor }),
+      },
+    ]);
+  });
+
+  it('sends the first-person player\'s feet, which setPlayers leaves out', async () => {
+    const { frame, proximity, players, store } = await setup({ options: { cameraMode: 'first-person' } });
+
+    frame.step(0.016, 1000);
+
+    expect(players[0]!.players.map((p) => p.id)).not.toContain('alice');
+    const { pos } = store.getState().players.alice!;
+    const charRadius = store.getState().worldSettings.charRadius;
+    expect(proximity[0]!.undrawn).toEqual({ alice: [pos.x, pos.y + 0.9 - charRadius, pos.z] });
   });
 
   it("steps the sim along the view's intent and moves the store's player", async () => {

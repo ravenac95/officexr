@@ -18,6 +18,7 @@ mod offscreen;
 pub mod overlays;
 pub mod picking;
 pub mod placement;
+pub mod proximity;
 pub mod scene;
 mod sky;
 pub mod views;
@@ -119,11 +120,13 @@ impl Plugin for OfficeXrRenderPlugin {
         embedded_asset!(app, "overlay.wesl");
         embedded_asset!(app, "grid.wesl");
         embedded_asset!(app, "bell.png");
+        embedded_asset!(app, "proximity.wesl");
         app.add_plugins((
             MaterialPlugin::<ObjectMaterial>::default(),
             MaterialPlugin::<SkyMaterial>::default(),
             MaterialPlugin::<overlays::OverlayMaterial>::default(),
             MaterialPlugin::<overlays::GridMaterial>::default(),
+            MaterialPlugin::<proximity::GlowMaterial>::default(),
             lighting::plugin,
             avatars::plugin,
             scene_systems,
@@ -164,6 +167,7 @@ fn gltf_loader(app: &App) -> GltfLoader {
 /// The systems that turn each view's scene and camera into entities.
 fn scene_systems(app: &mut App) {
     app.add_plugins(views::plugin)
+        .init_resource::<proximity::GlowMeshes>()
         .add_systems(PostUpdate, apply_camera.before(TransformSystems::Propagate))
         // With this frame's camera and anchor poses, before the UI lays the labels out.
         .add_systems(
@@ -182,6 +186,7 @@ fn scene_systems(app: &mut App) {
                     objects::sync_objects,
                     layouts::sync_layouts,
                     overlays::sync_overlays,
+                    proximity::sync_glow,
                 )
                     .chain(),
                 (
@@ -314,6 +319,7 @@ pub(crate) mod tests {
         .init_asset::<StandardMaterial>()
         .init_asset::<overlays::OverlayMaterial>()
         .init_asset::<overlays::GridMaterial>()
+        .init_asset::<proximity::GlowMaterial>()
         .init_asset::<Gltf>()
         .init_asset::<GltfNode>()
         .init_asset::<GltfMesh>()
