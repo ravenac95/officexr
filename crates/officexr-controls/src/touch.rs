@@ -98,6 +98,7 @@ pub(crate) fn spawn_stick(mut commands: Commands) {
 
 /// Applies each window's touches to the views on it with input enabled. Only the primary window
 /// draws the Bevy stick.
+// ponytail: views drawn to an image (webgl2 off the primary canvas) get no touch look or pinch.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn read_touches(
     mut events: MessageReader<TouchInput>,
@@ -129,6 +130,8 @@ pub(crate) fn read_touches(
         let at = event.position;
         match event.phase {
             TouchPhase::Started => {
+                // A browser can drop a touch's end and reuse its id.
+                fingers.retain(|f| f.id != event.id);
                 fingers.push(Finger {
                     id: event.id,
                     prev: at,
@@ -155,6 +158,7 @@ pub(crate) fn read_touches(
             }
         }
     }
+    state.fingers.retain(|_, fingers| !fingers.is_empty());
     if !bevy_stick {
         state.stick_touch = None;
     }
