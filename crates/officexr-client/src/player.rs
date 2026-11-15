@@ -1,22 +1,20 @@
-//! The local player: keyboard or touch-stick intent stepped through `officexr-sim` each frame, as
-//! `SceneFrame.tsx` does, drawn with the peers and broadcast to them.
+//! The local player: the controls plugin's (or touch-stick) intent stepped through `officexr-sim`
+//! each frame, as `SceneFrame.tsx` does, drawn with the peers and broadcast to them.
 
 use bevy::prelude::*;
+use officexr_controls::{ControlsHub, MoveIntent};
 use officexr_render::{PlayerRender, Players};
 use officexr_sim::physics::character_movement::XZ;
 use officexr_sim::physics::rules::SPAWN_DROP_HEIGHT;
 use officexr_sim::{SimCore, SimInput, SimPeer, Vec3 as SimVec3};
 
+use crate::VIEW;
 use crate::baked_colliders::BakedColliders;
 use crate::broadcaster::{Pose, PositionBroadcaster};
-use crate::camera::Orbit;
 use crate::net::{Joined, Outbound};
 use crate::peers::character_for;
 use crate::touch::TouchControls;
 use crate::world::{CHAR_RADIUS, SimWorld};
-
-/// The camera looks at the avatar's chest, not its feet.
-const FOLLOW_HEIGHT: f32 = 1.2;
 
 #[derive(Resource)]
 pub struct LocalPlayer {
@@ -81,14 +79,13 @@ pub fn apply_colliders(
 #[allow(clippy::too_many_arguments)]
 pub fn step_player(
     time: Res<Time>,
-    keys: Res<ButtonInput<KeyCode>>,
+    controls: Res<ControlsHub>,
     touch: Res<TouchControls>,
     world: Option<Res<SimWorld>>,
     outbound: Res<Outbound>,
     mut joined: MessageReader<Joined>,
     mut player: ResMut<LocalPlayer>,
     mut players: ResMut<Players>,
-    mut orbit: ResMut<Orbit>,
 ) {
     let rejoined = joined.read().count() > 0;
     let (Some(world), Some(pose)) = (world, player.pose) else {
@@ -99,23 +96,16 @@ pub fn step_player(
         outbound.send_position(player.broadcaster.announce(pose));
     }
 
+    let (intent, yaw) = controls.with(VIEW, |c| (c.take_intent(), c.camera_yaw()));
     let intent = match player.script.as_mut() {
-        Some(script) => script.next(),
-        None => Intent::from_keys(&keys).or_stick(touch.stick),
+        Some(script) => script.next().to_move(yaw),
+        None => or_stick(intent, touch.stick, yaw),
     };
-    let (fwd, strafe) = (f64::from(intent.fwd), f64::from(intent.strafe));
-    let yaw = f64::from(orbit.yaw);
-    let dx = -yaw.sin() * fwd + yaw.cos() * strafe;
-    let dz = -yaw.cos() * fwd - yaw.sin() * strafe;
-    let len = dx.hypot(dz);
-    let dir = if len > 0.0 {
-        XZ {
-            x: dx / len,
-            z: dz / len,
-        }
-    } else {
-        XZ::default()
+    let dir = XZ {
+        x: f64::from(intent.dir[0]),
+        z: f64::from(intent.dir[1]),
     };
+    let moving = intent.dir != [0.0; 2];
 
     let peers: Vec<SimPeer> = players
         .players
@@ -143,7 +133,7 @@ pub fn step_player(
             world.player_speed
         },
         running: intent.run,
-        yaw: if len > 0.0 {
+        yaw: if moving {
             (-dir.x).atan2(-dir.z)
         } else {
             pose.yaw
@@ -175,10 +165,11 @@ pub fn step_player(
         name: String::new(),
         airborne: pose.is_airborne,
     });
-    orbit.target = at(pose.pos) + Vec3::Y * FOLLOW_HEIGHT;
+    controls.with(VIEW, |c| c.set_follow(at(pose.pos), pose.yaw as f32));
 }
 
-#[derive(Clone, Copy, Default, Debug, PartialEq)]
+/// The script's movement keys, before they are turned by the camera's yaw.
+#[derive(Clone, Copy, Default)]
 struct Intent {
     fwd: f32,
     strafe: f32,
@@ -188,42 +179,23 @@ struct Intent {
 }
 
 impl Intent {
-    fn from_keys(keys: &ButtonInput<KeyCode>) -> Self {
-        let axis = |plus: [KeyCode; 2], minus: [KeyCode; 2]| {
-            f32::from(u8::from(keys.any_pressed(plus)))
-                - f32::from(u8::from(keys.any_pressed(minus)))
-        };
-        Self {
-            fwd: axis(
-                [KeyCode::KeyW, KeyCode::ArrowUp],
-                [KeyCode::KeyS, KeyCode::ArrowDown],
-            ),
-            strafe: axis(
-                [KeyCode::KeyD, KeyCode::ArrowRight],
-                [KeyCode::KeyA, KeyCode::ArrowLeft],
-            ),
-            run: keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]),
-            jump: keys.just_pressed(KeyCode::Space),
-        }
-    }
-
-    /// As `moveIntent.ts`: held movement keys win over the stick (`x` strafe, `y` forward), and a
-    /// near-full deflection runs.
-    // ponytail: the deflection only picks walk or run; the web also scales speed by it.
-    fn or_stick(self, stick: Vec2) -> Self {
-        if self.fwd != 0.0 || self.strafe != 0.0 {
-            return self;
-        }
-        Self {
-            fwd: stick.y,
-            strafe: stick.x,
-            run: self.run || stick.length() >= RUN_DEFLECTION,
-            ..self
-        }
+    fn to_move(self, yaw: f32) -> MoveIntent {
+        MoveIntent::from_axes(self.fwd, self.strafe, self.run, self.jump, yaw)
     }
 }
 
 const RUN_DEFLECTION: f32 = 0.9;
+
+/// As `moveIntent.ts`: held movement keys win over the stick (`x` strafe, `y` forward), and a
+/// near-full deflection runs.
+// ponytail: the deflection only picks walk or run; the web also scales speed by it.
+fn or_stick(keys: MoveIntent, stick: Vec2, yaw: f32) -> MoveIntent {
+    if keys.dir != [0.0; 2] {
+        return keys;
+    }
+    let run = keys.run || stick.length() >= RUN_DEFLECTION;
+    MoveIntent::from_axes(stick.y, stick.x, run, keys.jump, yaw)
+}
 
 /// Test-only scripted input for headless live checks, from `OFFICEXR_TEST_INPUT`: comma-separated
 /// `<keys>*<frames>` steps, `keys` a `+`-joined subset of `w a s d shift space` or `-` for none,
@@ -296,17 +268,17 @@ mod tests {
 
     #[test]
     fn keys_win_over_the_stick() {
-        let keys = Intent {
-            fwd: 1.0,
+        let keys = MoveIntent {
+            dir: [0.0, -1.0],
             ..default()
         };
-        assert_eq!(keys.or_stick(Vec2::new(1.0, 0.0)), keys);
+        assert_eq!(or_stick(keys, Vec2::new(1.0, 0.0), 0.0), keys);
     }
 
     #[test]
-    fn stick_steers_and_runs_near_full_deflection() {
-        let walk = Intent::default().or_stick(Vec2::new(0.3, 0.4));
-        assert_eq!((walk.strafe, walk.fwd, walk.run), (0.3, 0.4, false));
-        assert!(Intent::default().or_stick(Vec2::new(0.0, -0.95)).run);
+    fn stick_steers_relative_to_the_camera_and_runs_near_full_deflection() {
+        let walk = or_stick(MoveIntent::default(), Vec2::new(0.0, 0.4), 0.0);
+        assert_eq!((walk.dir, walk.run), ([0.0, -1.0], false));
+        assert!(or_stick(MoveIntent::default(), Vec2::new(0.0, 0.95), 0.0).run);
     }
 }
