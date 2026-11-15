@@ -26,6 +26,15 @@ const THUMBNAILS_DIR = path.resolve(__dirname, '../thumbnails');
 const MANIFEST_PATH = path.resolve(__dirname, '../src/scenes/thumbnail-manifest.ts');
 const DEV_SERVER = process.env.THUMBNAILS_DEV_SERVER ?? 'http://localhost:5174';
 const CATALOG_URL = `${DEV_SERVER}/api/world-object-kinds`;
+/** A kind's model loading and settling in the Bevy preview. */
+const READY_TIMEOUT_MS = 60_000;
+
+/** `ObjectPreviewCanvas`'s `ThumbnailSentinel`, as far as this script reads it. */
+interface ThumbnailSentinel {
+  kindId: string | null;
+  ready(): boolean;
+  capture(): Promise<Blob>;
+}
 
 interface WorldObjectKindEntry {
   id: string;
@@ -97,8 +106,8 @@ async function main() {
   console.log(`[gen-thumbnails] Navigating to ${objectUrl}...`);
   await page.goto(objectUrl);
 
-  // Wait for the page to stabilize (React rendered, catalog loaded)
-  await page.waitForTimeout(2000);
+  // Wait for the page to stabilize (React rendered, catalog loaded, the Bevy preview booted)
+  await page.waitForFunction(() => '__officexrThumbnail' in window, null, { timeout: READY_TIMEOUT_MS });
 
   let successCount = 0;
   let failCount = 0;
@@ -127,28 +136,27 @@ async function main() {
         }
       }
 
-      // Click the kind to select it
       await kindBtn.first().click();
 
-      // Wait for the preview to settle (GLTF load + render)
-      await page.waitForTimeout(800);
-
-      // Read the WebGL framebuffer directly via toDataURL — element
-      // screenshot would pick up the page's parent background behind
-      // the transparent canvas, producing opaque RGB. Reading the
-      // canvas pixels preserves alpha. Requires `preserveDrawingBuffer: true`
-      // on the R3F Canvas in thumbnailMode (see ObjectPreviewCanvas.tsx).
-      const dataUrl = await page.evaluate(() => {
-        const c = document.querySelector('canvas') as HTMLCanvasElement | null;
-        return c ? c.toDataURL('image/png') : null;
+      // The Bevy preview's `captureView` keeps the see-through background's alpha, which an element
+      // screenshot would fill in with the page behind the canvas.
+      await page.waitForFunction(
+        (id) => {
+          const t = (window as { __officexrThumbnail?: ThumbnailSentinel }).__officexrThumbnail;
+          return t?.kindId === id && t.ready();
+        },
+        kind.id,
+        { timeout: READY_TIMEOUT_MS },
+      );
+      const base64 = await page.evaluate(async () => {
+        const t = (window as { __officexrThumbnail?: ThumbnailSentinel }).__officexrThumbnail!;
+        const bytes = new Uint8Array(await (await t.capture()).arrayBuffer());
+        let binary = '';
+        for (const b of bytes) {
+          binary += String.fromCharCode(b);
+        }
+        return btoa(binary);
       });
-      if (!dataUrl) {
-        console.warn(`[gen-thumbnails] WARN: No canvas found for kind "${kind.id}". Skipping.`);
-        failCount++;
-        continue;
-      }
-
-      const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
       fs.writeFileSync(outputPath, Buffer.from(base64, 'base64'));
       generated.push({ id: kind.id, filePath: outputPath });
       successCount++;

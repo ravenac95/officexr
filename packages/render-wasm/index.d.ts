@@ -38,7 +38,7 @@ export interface WorldDiff {
     layoutName?: string;
     roomInstanceId?: string;
   }[];
-  /** A flat background instead of the sky; `null` brings the sky back. */
+  /** A flat background instead of the sky (`#rrggbbaa` for a see-through one); `null` brings the sky back. */
   clearColor?: string | null;
 }
 
@@ -218,11 +218,17 @@ export interface RendererModule {
    * paused, and the height its feet settled at is returned.
    */
   setWorld(id: ViewId, diffJson: string, mugshot?: string | null): number | undefined;
+  /**
+   * `players`: `{ players, charRadius, playerSpeed, runSpeed }`. A player's `animation`, when set, plays
+   * that state's clip at that time scale instead of the one its velocity implies.
+   */
   setPlayers(id: ViewId, players: unknown): void;
   setCamera(id: ViewId, pose: CameraPose): void;
   /** `ready` once every model has loaded and settled; `pending` counts the models still loading. */
   isReady(id: ViewId): { ready: boolean; pending: number };
   frameStats(id: ViewId): { drawCalls: number; triangles: number };
+  /** The view's next frame as a PNG, keeping a see-through `clearColor`'s alpha. Throws for a destroyed view. */
+  captureView(id: ViewId): Promise<Blob>;
   /**
    * Sends `callback` the view's pick events, from pointer events on its canvas, replacing any callback
    * it had; `null` stops them. A view without a callback does no picking. A throwing callback is logged
@@ -247,8 +253,8 @@ export interface RendererModule {
   // `setCamera`, in every frame its mode has something to frame. Top-down, free-fly and orbit always do;
   // first-person, third-person and fixed need a follow target (fixed, or its `lookAt`), and until
   // then `setCamera` still applies. Keys are heard page-wide and reach every view with input
-  // enabled; pointer lock, mouse-look and the wheel reach only a view drawing into a Bevy window
-  // (with WebGL2, the primary canvas's).
+  // enabled; pointer lock and mouse-look reach only a view drawing into a Bevy window (with WebGL2,
+  // the primary canvas's). Drags and the wheel reach every view from its own canvas.
   /** The movement since the last call, to step the sim with. */
   takeIntent(id: ViewId): MoveIntent;
   /** The local player's body root and yaw, after stepping the sim. */

@@ -3,6 +3,8 @@
 //! back as the view's follow target.
 
 mod page_input;
+#[cfg(feature = "webgl2")]
+pub(super) mod view_pointer;
 
 use std::sync::OnceLock;
 
@@ -19,6 +21,8 @@ static HUB: OnceLock<ControlsHub> = OnceLock::new();
 pub(super) fn add(app: &mut App) {
     app.add_plugins(ControlsPlugin);
     page_input::add(app);
+    #[cfg(feature = "webgl2")]
+    view_pointer::add(app);
     let _ = HUB.set(app.world().resource::<ControlsHub>().clone());
 }
 

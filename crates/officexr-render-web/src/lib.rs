@@ -26,11 +26,13 @@ use bevy::prelude::*;
 use bevy::window::ExitCondition;
 use officexr_render::views::{ViewHub, ViewId, ViewKind, ViewMsg, ViewStatus, ViewTarget};
 use officexr_render::{
-    AssetBase, OfficeXrRenderPlugin, PlayerRender, Players, SceneCamera, WorldDiff, mugshot_player,
+    AssetBase, OfficeXrRenderPlugin, PlayerAnimation, PlayerRender, Players, SceneCamera,
+    WorldDiff, mugshot_player,
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
+mod capture;
 mod controls;
 mod overlays;
 mod picking;
@@ -88,6 +90,8 @@ struct PlayerInput {
     vel: [f32; 3],
     name: String,
     airborne: bool,
+    #[serde(default)]
+    animation: Option<PlayerAnimation>,
 }
 
 #[derive(Serialize)]
@@ -181,6 +185,7 @@ pub fn init(origin: String, primary_canvas: JsValue) -> Result<(), JsError> {
         OfficeXrRenderPlugin,
     ));
     picking::add(&mut app);
+    capture::add(&mut app);
     #[cfg(feature = "webgl2")]
     image_views::add(&mut app);
     controls::add(&mut app);
@@ -235,6 +240,7 @@ fn target(id: ViewId, _: Canvas) -> ViewTarget {
 
 #[cfg(feature = "webgl2")]
 fn target(id: ViewId, canvas: Canvas) -> ViewTarget {
+    controls::view_pointer::listen(id, JsValue::clone(&canvas).unchecked_into());
     ViewTarget::Image(image_views::register(id, canvas))
 }
 
@@ -247,7 +253,10 @@ pub fn destroy_view(id: ViewId) -> Result<(), JsError> {
         PRIMARY_VIEW.set(None);
     }
     #[cfg(feature = "webgl2")]
-    image_views::unregister(id);
+    {
+        image_views::unregister(id);
+        controls::view_pointer::forget(id);
+    }
     picking::forget(id);
     // So the id finds no canvas: `onPick` and the ray queries on it then fail.
     if let Ok(canvas) =
@@ -308,6 +317,7 @@ pub fn set_players(id: ViewId, players: JsValue) -> Result<(), JsError> {
                 vel: p.vel.into(),
                 name: p.name,
                 airborne: p.airborne,
+                animation: p.animation,
             })
             .collect(),
         char_radius: input.char_radius,

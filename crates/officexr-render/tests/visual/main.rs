@@ -276,6 +276,7 @@ fn simulate(scenario: &Scenario, scene_json: &str, players: &Players) -> Vec<Vec
                     vel: v(r.broadcast_vel),
                     name: scenario.characters[i].name.clone(),
                     airborne: r.is_airborne,
+                    animation: None,
                 }
             })
             .collect();

@@ -11,7 +11,6 @@ export {
   type AnimationState,
 } from './Adventurer.tsx';
 export { Players } from './Players.tsx';
-export { CharacterPreviewCanvas } from './CharacterPreviewCanvas.tsx';
 export { BakedLayout, BakedLayoutErrorBoundary, type BakedLayoutProps } from './BakedLayout.tsx';
 export { SkyDome, resolveHorizonColor, type SkySun } from './SkyDome.tsx';
 export { ProximityGlow } from './ProximityGlow.tsx';
@@ -24,7 +23,6 @@ export {
   type LightingSettings,
 } from './LightingRig.tsx';
 export { DEFAULT_EDITOR_LIGHTING } from '../app/editor-lighting.ts';
-export { EditorCamera } from './EditorCamera.tsx';
 // Renderer-side helpers re-exported for editor overlays (e.g. the
 // Room editor's GhostLayer needs to build a transparent material from
 // the same GLTF geometry the opaque InstancedMesh uses).

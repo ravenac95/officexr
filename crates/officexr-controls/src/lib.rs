@@ -9,9 +9,9 @@
 //!
 //! Keys are read from Bevy's `ButtonInput<KeyCode>` and reach every view
 //! whose input is enabled; the host feeds it the keys the views should hear
-//! (on the web, the whole page's). Pointer lock, mouse-look and the wheel need
-//! the view to draw into a Bevy window; on WebGL2 only the primary view does.
-// ponytail: a WebGL2 image view (non-primary canvas) gets keys but no pointer lock, mouse-look or wheel; feed it from JS if one ever needs them.
+//! (on the web, the whole page's). Pointer lock and mouse-look need the view to
+//! draw into a Bevy window; on WebGL2 only the primary view does. A view on an
+//! image takes its drags and wheel from the host as [`ViewPointerInput`].
 
 mod config;
 pub mod look;
@@ -24,7 +24,7 @@ use bevy::camera::RenderTarget;
 use bevy::ecs::system::SystemParam;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
-use bevy::input::mouse::{AccumulatedMouseMotion, MouseButtonInput, MouseWheel};
+use bevy::input::mouse::{AccumulatedMouseMotion, MouseButtonInput, MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow, WindowRef};
 use officexr_render::views::{SceneSystems, View, ViewCamera, ViewId};
@@ -171,6 +171,26 @@ pub struct PointerClaimed(pub bool);
 #[derive(Message, Clone, Copy, Debug, Default)]
 pub struct PointerLockLost;
 
+/// Mouse input for a view that draws into an image rather than a window, which
+/// the host reads from wherever it shows the image (a WebGL2 image view's canvas).
+#[derive(Message, Clone, Copy, Debug)]
+pub struct ViewPointerInput {
+    pub view: ViewId,
+    pub pointer: ViewPointer,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ViewPointer {
+    Press(MouseButton),
+    Release(MouseButton),
+    /// The pointer moved by this many CSS px.
+    Move(Vec2),
+    /// A scroll, signed as Bevy's `MouseWheel`, in CSS px or lines.
+    Wheel(f32, MouseScrollUnit),
+    /// The host lost the pointer mid-press: every button lets go.
+    Lost,
+}
+
 /// Reads input and moves the views' cameras, before [`SceneSystems`] draws them.
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ControlsSystems;
@@ -185,6 +205,7 @@ impl Plugin for ControlsPlugin {
             .init_resource::<ShortcutKeys>()
             .init_resource::<WindowInputs>()
             .add_message::<PointerLockLost>()
+            .add_message::<ViewPointerInput>()
             .configure_sets(Update, ControlsSystems.before(SceneSystems))
             .add_systems(
                 Update,
@@ -335,10 +356,25 @@ struct WindowInput {
     wheel: Vec<(f32, f32)>,
 }
 
-/// This frame's mouse input per window.
+/// This frame's mouse input per window, and per view the host feeds.
 #[derive(Resource, Default)]
-struct WindowInputs(HashMap<Entity, WindowInput>);
+struct WindowInputs {
+    windows: HashMap<Entity, WindowInput>,
+    /// Their held buttons carry over from frame to frame.
+    views: HashMap<ViewId, WindowInput>,
+}
 
+impl WindowInputs {
+    fn of(&self, view: &View, primary: Option<Entity>) -> Option<&WindowInput> {
+        match window_of(view, primary) {
+            Some(window) => self.windows.get(&window),
+            None => self.views.get(&view.id),
+        }
+    }
+}
+
+// Each parameter is one input source; bundling them would only rename them.
+#[allow(clippy::too_many_arguments)]
 fn gather_mouse(
     mut inputs: ResMut<WindowInputs>,
     mut claimed: ResMut<PointerClaimed>,
@@ -346,11 +382,14 @@ fn gather_mouse(
     motion: Res<AccumulatedMouseMotion>,
     mut presses: MessageReader<MouseButtonInput>,
     mut wheels: MessageReader<MouseWheel>,
+    mut fed: MessageReader<ViewPointerInput>,
     windows: Query<(Entity, &Window, &CursorOptions)>,
+    views: Query<&View>,
 ) {
     let claimed = std::mem::take(&mut claimed.0);
+    gather_view_pointers(&mut inputs.views, &mut fed, claimed, &views);
     let held: Vec<MouseButton> = buttons.get_pressed().copied().collect();
-    inputs.0 = windows
+    inputs.windows = windows
         .iter()
         .map(|(entity, window, cursor)| {
             let input = WindowInput {
@@ -366,17 +405,56 @@ fn gather_mouse(
     for press in presses.read() {
         if press.state == ButtonState::Pressed
             && !claimed
-            && let Some(input) = inputs.0.get_mut(&press.window)
+            && let Some(input) = inputs.windows.get_mut(&press.window)
         {
             input.pressed.push(press.button);
         }
     }
     for wheel in wheels.read() {
-        if let Some(input) = inputs.0.get_mut(&wheel.window) {
+        if let Some(input) = inputs.windows.get_mut(&wheel.window) {
             let delta = dom_wheel_delta(wheel.y, wheel.unit, input.scale_factor);
             input
                 .wheel
                 .push((delta, wheel_zoom_factor(delta, wheel.unit)));
+        }
+    }
+}
+
+fn gather_view_pointers(
+    inputs: &mut HashMap<ViewId, WindowInput>,
+    fed: &mut MessageReader<ViewPointerInput>,
+    claimed: bool,
+    views: &Query<&View>,
+) {
+    inputs.retain(|id, _| views.iter().any(|v| v.id == *id));
+    for input in inputs.values_mut() {
+        *input = WindowInput {
+            scale_factor: 1.0,
+            held: std::mem::take(&mut input.held),
+            ..default()
+        };
+    }
+    for ViewPointerInput { view, pointer } in fed.read().copied() {
+        let input = inputs.entry(view).or_insert_with(|| WindowInput {
+            scale_factor: 1.0,
+            ..default()
+        });
+        match pointer {
+            ViewPointer::Press(button) => {
+                if !claimed {
+                    input.pressed.push(button);
+                }
+                if !input.held.contains(&button) {
+                    input.held.push(button);
+                }
+            }
+            ViewPointer::Release(button) => input.held.retain(|b| *b != button),
+            ViewPointer::Move(delta) => input.motion += delta,
+            ViewPointer::Wheel(y, unit) => {
+                let delta = dom_wheel_delta(y, unit, 1.0);
+                input.wheel.push((delta, wheel_zoom_factor(delta, unit)));
+            }
+            ViewPointer::Lost => input.held.clear(),
         }
     }
 }
@@ -399,9 +477,7 @@ fn steer(
         let Some(controls) = hub.get_mut(&view.id) else {
             continue;
         };
-        let window = window_of(view, primary)
-            .and_then(|w| inputs.0.get(&w))
-            .unwrap_or(&empty);
+        let window = inputs.of(view, primary).unwrap_or(&empty);
         if controls.input_enabled {
             let held = Modifiers {
                 shift: keys.any(&SHIFT),
@@ -878,6 +954,56 @@ mod tests {
         motion(&mut app);
         app.update();
         assert_eq!(orbit(&app), expected);
+    }
+
+    #[test]
+    fn an_image_view_orbits_on_the_pointer_the_host_feeds_it_and_ignores_the_windows() {
+        let (mut app, primary) = app();
+        app.init_asset::<Image>();
+        let id = app
+            .world()
+            .resource::<ViewHub>()
+            .create(ViewKind::Preview, |_| ViewTarget::Image(UVec2::new(8, 8)));
+        app.update();
+        for view in [primary, id] {
+            controls(&app, view, |c| c.mode = CameraMode::Orbit);
+        }
+        let orbit = |app: &App, view| controls(app, view, |c| c.rig.orbit_goal);
+        let feed = |app: &mut App, pointer| {
+            app.world_mut()
+                .write_message(ViewPointerInput { view: id, pointer });
+        };
+
+        feed(&mut app, ViewPointer::Press(MouseButton::Right));
+        feed(&mut app, ViewPointer::Move(Vec2::new(30.0, 0.0)));
+        app.update();
+        let mut expected = look::Orbit::default();
+        expected.rotate(Vec2::new(30.0, 0.0), &OrbitCamera::default());
+        assert_eq!(orbit(&app, id), expected);
+        assert_eq!(orbit(&app, primary), look::Orbit::default());
+
+        // Held across frames, until the host loses the pointer.
+        feed(&mut app, ViewPointer::Move(Vec2::new(30.0, 0.0)));
+        app.update();
+        expected.rotate(Vec2::new(30.0, 0.0), &OrbitCamera::default());
+        assert_eq!(orbit(&app, id), expected);
+        feed(&mut app, ViewPointer::Lost);
+        feed(&mut app, ViewPointer::Move(Vec2::new(30.0, 0.0)));
+        app.update();
+        assert_eq!(orbit(&app, id), expected);
+
+        // The window's own mouse reaches only the window's view.
+        press(&mut app, MouseButton::Right, ButtonState::Pressed);
+        app.world_mut().write_message(MouseMotion {
+            delta: Vec2::new(40.0, 0.0),
+        });
+        app.update();
+        assert_eq!(orbit(&app, id), expected);
+        assert_ne!(orbit(&app, primary), look::Orbit::default());
+
+        feed(&mut app, ViewPointer::Wheel(1.0, MouseScrollUnit::Line));
+        app.update();
+        assert!(orbit(&app, id).distance < expected.distance);
     }
 
     #[test]

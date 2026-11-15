@@ -174,6 +174,7 @@ pub fn step_player(
         vel: at(pose.vel),
         name: String::new(),
         airborne: pose.is_airborne,
+        animation: None,
     });
     orbit.target = at(pose.pos) + Vec3::Y * FOLLOW_HEIGHT;
 }
