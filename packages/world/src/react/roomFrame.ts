@@ -25,6 +25,10 @@ export interface PlayerInput {
   /** Empty hides the name tag. */
   name: string;
   airborne: boolean;
+  /** Sitting: drawn in the seat pose at this body root and yaw. */
+  seat: { pos: Xyz; yaw: number } | null;
+  /** Each increase of `count` is a bump, pushed along `normal` (XZ). */
+  bump: { count: number; normal: [number, number] };
 }
 
 export interface PlayersInput {
@@ -32,6 +36,7 @@ export interface PlayersInput {
   charRadius: number;
   playerSpeed: number;
   runSpeed: number;
+  bumpEasingMs: number;
 }
 
 /** The calls one frame makes on its Bevy view. */
@@ -97,12 +102,21 @@ export class RoomFrame {
   private proximity: TrackerOutput | null = null;
   private sentWorld: SentWorld | null = null;
   private worldSources: unknown[] = [];
+  private readonly bumps = new Map<string, PlayerInput['bump']>();
+  private readonly stopBumps: () => void;
 
   constructor(
     private readonly deps: RoomFrameDeps,
     options: RoomFrameOptions,
   ) {
     this.options = options;
+    this.stopBumps = deps.bus.on('collision:char-bump', ({ selfId, normal }) => {
+      this.bumps.set(selfId, { count: (this.bumps.get(selfId)?.count ?? 0) + 1, normal: [normal.x, normal.z] });
+    });
+  }
+
+  dispose(): void {
+    this.stopBumps();
   }
 
   step(dtSec: number, nowMs: number): void {
@@ -281,7 +295,6 @@ export class RoomFrame {
     const { selfId } = this.deps;
     const { sim, cameraMode } = this.options;
     const ws = state.worldSettings;
-    // ponytail(OSO-7939): seated players are drawn standing; Bevy avatars have no sit pose yet.
     const players = Object.values(state.players)
       .filter((p) => p.id !== selfId || cameraMode !== 'first-person')
       .map((p): PlayerInput => {
@@ -295,6 +308,8 @@ export class RoomFrame {
           vel: xyz(p.vel),
           name: isSelf ? '' : p.name,
           airborne: isSelf ? this.airborne : p.isAirborne,
+          seat: p.seat == null ? null : { pos: xyz(p.pos), yaw: p.yaw },
+          bump: this.bumps.get(p.id) ?? { count: 0, normal: [0, 0] },
         };
       });
     return {
@@ -302,6 +317,7 @@ export class RoomFrame {
       charRadius: ws.charRadius,
       playerSpeed: ws.playerSpeed,
       runSpeed: ws.playerSpeed * ws.runSpeedMultiplier,
+      bumpEasingMs: ws.bumpEasingMs,
     };
   }
 }

@@ -61,8 +61,7 @@ export interface PlayViewProps {
   invertLook?: boolean;
   /** `'debug'` shows the camera, transport and layout status plus the focus chip; `'player'` shows none of it. */
   hud?: 'debug' | 'player';
-  /** Pings another player; the 3D view has no hover bell yet, so pings come from the participant list. */
-  // ponytail(OSO-7939): the 3D hover bell waits on Bevy picking; this is the seam it hooks into.
+  /** Pings another player, from the 3D view's hover bell or the participant list. */
   onPingPlayer?: (id: PlayerId) => void;
   /** The local player's simulation; default `'ts'`. */
   sim?: SimImplementation;
@@ -146,6 +145,7 @@ export function PlayView(props: PlayViewProps) {
           selfReady={ready}
           sim={props.sim}
           onLoadProgress={setProgress}
+          onPing={props.onPingPlayer && ((_, id) => props.onPingPlayer?.(id))}
           onModelsReady={() => dispatch({ type: 'modelsReady' })}
           onCollidersReady={(roomInstanceId) => dispatch({ type: 'collidersReady', roomInstanceId })}
           onError={(err) => dispatch({ type: 'collidersFailed', message: `Could not load the world: ${err.message}` })}

@@ -26,7 +26,8 @@ use bevy::prelude::*;
 use bevy::window::ExitCondition;
 use officexr_render::views::{ViewHub, ViewId, ViewKind, ViewMsg, ViewStatus, ViewTarget};
 use officexr_render::{
-    AssetBase, OfficeXrRenderPlugin, PlayerRender, Players, SceneCamera, WorldDiff, mugshot_player,
+    AssetBase, Bump, OfficeXrRenderPlugin, PlayerRender, Players, SceneCamera, Seat, WorldDiff,
+    mugshot_player,
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -77,6 +78,19 @@ struct PlayersInput {
     char_radius: f32,
     player_speed: f32,
     run_speed: f32,
+    bump_easing_ms: f32,
+}
+
+#[derive(Deserialize)]
+struct SeatInput {
+    pos: [f32; 3],
+    yaw: f32,
+}
+
+#[derive(Deserialize)]
+struct BumpInput {
+    count: u32,
+    normal: [f32; 2],
 }
 
 #[derive(Deserialize)]
@@ -88,6 +102,8 @@ struct PlayerInput {
     vel: [f32; 3],
     name: String,
     airborne: bool,
+    seat: Option<SeatInput>,
+    bump: BumpInput,
 }
 
 #[derive(Serialize)]
@@ -308,11 +324,20 @@ pub fn set_players(id: ViewId, players: JsValue) -> Result<(), JsError> {
                 vel: p.vel.into(),
                 name: p.name,
                 airborne: p.airborne,
+                seat: p.seat.map(|s| Seat {
+                    pos: s.pos.into(),
+                    yaw: s.yaw,
+                }),
+                bump: Bump {
+                    count: p.bump.count,
+                    normal: p.bump.normal.into(),
+                },
             })
             .collect(),
         char_radius: input.char_radius,
         player_speed: input.player_speed,
         run_speed: input.run_speed,
+        bump_easing_ms: input.bump_easing_ms,
         ..default()
     };
     send(id, ViewMsg::Players(players))

@@ -47,6 +47,18 @@ pub(crate) fn label(
     )
 }
 
+/// Where a placed label is, in its view's logical pixels.
+pub(crate) fn rect(node: &Node, computed: &ComputedNode) -> Option<Rect> {
+    let (Val::Px(left), Val::Px(top)) = (node.left, node.top) else {
+        return None;
+    };
+    let size = computed.size() * computed.inverse_scale_factor();
+    Some(Rect::from_corners(
+        Vec2::new(left, top),
+        Vec2::new(left, top) + size,
+    ))
+}
+
 /// The camera of the view `anchor` is in, once it has one.
 fn view_camera(anchor: Entity, parents: &Query<&ChildOf>, views: &Query<&View>) -> Option<Entity> {
     parents

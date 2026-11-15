@@ -26,6 +26,10 @@ pub enum PickTarget {
     Player {
         id: String,
     },
+    /// The hover bell that pings this player.
+    PingBell {
+        id: String,
+    },
     Overlay {
         tag: String,
     },
@@ -60,6 +64,8 @@ pub fn intersect_plane(ray: Ray3d, normal: Vec3, constant: f32) -> Option<Vec3> 
         .map(|t| ray.get_point(t))
 }
 
+#[cfg(feature = "picking")]
+mod ping_bell;
 #[cfg(feature = "picking")]
 mod pointers;
 #[cfg(feature = "picking")]

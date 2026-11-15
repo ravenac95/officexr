@@ -37,7 +37,7 @@ use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 use bevy::ui::UiSystems;
 
-pub use avatars::{Bound as AvatarBound, Motion, PlayerRender, Players, next_motion};
+pub use avatars::{Bound as AvatarBound, Bump, Motion, PlayerRender, Players, Seat, next_motion};
 pub use layouts::LayoutIndex;
 pub use lighting::{HemisphereFill, ObjectMaterial, snap_to_shadow_texel};
 #[cfg(feature = "mugshot")]

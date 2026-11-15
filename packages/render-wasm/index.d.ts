@@ -49,6 +49,8 @@ export type PickTarget =
   | { type: 'object'; id: string }
   | { type: 'layout'; name: string; roomInstanceId: string }
   | { type: 'player'; id: string }
+  /** The bell shown over a hovered player; only `click` is reported on it. */
+  | { type: 'pingBell'; id: string }
   | { type: 'overlay'; tag: string }
   /** The infinite floor plane at y = 0. */
   | { type: 'ground' };

@@ -76,6 +76,7 @@ fn cycle_motions(time: Res<Time>, mut players: ResMut<Players>) {
                 vel: Vec3::new(speeds[tier], 0.0, 0.0),
                 name: character.to_string(),
                 airborne: tier == 3,
+                ..default()
             }
         })
         .collect();

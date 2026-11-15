@@ -15,6 +15,7 @@ import type { SimBakedColliders, SimCore } from '../sim/SimCore.ts';
 import { useApplication, useCatalog, useCatalogCharacters } from './application-context.tsx';
 import { bootBevy, playCanvas } from './bevyRenderer.ts';
 import { FrameLoop } from './frameLoop.ts';
+import { pingBellPicks } from './pingBell.ts';
 import { RoomFrame, type RoomView } from './roomFrame.ts';
 import { useCreateSim, type SimImplementation } from './useCreateSim.ts';
 import { useStoreSelector } from './useStoreSelector.ts';
@@ -52,6 +53,8 @@ export interface BevySceneProps {
   onModelsReady?: () => void;
   onCollidersReady?: (roomInstanceId: string) => void;
   onError?: (error: Error) => void;
+  /** A click on the bell over a hovered player. */
+  onPing?: (view: ViewId, playerId: string) => void;
 }
 
 interface BevySentinels {
@@ -267,6 +270,7 @@ export function BevyScene(props: BevySceneProps) {
 
   const onProgress = useEffectEvent((percent: number) => props.onLoadProgress?.(percent));
   const onModelsReady = useEffectEvent(() => props.onModelsReady?.());
+  const onPing = useEffectEvent((view: ViewId, playerId: string) => props.onPing?.(view, playerId));
   const onFrameStats = useEffectEvent((sample: FrameStatsSample | null) => props.onFrameStats?.(sample));
   const { actions, rules, bus, handshake, bots, viewYaw } = props;
   useEffect(() => {
@@ -274,6 +278,7 @@ export function BevyScene(props: BevySceneProps) {
       return;
     }
     const { wasm, view } = bevy;
+    wasm.onPick(view, pingBellPicks(view, onPing));
     const room = new RoomFrame(
       {
         store,
@@ -320,6 +325,8 @@ export function BevyScene(props: BevySceneProps) {
     return () => {
       loop.stop();
       frame.current = null;
+      room.dispose();
+      wasm.onPick(view, null);
       onFrameStats(null);
     };
     // The frame takes every other input through `options`.

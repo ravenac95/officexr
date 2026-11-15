@@ -5,7 +5,8 @@
 use std::f32::consts::PI;
 use std::time::Duration;
 
-use bevy::animation::{AnimatedBy, AnimationTargetId};
+use bevy::animation::animation_curves::{AnimatableCurve, AnimatableKeyframeCurve};
+use bevy::animation::{AnimatedBy, AnimationTargetId, animated_field};
 use bevy::gltf::Gltf;
 use bevy::prelude::*;
 
@@ -27,9 +28,47 @@ const AVATAR_YAW_OFFSET: f32 = PI;
 const TAG_HEIGHT_M: f32 = 2.0;
 const WALK_THRESHOLD: f32 = 0.05;
 const FADE: Duration = Duration::from_millis(200);
+/// Faster than authored so a bump reads as a quick recoil, not a flinch.
+const HIT_SPEED: f32 = 1.6;
+const HIT_FADE: Duration = Duration::from_millis(50);
+const BUMP_KICK_M: f32 = 0.16;
+/// Where the ping bell hangs, above the name tag.
+const BELL_HEIGHT_M: f32 = 2.45;
+
+/// Rig_Medium bone paths below `root` and their seated local rotations
+/// (XYZ Euler degrees), as `sitPoseClip.ts` poses them; other bones keep what they had.
+const SIT_POSE: [(&str, [f32; 3]); 11] = [
+    ("hips/upperleg.l", [90.0, 0.0, 0.0]),
+    ("hips/upperleg.r", [90.0, 0.0, 0.0]),
+    ("hips/upperleg.l/lowerleg.l", [90.0, 0.0, 0.0]),
+    ("hips/upperleg.r/lowerleg.r", [90.0, 0.0, 0.0]),
+    ("hips/upperleg.l/lowerleg.l/foot.l", [-44.0, 0.0, 0.0]),
+    ("hips/upperleg.r/lowerleg.r/foot.r", [-44.0, 0.0, 0.0]),
+    ("hips/spine", [8.0, 0.0, 0.0]),
+    // Idle_A frame 0: the bind pose is a T-pose.
+    ("hips/spine/chest/upperarm.l", [-52.6, 48.4, -109.2]),
+    ("hips/spine/chest/upperarm.r", [-53.1, -52.3, 98.5]),
+    ("hips/spine/chest/upperarm.l/lowerarm.l", [0.0, 0.0, -42.0]),
+    ("hips/spine/chest/upperarm.r/lowerarm.r", [0.0, 0.0, 44.0]),
+];
+
+/// Where a seated player sits: the body root and yaw the seat puts them at.
+#[derive(Clone, Copy, Debug)]
+pub struct Seat {
+    pub pos: Vec3,
+    pub yaw: f32,
+}
+
+/// Collision bumps a player has had; each increase of `count` is a new one,
+/// pushed along `normal` (XZ, out of whoever they hit).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Bump {
+    pub count: u32,
+    pub normal: Vec2,
+}
 
 /// One player as the renderer needs it, as `OfficeState.players` holds it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct PlayerRender {
     pub id: String,
     /// A `/models/characters/<character>.glb` name, e.g. `Barbarian`.
@@ -41,6 +80,15 @@ pub struct PlayerRender {
     /// Empty hides the tag, as for the local player.
     pub name: String,
     pub airborne: bool,
+    /// Sitting overrides every other motion, and places the player at the seat.
+    pub seat: Option<Seat>,
+    pub bump: Bump,
+}
+
+impl PlayerRender {
+    fn placed(&self) -> (Vec3, f32) {
+        self.seat.map_or((self.pos, self.yaw), |s| (s.pos, s.yaw))
+    }
 }
 
 /// The players to draw this frame, with the world tunables their motion
@@ -53,6 +101,8 @@ pub struct Players {
     pub body_y: f32,
     pub player_speed: f32,
     pub run_speed: f32,
+    /// How long a bump's push takes to ease out.
+    pub bump_easing_ms: f32,
     /// Bind pose, no clips and no name tags, as the mugshot renders.
     pub paused: bool,
 }
@@ -60,7 +110,7 @@ pub struct Players {
 impl Players {
     /// Where `player`'s character model stands: the ball collider's bottom.
     pub fn feet(&self, player: &PlayerRender) -> Vec3 {
-        player.pos + Vec3::Y * (self.body_y - self.char_radius)
+        player.placed().0 + Vec3::Y * (self.body_y - self.char_radius)
     }
 }
 
@@ -72,6 +122,7 @@ impl Default for Players {
             body_y: 0.9,
             player_speed: 3.0,
             run_speed: 6.0,
+            bump_easing_ms: 180.0,
             paused: false,
         }
     }
@@ -83,34 +134,24 @@ pub enum Motion {
     Walking,
     Running,
     Jumping,
+    Sitting,
 }
 
-impl Motion {
-    const ALL: [Motion; 4] = [
-        Motion::Idle,
-        Motion::Walking,
-        Motion::Running,
-        Motion::Jumping,
-    ];
-
-    fn clip(self) -> &'static str {
-        match self {
-            Motion::Idle => "Idle_A",
-            Motion::Walking => "Walking_C",
-            Motion::Running => "Running_A",
-            Motion::Jumping => "Jump_Full_Long",
-        }
-    }
-}
+/// Graph node of the one-shot hit reaction, after one node per [`Motion`].
+const HIT_NODE: usize = Motion::Sitting as usize + 1;
 
 /// `Players.tsx`'s locomotion tier, with its enter/exit hysteresis.
 pub fn next_motion(
     previous: Motion,
     vel: Vec3,
     airborne: bool,
+    seated: bool,
     player_speed: f32,
     run_speed: f32,
 ) -> Motion {
+    if seated {
+        return Motion::Sitting;
+    }
     if airborne {
         return Motion::Jumping;
     }
@@ -121,9 +162,13 @@ pub fn next_motion(
     let run_enter = (run * 1.05).powi(2);
     let run_exit = (run * 0.95).powi(2);
     match previous {
-        Motion::Idle | Motion::Jumping if speed_sq >= run_enter => Motion::Running,
-        Motion::Idle | Motion::Jumping if speed_sq >= walk_enter => Motion::Walking,
-        Motion::Idle | Motion::Jumping => Motion::Idle,
+        Motion::Idle | Motion::Jumping | Motion::Sitting if speed_sq >= run_enter => {
+            Motion::Running
+        }
+        Motion::Idle | Motion::Jumping | Motion::Sitting if speed_sq >= walk_enter => {
+            Motion::Walking
+        }
+        Motion::Idle | Motion::Jumping | Motion::Sitting => Motion::Idle,
         Motion::Walking if speed_sq >= run_enter => Motion::Running,
         Motion::Walking if speed_sq <= walk_exit => Motion::Idle,
         Motion::Walking => Motion::Walking,
@@ -139,7 +184,7 @@ fn anim_scale(motion: Motion, vel: Vec3, player_speed: f32, run_speed: f32) -> f
     let denom = match motion {
         Motion::Running => run_speed,
         Motion::Walking => player_speed,
-        Motion::Idle | Motion::Jumping => return 1.0,
+        Motion::Idle | Motion::Jumping | Motion::Sitting => return 1.0,
     };
     let ratio = if denom > 0.0 {
         Vec2::new(vel.x, vel.z).length() / denom
@@ -150,12 +195,24 @@ fn anim_scale(motion: Motion, vel: Vec3, player_speed: f32, run_speed: f32) -> f
 }
 
 #[derive(Component)]
-struct Avatar {
+pub(crate) struct Avatar {
     id: String,
     character: String,
     motion: Motion,
+    /// The player's `bump.count` last seen, and the running bump's start (seconds) and push.
+    bumps: u32,
+    bump: Option<(f32, Vec2)>,
     /// The `Rig_Medium` node, once bound.
     rig: Option<Entity>,
+}
+
+/// The label a hovered player shows to be pinged; `picking::ping_bell` drives it.
+#[derive(Component, Default)]
+pub(crate) struct PingBell {
+    /// Seconds the bell stays after the pointer leaves, so it can cross to it.
+    pub linger: f32,
+    /// A press landed on the bell, awaiting its release.
+    pub armed: bool,
 }
 
 /// Set once the character's skeleton is bound to the clips (or, paused,
@@ -166,7 +223,7 @@ pub struct Bound;
 #[derive(Resource)]
 struct Clips {
     rigs: Vec<Handle<Gltf>>,
-    graph: Option<(Handle<AnimationGraph>, [AnimationNodeIndex; 4])>,
+    graph: Option<(Handle<AnimationGraph>, [AnimationNodeIndex; HIT_NODE + 1])>,
 }
 
 pub(crate) fn plugin(app: &mut App) {
@@ -219,6 +276,7 @@ fn build_graph(
     assets: Res<AssetServer>,
     gltfs: Res<Assets<Gltf>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
+    mut animations: ResMut<Assets<AnimationClip>>,
 ) {
     if clips.graph.is_some()
         || !clips
@@ -236,8 +294,41 @@ fn build_graph(
             .find_map(|h| gltfs.get(h)?.named_animations.get(name).cloned())
             .unwrap_or_else(|| panic!("no {name} clip in the Rig_Medium GLBs"))
     };
-    let (graph, nodes) = AnimationGraph::from_clips(Motion::ALL.map(|m| find(m.clip())));
+    let (graph, nodes) = AnimationGraph::from_clips([
+        find("Idle_A"),
+        find("Walking_C"),
+        find("Running_A"),
+        find("Jump_Full_Long"),
+        animations.add(sit_pose_clip()),
+        find("Hit_A"),
+    ]);
     clips.graph = Some((graphs.add(graph), nodes.try_into().unwrap()));
+}
+
+fn sit_pose_clip() -> AnimationClip {
+    let mut clip = AnimationClip::default();
+    for (bone, [x, y, z]) in SIT_POSE {
+        let path: Vec<Name> = ["Rig_Medium", "root"]
+            .into_iter()
+            .chain(bone.split('/'))
+            .map(Name::new)
+            .collect();
+        let rotation = Quat::from_euler(
+            EulerRot::XYZ,
+            x.to_radians(),
+            y.to_radians(),
+            z.to_radians(),
+        );
+        clip.add_curve_to_target(
+            AnimationTargetId::from_names(path.iter()),
+            AnimatableCurve::new(
+                animated_field!(Transform::rotation),
+                AnimatableKeyframeCurve::new([(0.0, rotation), (1.0, rotation)])
+                    .expect("two keyframes"),
+            ),
+        );
+    }
+    clip
 }
 
 fn sync_avatars(
@@ -272,7 +363,7 @@ fn sync_view_avatars(
     for p in &players.players {
         // ponytail: the yaw snaps; Players.tsx eases it at `turnSpeed`.
         let transform = Transform::from_translation(players.feet(p))
-            .with_rotation(Quat::from_rotation_y(p.yaw + AVATAR_YAW_OFFSET));
+            .with_rotation(Quat::from_rotation_y(p.placed().1 + AVATAR_YAW_OFFSET));
         let existing = avatars
             .iter_mut()
             .find(|(_, a, _, v)| v.parent() == view && a.id == p.id && a.character == p.character);
@@ -288,6 +379,8 @@ fn sync_view_avatars(
                     id: p.id.clone(),
                     character: p.character.clone(),
                     motion: Motion::Idle,
+                    bumps: p.bump.count,
+                    bump: None,
                     rig: None,
                 },
                 PickTarget::Player { id: p.id.clone() },
@@ -303,6 +396,16 @@ fn sync_view_avatars(
             Color::srgba(0.0, 0.0, 0.0, 0.55),
             avatar,
             Vec3::Y * TAG_HEIGHT_M,
+        ));
+        commands.spawn((
+            PingBell::default(),
+            world_label::label(
+                "Ping".into(),
+                14.0,
+                Color::srgb(0.07, 0.07, 0.07),
+                avatar,
+                Vec3::Y * BELL_HEIGHT_M,
+            ),
         ));
     }
 }
@@ -386,16 +489,19 @@ fn tag_targets(
     path.pop();
 }
 
+#[allow(clippy::type_complexity)]
 fn animate(
+    time: Res<Time>,
     views: Query<&ViewPlayers>,
     clips: Res<Clips>,
-    mut avatars: Query<(&mut Avatar, &ChildOf), With<Bound>>,
+    mut avatars: Query<(&mut Avatar, &mut Transform, &ChildOf), With<Bound>>,
     mut rigs: Query<(&mut AnimationPlayer, &mut AnimationTransitions)>,
 ) {
     let Some((_, nodes)) = &clips.graph else {
         return;
     };
-    for (mut avatar, view) in &mut avatars {
+    let now = time.elapsed_secs();
+    for (mut avatar, mut transform, view) in &mut avatars {
         let Ok(players) = views.get(view.parent()) else {
             continue;
         };
@@ -405,6 +511,22 @@ fn animate(
         let Some(p) = players.players.iter().find(|p| p.id == avatar.id) else {
             continue;
         };
+        if p.bump.count != avatar.bumps {
+            avatar.bumps = p.bump.count;
+            avatar.bump = Some((now, p.bump.normal));
+        }
+        // Players.tsx's visual-only kick: a decaying wave along the bump's normal.
+        let mut kick = Vec3::ZERO;
+        if let Some((start, normal)) = avatar.bump {
+            let t = (now - start) * 1000.0 / players.bump_easing_ms;
+            if t >= 1.0 {
+                avatar.bump = None;
+            } else {
+                let env = (-3.2 * t).exp() * (2.0 * PI * 1.1 * t).cos();
+                kick = Vec3::new(normal.x, 0.0, normal.y) * env * BUMP_KICK_M;
+            }
+        }
+        transform.translation = players.feet(p) + kick;
         let Some(Ok((mut player, mut transitions))) = avatar.rig.map(|r| rigs.get_mut(r)) else {
             continue;
         };
@@ -412,9 +534,20 @@ fn animate(
             avatar.motion,
             p.vel,
             p.airborne,
+            p.seat.is_some(),
             players.player_speed,
             players.run_speed,
         );
+        let hit = nodes[HIT_NODE];
+        if motion != Motion::Sitting && avatar.bump.is_some_and(|(start, _)| start == now) {
+            transitions
+                .play(&mut player, hit, HIT_FADE)
+                .set_speed(HIT_SPEED);
+        }
+        // The reaction plays over the loop, which resumes when it ends.
+        if player.animation(hit).is_some_and(|a| !a.is_finished()) {
+            continue;
+        }
         let node = nodes[motion as usize];
         if motion != avatar.motion || !player.is_playing_animation(node) {
             avatar.motion = motion;
@@ -435,7 +568,7 @@ fn animate(
 fn show_tags(
     views: Query<(&View, &ViewPlayers)>,
     avatars: Query<(&Avatar, &Labels, &ChildOf)>,
-    mut tags: Query<&mut WorldLabel>,
+    mut tags: Query<&mut WorldLabel, Without<PingBell>>,
 ) {
     for (avatar, labels, view) in &avatars {
         let Ok((view, players)) = views.get(view.parent()) else {
@@ -462,7 +595,7 @@ mod tests {
     use super::*;
 
     fn step(previous: Motion, speed: f32) -> Motion {
-        next_motion(previous, Vec3::new(speed, 0.0, 0.0), false, 3.0, 6.0)
+        next_motion(previous, Vec3::new(speed, 0.0, 0.0), false, false, 3.0, 6.0)
     }
 
     #[test]
@@ -480,7 +613,37 @@ mod tests {
 
     #[test]
     fn airborne_overrides_speed() {
-        let m = next_motion(Motion::Running, Vec3::new(6.0, 0.0, 0.0), true, 3.0, 6.0);
+        let m = next_motion(
+            Motion::Running,
+            Vec3::new(6.0, 0.0, 0.0),
+            true,
+            false,
+            3.0,
+            6.0,
+        );
         assert_eq!(m, Motion::Jumping);
+    }
+
+    #[test]
+    fn sitting_overrides_airborne_and_speed_and_restarts_the_tiers() {
+        let fast = Vec3::new(6.0, 0.0, 0.0);
+        let m = next_motion(Motion::Running, fast, true, true, 3.0, 6.0);
+        assert_eq!(m, Motion::Sitting);
+        assert_eq!(step(Motion::Sitting, 0.0), Motion::Idle);
+        assert_eq!(step(Motion::Sitting, 0.08), Motion::Walking);
+    }
+
+    #[test]
+    fn a_seat_places_the_avatar_at_the_seat() {
+        let seat = Seat {
+            pos: Vec3::new(1.0, 2.0, 3.0),
+            yaw: 0.5,
+        };
+        let p = PlayerRender {
+            seat: Some(seat),
+            ..default()
+        };
+        assert_eq!(Players::default().feet(&p), Vec3::new(1.0, 2.5, 3.0));
+        assert_eq!(p.placed().1, 0.5);
     }
 }

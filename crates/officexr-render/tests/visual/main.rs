@@ -30,7 +30,7 @@ use officexr_render::placement::VOXEL_SIZE;
 use officexr_render::views::View;
 use officexr_render::{
     AssetBase, AvatarBound, LayoutIndex, ObjectKinds, OffscreenTarget, PlayerRender, Players,
-    SceneCamera, WorldSceneData, offscreen_app, scene_sim, sim_input,
+    SceneCamera, Seat, WorldSceneData, offscreen_app, scene_sim, sim_input,
 };
 use officexr_sim::SimPeer;
 use officexr_sim::physics::character_movement::XZ;
@@ -103,6 +103,14 @@ struct Character {
     /// Body root, teleported to before the first step.
     spawn: [f64; 3],
     moves: Vec<Move>,
+    /// Sits at this body root and yaw instead of where the moves lead.
+    seat: Option<SeatSpec>,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+struct SeatSpec {
+    pos: [f32; 3],
+    yaw: f32,
 }
 
 #[derive(Deserialize)]
@@ -271,11 +279,18 @@ fn simulate(scenario: &Scenario, scene_json: &str, players: &Players) -> Vec<Vec
                 PlayerRender {
                     id: format!("p{i}"),
                     character: scenario.characters[i].character.clone(),
-                    pos: v(r.new_pos),
+                    pos: scenario.characters[i]
+                        .seat
+                        .map_or(v(r.new_pos), |s| s.pos.into()),
                     yaw: yaws[i],
                     vel: v(r.broadcast_vel),
                     name: scenario.characters[i].name.clone(),
                     airborne: r.is_airborne,
+                    seat: scenario.characters[i].seat.map(|s| Seat {
+                        pos: s.pos.into(),
+                        yaw: s.yaw,
+                    }),
+                    ..default()
                 }
             })
             .collect();

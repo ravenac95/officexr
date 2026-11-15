@@ -105,6 +105,10 @@ impl PickHub {
         self.lock().pointer.push((view, msg));
     }
 
+    pub(super) fn push(&self, view: ViewId, pick: PickEvent) {
+        self.lock().picks.push((view, pick));
+    }
+
     pub fn take_picks(&self) -> Vec<(ViewId, PickEvent)> {
         std::mem::take(&mut self.lock().picks)
     }
@@ -112,13 +116,13 @@ impl PickHub {
 
 /// A view's pointer, a child of the view alongside its [`PickTarget::Ground`].
 #[derive(Component)]
-struct ViewPointer {
-    view: ViewId,
+pub(super) struct ViewPointer {
+    pub(super) view: ViewId,
     ground: Entity,
     /// `None` while the pointer is off the view.
-    screen: Option<Vec2>,
+    pub(super) screen: Option<Vec2>,
     size: Vec2,
-    modifiers: Modifiers,
+    pub(super) modifiers: Modifiers,
 }
 
 pub(crate) fn plugin(app: &mut App) {
@@ -131,6 +135,7 @@ pub(crate) fn plugin(app: &mut App) {
         MeshPickingPlugin,
         HierarchyPropagatePlugin::<Pickable>::new(PostUpdate),
     ))
+    .add_plugins(super::ping_bell::plugin)
     .init_resource::<PickHub>()
     .add_message::<TargetPressed>()
     .add_systems(First, feed_pointers.in_set(PickingSystems::Input))
@@ -398,7 +403,7 @@ fn forward<E>(
         modifiers: state.modifiers,
         screen: pointer.position.into(),
     };
-    hub.lock().picks.push((state.view, pick));
+    hub.push(state.view, pick);
 }
 
 #[cfg(test)]

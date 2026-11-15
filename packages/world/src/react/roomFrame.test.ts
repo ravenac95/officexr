@@ -103,6 +103,7 @@ async function setup(opts: { intent?: MoveIntent; options?: Partial<RoomFrameOpt
     players,
     inputEnabled,
     actions: alice.actions,
+    bus: alice.bus,
     store: alice.store,
     setIntent: (intent: MoveIntent) => {
       viewState.intent = intent;
@@ -173,6 +174,21 @@ describe('RoomFrame', () => {
     frame.options = { ...frame.options, cameraMode: 'first-person' };
     frame.step(0.016, 1016);
     expect(players[1]!.players.map((p) => p.id)).toEqual(['bob']);
+  });
+
+  it('sends a seated player with their seat, and counts bumps with their push direction', async () => {
+    const { frame, players, actions, bus } = await setup();
+    actions.upsertPlayer({ id: 'bob', seat: 'chair-1' });
+    bus.emit({ kind: 'collision:char-bump', selfId: 'bob', otherId: 'alice', normal: { x: 0, z: 1 } });
+    bus.emit({ kind: 'collision:char-bump', selfId: 'bob', otherId: 'alice', normal: { x: 1, z: 0 } });
+
+    frame.step(0.016, 1000);
+
+    const [alice, bob] = players[0]!.players;
+    expect(alice!.seat).toBeNull();
+    expect(alice!.bump).toEqual({ count: 0, normal: [0, 0] });
+    expect(bob!.seat).toEqual({ pos: [bob!.pos[0], bob!.pos[1], bob!.pos[2]], yaw: bob!.yaw });
+    expect(bob!.bump).toEqual({ count: 2, normal: [1, 0] });
   });
 
   it('sends the world once, and again only when the store changes it', async () => {
