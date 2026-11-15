@@ -27,6 +27,7 @@ use bevy::time::TimeUpdateStrategy;
 use bevy::winit::WinitPlugin;
 use officexr_render::overlays::{Overlay, ViewOverlays};
 use officexr_render::placement::VOXEL_SIZE;
+use officexr_render::proximity::{Proximity, ViewProximity};
 use officexr_render::views::View;
 use officexr_render::{
     AssetBase, AvatarBound, LayoutIndex, ObjectKinds, OffscreenTarget, PlayerRender, Players,
@@ -43,6 +44,9 @@ const HERE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/visual");
 const MAX_GROUND_SINK: f32 = 0.10;
 const PIXEL_THRESHOLD: u32 = 6;
 const MAX_DIFF_FRAC: f64 = 0.01;
+/// A `Tint`: how much brighter, in 8-bit sRGB, and how near the colour's hue.
+const MIN_TINT: f32 = 24.0;
+const MIN_TINT_ALIKE: f32 = 0.9;
 /// Every other 60 Hz sim frame makes a 30 fps video.
 const VIDEO_STRIDE: usize = 2;
 const READY_FRAMES: u32 = 10;
@@ -68,6 +72,12 @@ struct Scenario {
     /// As `setOverlays` takes them; their ghosts' kinds join the scene's.
     #[serde(default)]
     overlays: Vec<Value>,
+    /// As `setProximity` takes it; players are `p<character index>`.
+    #[serde(default)]
+    proximity: Option<Value>,
+    /// The sim frame `proximity` is sent on.
+    #[serde(default)]
+    proximity_from: usize,
 }
 
 #[derive(Deserialize, Clone)]
@@ -141,6 +151,15 @@ enum Assertion {
         character: usize,
         position: [f32; 3],
         tolerance: f32,
+    },
+    /// The keyframe's pixel at `at` is the same pixel of keyframe `against`
+    /// plus some of `color`, as an additive glow adds it.
+    Tint {
+        frame: usize,
+        against: usize,
+        camera: String,
+        at: [u32; 2],
+        color: String,
     },
 }
 
@@ -334,6 +353,7 @@ fn check_positions(
                     ));
                 }
             }
+            Assertion::Tint { .. } => {}
         }
     }
     failures
@@ -443,6 +463,32 @@ fn drive(
 #[derive(Resource)]
 struct ScenarioOverlays(Vec<Overlay>);
 
+/// The scenario's proximity output and the sim frame it's sent on.
+#[derive(Resource)]
+struct ScenarioProximity(Option<Proximity>, usize);
+
+/// Gives the primary view the scenario's proximity output from its frame.
+fn add_proximity(
+    mut commands: Commands,
+    proximity: Res<ScenarioProximity>,
+    timeline: Res<Timeline>,
+    views: Query<Entity, (With<View>, Without<ViewProximity>)>,
+) {
+    let (Some(output), from) = (&proximity.0, proximity.1) else {
+        return;
+    };
+    if timeline
+        .steps
+        .get(timeline.next)
+        .is_none_or(|s| s.frame < from)
+    {
+        return;
+    }
+    for view in &views {
+        commands.entity(view).insert(ViewProximity(output.clone()));
+    }
+}
+
 /// Gives the primary view the scenario's overlays once it exists.
 fn add_overlays(
     mut commands: Commands,
@@ -498,7 +544,18 @@ fn render(
         .insert_resource(ScenarioOverlays(
             serde_json::from_value(Value::from(scenario.overlays.clone())).expect("overlays"),
         ))
-        .add_systems(PreUpdate, (drive, add_overlays));
+        .insert_resource(ScenarioProximity(
+            scenario
+                .proximity
+                .clone()
+                .map(|p| serde_json::from_value(p).expect("proximity")),
+            scenario.proximity_from,
+        ))
+        // Before `drive` moves on, so it sees the step about to render.
+        .add_systems(
+            PreUpdate,
+            (drive, add_overlays, add_proximity.before(drive)),
+        );
     app.run();
     let failed = failed.lock().unwrap();
     failed
@@ -580,6 +637,40 @@ fn check_pixels(name: &str, keyframes: &[PathBuf], update: bool) -> Vec<String> 
     failures
 }
 
+/// The `Tint` assertions, on the saved keyframes.
+fn check_tints(scenario: &Scenario, out: &Path) -> Vec<String> {
+    let mut failures = vec![];
+    for a in &scenario.assert {
+        let Assertion::Tint {
+            frame,
+            against,
+            camera,
+            at,
+            color,
+        } = a
+        else {
+            continue;
+        };
+        let file = out.join(format!("{frame:04}-{camera}.png"));
+        let pixel = |frame: usize| {
+            let (size, data) = rgba(&out.join(format!("{frame:04}-{camera}.png")));
+            let i = ((at[1] * size.x + at[0]) * 4) as usize;
+            Vec3::new(data[i].into(), data[i + 1].into(), data[i + 2].into())
+        };
+        let added = pixel(*frame) - pixel(*against);
+        let want = Srgba::hex(color).expect("tint colour");
+        let want = Vec3::new(want.red, want.green, want.blue);
+        let alike = added.normalize_or_zero().dot(want.normalize());
+        if added.length() < MIN_TINT || alike < MIN_TINT_ALIKE {
+            failures.push(format!(
+                "{}: {at:?} adds {added:.0} to frame {against}'s, not {color}",
+                file.display()
+            ));
+        }
+    }
+    failures
+}
+
 /// `video.mp4` from the `video/` frames when ffmpeg is on PATH.
 fn encode_video(out: &Path) {
     let status = Command::new("ffmpeg")
@@ -622,6 +713,7 @@ fn run(name: &str, update: bool) -> Vec<String> {
     failures.extend(render(&scenario, &scene, frames, players, steps));
     let missing: Vec<_> = keyframes.iter().filter(|k| !k.exists()).collect();
     assert!(missing.is_empty(), "never saved: {missing:?}");
+    failures.extend(check_tints(&scenario, &out));
     encode_video(&out);
     // A failing run's keyframes don't become baselines.
     if failures.is_empty() || !update {

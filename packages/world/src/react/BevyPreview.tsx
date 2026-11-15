@@ -8,6 +8,7 @@ import type { AnimationState } from '../renderer/Adventurer.tsx';
 import type { FrameStatsSample } from '../renderer/FrameStatsProbe.tsx';
 import type { WorldObjectKind } from '../scenes/world-object-kinds-schema.ts';
 import { bootBevy } from './bevyRenderer.ts';
+import { frameStatsMeter } from './frameStatsMeter.ts';
 
 type Vec3 = [number, number, number];
 
@@ -74,7 +75,6 @@ const SEE_THROUGH = '#00000000';
 const CHAR_RADIUS = 0.4;
 const VOXEL_SIZE = 0.5;
 const SPIN_RAD_PER_SEC = 0.4;
-const STATS_INTERVAL_MS = 500;
 const INSTANCE_ID = 'preview';
 /** `EndlessGrid`'s defaults. */
 const GRID: Overlay = { tag: 'grid', kind: 'grid', y: 0, cellSize: 1, fade: 80 };
@@ -239,20 +239,12 @@ export function BevyPreview(props: BevyPreviewProps) {
       return;
     }
     const { wasm, view } = preview;
-    const stats = { frames: 0, elapsedMs: 0 };
+    const meterStats = frameStatsMeter(() => wasm.frameStats(view), onFrameStats);
     let last = performance.now();
     let frame = requestAnimationFrame(function step(now: number) {
-      const dtSec = (now - last) / 1000;
-      stats.frames += 1;
-      stats.elapsedMs += now - last;
+      feed(preview, (now - last) / 1000);
       last = now;
-      feed(preview, dtSec);
-      if (stats.elapsedMs >= STATS_INTERVAL_MS) {
-        const { drawCalls, triangles } = wasm.frameStats(view);
-        onFrameStats({ fps: (1000 * stats.frames) / stats.elapsedMs, frameMs: stats.elapsedMs / stats.frames, drawCalls, triangles });
-        stats.frames = 0;
-        stats.elapsedMs = 0;
-      }
+      meterStats(now);
       frame = requestAnimationFrame(step);
     });
     return () => {

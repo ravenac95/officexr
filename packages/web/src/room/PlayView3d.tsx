@@ -6,6 +6,7 @@ import type { TopDownPlayViewProps } from '@officexr/world/top-down';
 import { Switch } from '../hud/ui/Switch';
 import { CameraModeControl } from './CameraModeControl';
 import { CharacterAction, CharacterPane } from './CharacterPane';
+import { storedJoystickKind, storeJoystickKind } from './joystickKind';
 import { MotionLookControl } from './MotionLookControl';
 import type { SettingsAction, SettingsTab } from './Settings';
 import { SettingRow, SettingsModal } from './SettingsModal';
@@ -26,9 +27,11 @@ export default function PlayView3d({
   children: ReactNode;
 }) {
   const [cameraMode, setCameraMode] = useState<CameraMode>('fixed');
+  // ponytail: no Recenter; the Bevy view's motion look doesn't port it yet.
   const [motionLook, setMotionLook] = useState({ enabled: false, recenterKey: 0 });
   const [motionUnsupported, setMotionUnsupported] = useState(false);
   const [invertLook, setInvertLook] = useState(false);
+  const [joystickKind, setJoystickKind] = useState(() => storedJoystickKind());
 
   const controls = (
     <>
@@ -39,13 +42,23 @@ export default function PlayView3d({
         <MotionLookControl
           enabled={motionLook.enabled}
           onEnabledChange={(enabled) => setMotionLook((m) => ({ ...m, enabled }))}
-          onRecenter={() => setMotionLook((m) => ({ ...m, recenterKey: m.recenterKey + 1 }))}
           unsupported={motionUnsupported}
           onUnsupported={() => setMotionUnsupported(true)}
         />
       </SettingRow>
       <SettingRow label="Invert look">
         <Switch aria-label="Invert look" checked={invertLook} onCheckedChange={setInvertLook} />
+      </SettingRow>
+      <SettingRow label="Page joystick">
+        <Switch
+          aria-label="Page joystick"
+          checked={joystickKind === 'dom'}
+          onCheckedChange={(dom) => {
+            const kind = dom ? 'dom' : 'bevy';
+            storeJoystickKind(kind);
+            setJoystickKind(kind);
+          }}
+        />
       </SettingRow>
     </>
   );
@@ -59,6 +72,7 @@ export default function PlayView3d({
       onCameraModeChange={setCameraMode}
       motionLook={motionLook}
       invertLook={invertLook}
+      joystickKind={joystickKind}
       hud="player"
       sim={simFromSearch(window.location.search)}
     >

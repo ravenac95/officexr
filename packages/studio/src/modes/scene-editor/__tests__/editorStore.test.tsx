@@ -3,6 +3,16 @@ import { act } from '@testing-library/react';
 import { renderEditorStore } from '../../../test-harness/renderEditorStore.tsx';
 
 const KIND = '__primitive_blue';
+/** A 2 m catalog block that tiles on every axis. */
+const TILED = 'colored_block_blue';
+
+const pickOn = (commandId: string) => ({
+  target: { type: 'object' as const, commandId },
+  hit: null,
+  cameraY: 10,
+  modKey: false,
+  shift: false,
+});
 const origin = { x: 0, z: 0 };
 
 function faceHit(commandId: string, faceNormal: [number, number, number], point: { x: number; y: number; z: number }) {
@@ -123,5 +133,91 @@ describe('scene editor store + tools (no renderer)', () => {
     editor.setTool('delete');
     editor.pick({ target: { type: 'cube', commandId: ids[1] } });
     expect(positions(editor)).toEqual([]);
+  });
+
+  it('add tool previews a ghost where a click would place', async () => {
+    const editor = await renderEditorStore({ stagedKindId: KIND });
+    editor.setTool('add');
+    editor.hover({ target: { type: 'empty' }, point: origin });
+    expect(editor.tools.ghosts).toEqual([{ mode: 'solid', kindId: KIND, voxel: [0, 0, 0], yawDeg: 0 }]);
+  });
+
+  it('move tool: a press on an unselected object selects it instead of dragging', async () => {
+    const editor = await renderEditorStore();
+    let ids: string[] = [];
+    act(() => {
+      ids = editor.store.current.placeMany(KIND, [[0, 0, 0]]);
+    });
+    editor.setTool('move');
+    act(() => editor.tools.press(pickOn(ids[0]), editor.pointerAt([0, 0, 0])));
+    act(() => editor.tools.drag(false, editor.pointerAt([2, 0, 0])));
+    act(() => editor.tools.release());
+    expect([...editor.store.current.selection]).toEqual([ids[0]]);
+    expect(positions(editor)).toEqual([[0, 0, 0]]);
+  });
+
+  it('move tool: a cancelled drag commits nothing, and a later release has nothing to commit', async () => {
+    const editor = await renderEditorStore();
+    let ids: string[] = [];
+    act(() => {
+      ids = editor.store.current.placeMany(KIND, [[0, 0, 0]]);
+    });
+    act(() => editor.store.current.setSelection(ids));
+    editor.setTool('move');
+    act(() => editor.tools.press(pickOn(ids[0]), editor.pointerAt([0, 0, 0])));
+    act(() => editor.tools.drag(false, editor.pointerAt([0, 0, 3])));
+    expect(editor.tools.ghosts).toEqual([{ mode: 'solid', kindId: KIND, voxel: [0, 0, 3], yawDeg: undefined }]);
+    act(() => editor.tools.cancelDrag());
+    act(() => editor.tools.release());
+    expect(positions(editor)).toEqual([[0, 0, 0]]);
+    expect(editor.tools.ghosts).toEqual([]);
+  });
+
+  it('move tool: a drag onto another object shows a blocked ghost and commits nothing', async () => {
+    const editor = await renderEditorStore();
+    let ids: string[] = [];
+    act(() => {
+      ids = editor.store.current.placeMany(KIND, [[0, 0, 0], [2, 0, 0]]);
+    });
+    act(() => editor.store.current.setSelection([ids[0]]));
+    editor.setTool('move');
+    act(() => editor.tools.press(pickOn(ids[0]), editor.pointerAt([0, 0, 0])));
+    act(() => editor.tools.drag(false, editor.pointerAt([2, 0, 0])));
+    expect(editor.tools.ghosts.map((g) => g.mode)).toEqual(['blocked']);
+    act(() => editor.tools.release());
+    expect(positions(editor)).toEqual([[0, 0, 0], [2, 0, 0]]);
+  });
+
+  it('tile tool commits a Y extrusion with the pointer over nothing', async () => {
+    const editor = await renderEditorStore({ stagedKindId: TILED });
+    editor.setTool('tile');
+    editor.pick({ target: { type: 'empty' }, point: origin });
+    expect(positions(editor)).toEqual([[0, 0, 0]]);
+    // The kind tiles X → Z → Y; `c` twice makes Y next.
+    for (let i = 0; i < 2; i++) {
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c' }));
+      });
+    }
+    expect(editor.tools.yAxis?.origin).toEqual([0, 0, 0]);
+    editor.trackY(4);
+    editor.pick({ target: { type: 'sky' } });
+    expect(positions(editor)).toEqual([[0, 0, 0], [0, 4, 0]]);
+    expect(Object.keys(editor.store.current.doc.groups)).toHaveLength(1);
+  });
+
+  it('move tool: a press that arrives after its release starts no drag', async () => {
+    const editor = await renderEditorStore();
+    let ids: string[] = [];
+    act(() => {
+      ids = editor.store.current.placeMany(KIND, [[0, 0, 0]]);
+    });
+    act(() => editor.store.current.setSelection(ids));
+    editor.setTool('move');
+    act(() => editor.tools.press(pickOn(ids[0]), editor.pointerAt([0, 0, 0]), false));
+    act(() => editor.tools.drag(false, editor.pointerAt([0, 0, 3])));
+    act(() => editor.tools.release());
+    expect(positions(editor)).toEqual([[0, 0, 0]]);
+    expect(editor.tools.ghosts).toEqual([]);
   });
 });

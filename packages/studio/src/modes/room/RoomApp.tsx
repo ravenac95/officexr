@@ -7,7 +7,7 @@ import { ContextMenu, type ContextMenuItem } from './ContextMenu.tsx';
 import { InspectorPanel } from './InspectorPanel.tsx';
 import { ObjectPalette } from '../scene-editor/ObjectPalette.tsx';
 import { RoomPicker } from './RoomPicker.tsx';
-import { SceneEditorCanvas } from '../scene-editor/SceneEditorCanvas.tsx';
+import { SceneEditorView } from '../scene-editor/SceneEditorView.tsx';
 import { Toolbar } from '../scene-editor/Toolbar.tsx';
 import { useRoomDocument } from './useRoomDocument.ts';
 import { useEditorShortcuts } from '../scene-editor/useEditorShortcuts.ts';
@@ -22,7 +22,7 @@ import { paths, studioApiUrl } from '../../apiOrigin.ts';
  * Task 5 of the studio multi-editor restructure; the document /
  * inspector hooks moved to `useRoomDocument` / `useRoomInspector` in
  * Task 6 when the multi-select + groups model landed). Owns its own
- * R3F canvas, document state, and free-fly camera. Persists the
+ * Bevy view, document state, and orbit camera. Persists the
  * working document via `RoomStorage` (the studio API's rooms endpoint
  * in dev, localStorage otherwise). Has no SDK store, no SyncEngine,
  * no WebSocket — Debug mode is what consumes authored rooms.
@@ -35,8 +35,8 @@ export function RoomApp() {
   // Defaults to hidden so the Room palette focuses on furnishings.
   const [showLayoutObjects, setShowLayoutObjects] = useState(false);
   // Current build height (integer voxel y). The Add tool's floor
-  // picker sits at this y; Q lowers it, E raises it. The visible
-  // EndlessGrid stays at world y=0 as a reference plane — the build
+  // plane sits at this y; Q lowers it, E raises it. The ground grid
+  // stays at world y=0 as a reference plane — the build
   // height is independent of it so the user can place cubes below
   // y=0 (negative voxels) by pressing Q, or stack high in the sky by
   // pressing E.
@@ -283,7 +283,7 @@ export function RoomApp() {
           overflow: 'hidden',
         }}
       >
-        <SceneEditorCanvas backend={backend} />
+        <SceneEditorView backend={backend} />
         <RoomHud
           roomName={roomDoc.roomName}
           tool={tool}

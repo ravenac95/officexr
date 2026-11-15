@@ -19,7 +19,6 @@ mod ios;
 mod net;
 mod peers;
 mod player;
-mod touch;
 mod world;
 
 use bevy::asset::AssetMetaCheck;
@@ -68,13 +67,12 @@ pub fn main() {
     .insert_resource(inbound)
     .insert_resource(outbound)
     .init_resource::<player::LocalPlayer>()
-    .init_resource::<touch::TouchControls>()
     .init_resource::<Players>()
     .init_resource::<peers::Peers>()
     .add_message::<world::WorldUpdate>()
     .add_message::<peers::PeerUpdate>()
     .add_message::<net::Joined>()
-    .add_systems(Startup, (touch::spawn_stick, third_person))
+    .add_systems(Startup, third_person)
     .add_systems(
         Update,
         (
@@ -83,7 +81,6 @@ pub fn main() {
             peers::update_peers,
             baked_colliders::load_baked_colliders,
             player::apply_colliders,
-            touch::read_touches,
             player::step_player,
             cycle_camera_mode,
             screenshot_and_exit,
