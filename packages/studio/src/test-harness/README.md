@@ -14,10 +14,11 @@ the integration-test roadmap.
   on any hook that reads `useApplication` (e.g. `useRoomDocument`,
   `useLayoutDocument`).
 - **`renderEditorStore({ stagedKindId? })`** — headless scene editor: the
-  Room document store plus tool dispatch, no renderer. Drive it with
-  `setTool`, `setBuildHeight`, `pick({ target, point })` and
-  `moveSelection(delta)`. Placement and move occupancy use the same pure
-  functions as the canvas (`resolvePlacement`, `checkMoveOccupancy`).
+  Room document store driven through the view's own tools
+  (`useSceneEditorTools`), no renderer. Drive it with `setTool`,
+  `setBuildHeight`, `pick` / `hover({ target, point })`, `trackY`,
+  `moveSelection(delta)`, or `tools.press` / `drag` / `release` with a
+  `pointerAt(...)` projector.
 - **`seeds/`** — fixture documents (`emptyMapSeed`, `simpleRoomSeed`,
   `twoRoomMapSeed`). Pair with an `InMemory*Storage` (from
   `@officexr/world/scenes`) to seed a hook hermetically.
@@ -96,9 +97,10 @@ The previously-rotted specs are repaired:
 
 - `object-editor.spec.ts` / `routing.spec.ts` now query the renamed
   `/api/world-object-kinds` endpoint (was `/api/cube-kinds`).
-- `room-editor.spec.ts` reveals the "Show layout objects" toggle before
-  staging `Blue block` (a layout object, hidden by default), and
-  expects the current five-tool toolbar (Select/Add/Delete/Tile/Move).
+- `room-editor.spec.ts` is a hermetic smoke test on the Bevy view: one
+  Add-tool canvas click must add a history entry. The tools are tested
+  headlessly through `useSceneEditorTools` with `renderEditorStore`
+  (`scene-editor/__tests__/editorStore.test.tsx`).
 - `debug-mode.spec.ts` was realigned to the baked-geometry model: the
   map-switch test asserts a new `/api/baked-layouts/<layout>` fetch +
   pixel-hash change (maps carry no inline store cubes anymore), and the

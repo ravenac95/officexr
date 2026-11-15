@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import type { Overlay, RendererModule, ViewId, WorldDiff } from '@officexr/render-wasm';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { Overlay, WorldDiff } from '@officexr/render-wasm';
 import { DEFAULT_WORLD_CONSTANTS } from '@officexr/sdk';
 import { DEFAULT_EDITOR_LIGHTING, type ApplicationApi } from '@officexr/world/app';
-import { useApplication } from '@officexr/world/react';
+import { blobAssetPath, useApplication, usePrimaryBevyView } from '@officexr/world/react';
 import {
   FilesystemLayoutStorage,
   FilesystemMapStorage,
@@ -10,11 +10,10 @@ import {
 } from '@officexr/world/scenes';
 import { useTestStorages } from '../../test-harness/TestStorageContext.tsx';
 import type { RoomPlacements } from '../map/roomPlacements.ts';
-import { BevyCanvas } from './BevyCanvas.tsx';
 import { layoutUrl, loadRenderContent, type RenderContent, type RenderStorages } from './renderContent.ts';
 import { cameraPose, frameCamera, type Bounds, type CameraSetup } from './renderFraming.ts';
 import { parseRenderParams, type RenderParams } from './renderParams.ts';
-import { paths, studioApiOptions } from '../../apiOrigin.ts';
+import { paths, studioApiOptions, studioFetch } from '../../apiOrigin.ts';
 
 interface RenderSentinels {
   __officexrRenderReady?: { bounds: Bounds; metresPerPixel?: number };
@@ -107,20 +106,33 @@ function RenderView({
   onError: (message: string) => void;
 }) {
   const api = useApplication();
+  const container = useRef<HTMLDivElement>(null);
+  const bevy = usePrimaryBevyView(container, (e) => onError(`renderer failed to load: ${e.message}`));
   const setup = useMemo(() => frameCamera(params.camera, content.bounds, params), [params, content.bounds]);
 
-  const onView = (wasm: RendererModule, view: ViewId) => {
+  useEffect(() => {
+    if (!bevy) return;
+    const { wasm, view } = bevy;
     let cancelled = false;
+    const blobs: string[] = [];
     const world = renderWorld(api, content);
-    const glbUrls = [...(world.bakedLayouts ?? []).map((b) => b.gltfPath), ...content.modelUrls];
     void (async () => {
-      // Bevy never reports a model that fails to load, so a missing one is caught here first;
-      // the browser cache then serves Bevy's own fetch.
-      await Promise.all(glbUrls.map(assertFetchable));
+      // Bevy never reports a model that fails to load, so a missing one is caught here first. Baked
+      // layouts go to Bevy as blobs, since the studio API wants credentials Bevy's fetch doesn't send.
+      const [bakedLayouts] = await Promise.all([
+        Promise.all(
+          (world.bakedLayouts ?? []).map(async (b) => {
+            const url = URL.createObjectURL(await (await fetchOk(b.gltfPath, studioFetch)).blob());
+            blobs.push(url);
+            return { ...b, gltfPath: blobAssetPath(url, 'glb') };
+          }),
+        ),
+        Promise.all(content.modelUrls.map((url) => fetchOk(url, fetch))),
+      ]);
       if (cancelled) {
         return;
       }
-      wasm.setWorld(view, JSON.stringify(world));
+      wasm.setWorld(view, JSON.stringify({ ...world, bakedLayouts }));
       wasm.setOverlays(view, [GRID]);
       wasm.setCamera(view, cameraPose(setup, params));
       // A capture resolves on a drawn frame, so readiness is read once the diff has been applied,
@@ -136,25 +148,26 @@ function RenderView({
     })().catch((err: unknown) => !cancelled && onError(errorMessage(err)));
     return () => {
       cancelled = true;
+      blobs.forEach((url) => URL.revokeObjectURL(url));
     };
-  };
+  }, [bevy, api, content, setup, params, onError]);
 
   return (
     <div
+      ref={container}
       data-render-target={params.target}
       style={{ position: 'absolute', top: 0, left: 0, width: params.width, height: params.height }}
-    >
-      <BevyCanvas kind="world" primary onView={onView} onError={(m) => onError(`renderer failed to load: ${m}`)} />
-    </div>
+    />
   );
 }
 
-async function assertFetchable(url: string): Promise<void> {
-  const response = await fetch(url).catch((err: unknown) => err);
+async function fetchOk(url: string, fetcher: typeof fetch): Promise<Response> {
+  const response = await fetcher(url).catch((err: unknown) => err);
   if (!(response instanceof Response) || !response.ok) {
     const why = response instanceof Response ? `HTTP ${response.status}` : errorMessage(response);
     throw new Error(`failed to load asset: ${url} (${why})`);
   }
+  return response;
 }
 
 /** The content as one world diff, under the editors' lighting on a flat backdrop. */

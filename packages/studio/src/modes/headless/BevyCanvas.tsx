@@ -25,37 +25,28 @@ export function BevyCanvas({
   kind,
   primary = false,
   onView,
-  onError,
 }: {
   id?: string;
   kind: ViewKind;
   /** Draws into Bevy's primary window when Bevy boots here; mount it before the page's other canvases. */
   primary?: boolean;
   onView: (wasm: RendererModule, view: ViewId) => (() => void) | void;
-  /** The renderer failed to load, or the view to start. */
-  onError?: (message: string) => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     let cancelled = false;
     let cleanup: (() => void) | void;
     let view: ViewId | null = null;
-    bootBevy(primary && canvas.current ? canvas.current : undefined)
-      .then((wasm) => {
-        if (cancelled || !canvas.current) {
-          return;
-        }
-        view = wasm.createView(canvas.current, kind);
-        const s = bevySentinels();
-        s.__officexrBevy = wasm;
-        s.__officexrBevyViews = [...(s.__officexrBevyViews ?? []), view];
-        cleanup = onView(wasm, view);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) {
-          onError?.(e instanceof Error ? e.message : String(e));
-        }
-      });
+    void bootBevy(primary && canvas.current ? canvas.current : undefined).then((wasm) => {
+      if (cancelled || !canvas.current) {
+        return;
+      }
+      view = wasm.createView(canvas.current, kind);
+      const s = bevySentinels();
+      s.__officexrBevy = wasm;
+      s.__officexrBevyViews = [...(s.__officexrBevyViews ?? []), view];
+      cleanup = onView(wasm, view);
+    });
     return () => {
       cancelled = true;
       cleanup?.();

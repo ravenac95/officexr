@@ -1,4 +1,5 @@
 import type { WorldObjects } from '@officexr/sdk';
+import { bakedLayoutGlbUrl } from '@officexr/world/react';
 import { bakedLayoutUrl, loadMap, modelUrl, type ApplicationApi, type MapLoaderDeps } from '@officexr/world/app';
 import { paths, studioApiUrl } from '../../apiOrigin.ts';
 import { roomPlacements, type RoomPlacements } from '../map/roomPlacements.ts';
@@ -7,10 +8,9 @@ import type { RenderParams } from './renderParams.ts';
 
 export type RenderStorages = MapLoaderDeps['storages'];
 
-// ponytail: baked layouts load without credentials; fine while headless render only runs same-origin.
-/** A baked layout's GLB, absolute (Bevy resolves relative paths against the model origin) and `.glb` (Bevy picks loaders by extension). */
+/** A baked layout's GLB on the studio API, which needs `studioFetch`'s credentials. */
 export const layoutUrl = (layoutName: string) =>
-  new URL(`${bakedLayoutUrl(layoutName, studioApiUrl(paths.bakedLayouts))}.glb`, window.location.href).href;
+  bakedLayoutGlbUrl(bakedLayoutUrl(layoutName, studioApiUrl(paths.bakedLayouts)));
 
 /** What the render page draws; `bounds` is what the camera frames. */
 export type RenderContent = { bounds: Bounds; modelUrls: string[] } & (

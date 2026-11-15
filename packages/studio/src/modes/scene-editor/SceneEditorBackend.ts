@@ -1,12 +1,12 @@
 /**
- * `SceneEditorBackend` — the parent contract for `<SceneEditorCanvas>`.
+ * `SceneEditorBackend` — the parent contract for `<SceneEditorView>`.
  *
  * The canvas is document-agnostic: it edits a list of `SceneCommand`s
  * plus an authoring layer of `CommandGroup`s and a small bundle of UI
  * state (tool, selection, staged kind, build height). Whether those
  * live in a `RoomDocument` or a `LayoutDocument` is none of the
  * canvas's business — both kinds of document hook implement this
- * interface and pass it in via `<SceneEditorCanvas backend={...} />`.
+ * interface and pass it in via `<SceneEditorView backend={...} />`.
  *
  * DIP: the canvas (high-level rendering / interaction) depends on this
  * abstraction; concrete document hooks (`useRoomDocument`,
@@ -19,12 +19,12 @@
  *
  * ISP: the `doc` field is narrowed to `{ commands: readonly SceneCommand[] }`
  * because that is the only thing the canvas reads off the document
- * (in `MoveController` — see `SceneEditorCanvas.tsx`). Anything richer
+ * (in the Move tool — see `useSceneEditorTools.ts`). Anything richer
  * (room title, layout name, schemaVersion, …) would force consumers
  * that don't have those fields to fake them.
  *
  * Stable usage: every callback may safely be called from inside a React
- * event handler / R3F event. Implementations should already be wrapped
+ * event handler / pick callback. Implementations should already be wrapped
  * in `useCallback` (or equivalent) so the canvas's effects don't churn.
  */
 

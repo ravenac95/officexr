@@ -3,11 +3,10 @@ import JSZip from 'jszip';
 import { CHARACTERS, isCharacterName } from '@officexr/world';
 import type { CharacterName } from '@officexr/world';
 import type { BackgroundViewConfig, LightingViewConfig } from '@officexr/world/renderer';
-import type { RendererModule, ViewId } from '@officexr/render-wasm';
 import { createPersistentLocalState } from '@officexr/core-refactor';
-import { bodyPosition, useApplication } from '@officexr/world/react';
+import { bodyPosition, setBevyReady, useApplication, usePrimaryBevyView, type BevyView } from '@officexr/world/react';
 import { downloadBlob } from '../../lib/utils.ts';
-import { BevyCanvas, bevySentinels, useReadySentinel } from '../headless/BevyCanvas.tsx';
+import { bevySentinels } from '../headless/BevyCanvas.tsx';
 import {
   DEFAULT_MUGSHOT_BACKGROUND,
   DEFAULT_MUGSHOT_LIGHTING,
@@ -83,15 +82,10 @@ export interface MugshotManifest {
   background: BackgroundViewConfig;
 }
 
-interface Bevy {
-  wasm: RendererModule;
-  view: ViewId;
-}
-
 /**
  * Mugshot mode: a deterministic 2×2 cube scene with a paused
  * character (bind pose), tunable camera angle / distance / viewport,
- * drawn by a Bevy preview view. Drives the export-for-test workflow
+ * drawn by a Bevy view on the page's primary canvas. Drives the export-for-test workflow
  * (downloads a ZIP of 8 PNGs + manifest.json).
  *
  * Placement is GRAVITY-DRIVEN: `setWorld`'s mugshot drops the
@@ -109,11 +103,12 @@ interface Bevy {
  */
 export function MugshotApp() {
   const { catalog } = useApplication();
-  useReadySentinel();
   const [local] = useState(() =>
     createPersistentLocalState({ selfId: SELF_ID, officeId: OFFICE_ID }),
   );
-  const [bevy, setBevy] = useState<Bevy | null>(null);
+  const container = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const bevy = usePrimaryBevyView(container, (e) => setError(e.message));
   const [catalogReady, setCatalogReady] = useState(false);
   const [character, setCharacter] = useState<CharacterName>(() =>
     readCharacterFromHash(),
@@ -160,6 +155,24 @@ export function MugshotApp() {
       cancelled = true;
     };
   }, [catalog]);
+
+  // Readiness, and the view for drivers that capture it (`captureBevyView`).
+  useEffect(() => {
+    if (!bevy) return;
+    const sentinels = bevySentinels();
+    sentinels.__officexrBevy = bevy.wasm;
+    sentinels.__officexrBevyViews = [bevy.view];
+    let frame = requestAnimationFrame(function tick() {
+      setBevyReady(bevy.wasm.isReady(bevy.view).ready);
+      frame = requestAnimationFrame(tick);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      delete sentinels.__officexrBevy;
+      delete sentinels.__officexrBevyViews;
+      delete sentinels.__officexrBevyMugshotFeetY;
+    };
+  }, [bevy]);
 
   // The scene, settled under gravity unless the slider has pinned the body.
   useEffect(() => {
@@ -372,7 +385,12 @@ export function MugshotApp() {
             flexShrink: 0,
           }}
         >
-          <BevyCanvas kind="preview" primary onView={(wasm, view) => setBevy({ wasm, view })} />
+          <div ref={container} style={{ position: 'absolute', inset: 0 }} />
+          {error && (
+            <p role="alert" style={{ position: 'absolute', inset: 0, margin: 0, padding: 8, color: '#fca5a5', font: '12px sans-serif' }}>
+              The 3D view couldn't start: {error}
+            </p>
+          )}
         </div>
       </main>
       <ControlPanel
@@ -423,7 +441,7 @@ function waitFrames(n: number): Promise<void> {
   });
 }
 
-async function waitReady({ wasm, view }: Bevy): Promise<void> {
+async function waitReady({ wasm, view }: BevyView): Promise<void> {
   while (!wasm.isReady(view).ready) {
     await new Promise((resolve) => setTimeout(resolve, READY_POLL_MS));
   }
