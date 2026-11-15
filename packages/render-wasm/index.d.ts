@@ -113,6 +113,8 @@ export interface ProximityInput {
   areas: { id: string; center: [number, number]; radius: number; members: string[] }[];
   /** The feet of players `setPlayers` left out, as the first-person local player. */
   undrawn?: Record<string, [number, number, number]>;
+  /** The players bubbles rise around: both ends of each of the local player's `entering` pairs. */
+  bubbles?: string[];
   /** The world constants' `proximity` tunables; each defaults to `DEFAULT_WORLD_CONSTANTS`'. */
   style?: {
     discRadius?: number;
@@ -121,6 +123,12 @@ export interface ProximityInput {
     enteringColor?: HexColor;
     enteredColor?: HexColor;
     exitingColor?: HexColor;
+    meetingBorderInset?: number;
+    meetingBorderOutset?: number;
+    sparkleSpeed?: number;
+    sparkleFloatHeight?: number;
+    /** With the camera mode's multiplier already applied: `ProximityGlow` uses 5 in the fixed camera. */
+    sparkleSize?: number;
   };
 }
 
@@ -219,6 +227,8 @@ export interface MoveIntent {
   jump: boolean;
   /** The camera yaw `dir` was turned by. */
   yaw: number;
+  /** The stick's deflection when it, not the keys, gave `dir`; else 0. */
+  deflection: number;
 }
 
 /** The wasm-bindgen module of one backend, already instantiated by `loadRenderer`. */
@@ -306,7 +316,18 @@ export interface RendererModule {
   setInputEnabled(id: ViewId, enabled: boolean): void;
   /** Off, keys are ignored but drags and the wheel still move the camera, as while typing in a field beside a preview. */
   setKeysEnabled(id: ViewId, enabled: boolean): void;
+  /** The page's touch stick: `x` strafe (right +), `y` forward (+), within the unit circle. Held keys win. */
+  setStick(id: ViewId, stick: [number, number]): void;
+  /** A `deviceorientation` event's angles; nulls forget the previous reading, so the next starts afresh. */
+  setDeviceOrientation(id: ViewId, reading: { alpha: number | null; beta: number | null; gamma: number | null }): void;
+  /**
+   * `'bevy'` shows the view's own touch stick; `'dom'` hides it for the page's, fed by `setStick`.
+   * Returns whether the view can show the Bevy stick: only the primary canvas's view can.
+   */
+  setJoystickKind(id: ViewId, kind: JoystickKind): boolean;
 }
+
+export type JoystickKind = 'bevy' | 'dom';
 
 export type Gpu = { requestAdapter(): Promise<unknown> };
 

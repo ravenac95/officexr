@@ -8,7 +8,8 @@ const UNSUPPORTED_MESSAGE = 'Not supported on this device';
 interface MotionLookControlProps {
   enabled: boolean;
   onEnabledChange: (enabled: boolean) => void;
-  onRecenter: () => void;
+  /** Absent hides Recenter. */
+  onRecenter?: () => void;
   /** Kept by the caller so it survives Settings closing; the switch stays disabled once set. */
   unsupported: boolean;
   onUnsupported: () => void;
@@ -50,7 +51,7 @@ export function MotionLookControl({
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex items-center gap-2">
-        {enabled && (
+        {enabled && onRecenter && (
           <button
             type="button"
             onClick={onRecenter}

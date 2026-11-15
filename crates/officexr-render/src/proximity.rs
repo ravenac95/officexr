@@ -1,6 +1,6 @@
 //! `ProximityGlow.tsx`'s conversation glow: a pulsing ground disc under
 //! each player entering or leaving a conversation, and a steady one over
-//! each meeting area. Its bubble particles are not drawn here.
+//! each meeting area, with [`bubbles`] rising around both.
 
 use std::collections::HashMap;
 use std::f32::consts::{FRAC_PI_2, TAU};
@@ -17,6 +17,9 @@ use serde::Deserialize;
 
 use crate::scene::hex;
 use crate::views::ViewPlayers;
+
+mod bubbles;
+pub(crate) use bubbles::sync_bubbles;
 
 /// How fast opacities and area radii ease toward their targets, per second.
 const EASE_RATE: f32 = 6.0;
@@ -63,6 +66,16 @@ pub struct GlowStyle {
     pub entered_color: Color,
     #[serde(deserialize_with = "hex")]
     pub exiting_color: Color,
+    /// How far inside a disc's or area's rim its bubble ring starts, in metres.
+    pub meeting_border_inset: f32,
+    /// How far outside the rim the ring ends.
+    pub meeting_border_outset: f32,
+    /// The bubbles' rise speed multiplier.
+    pub sparkle_speed: f32,
+    /// How high bubbles rise, in metres, before starting again from the floor.
+    pub sparkle_float_height: f32,
+    /// The bubbles' size multiplier, with the camera mode's already applied.
+    pub sparkle_size: f32,
 }
 
 impl Default for GlowStyle {
@@ -75,6 +88,11 @@ impl Default for GlowStyle {
             entering_color: Srgba::hex("#ffd24a").unwrap().into(),
             entered_color: Srgba::hex("#7be67b").unwrap().into(),
             exiting_color: Srgba::hex("#ff8c42").unwrap().into(),
+            meeting_border_inset: 0.05,
+            meeting_border_outset: 0.05,
+            sparkle_speed: 1.5,
+            sparkle_float_height: 1.5,
+            sparkle_size: 1.0,
         }
     }
 }
@@ -89,6 +107,9 @@ pub struct Proximity {
     /// The feet of players the view doesn't draw, as the first-person local
     /// player; the drawn ones stand where `setPlayers` put them.
     pub undrawn: HashMap<String, [f32; 3]>,
+    /// The players bubbles rise around: both ends of each of the local
+    /// player's `entering` pairs.
+    pub bubbles: Vec<String>,
     pub style: GlowStyle,
 }
 
@@ -134,6 +155,8 @@ struct Glow {
     opacity: f32,
     /// Eased; areas only.
     radius: f32,
+    /// The centre of its disc this frame; `None` for an area with no member to stand on.
+    at: Option<Vec3>,
 }
 
 /// The view's glow entities, by player and area id.
@@ -264,6 +287,7 @@ pub(crate) fn sync_glow(
                 ),
                 opacity: 0.0,
                 radius: 0.0,
+                at: None,
             });
             let state = proximity.players.get(*id).copied();
             // An area member's own disc gives way to its area's glow.
@@ -277,6 +301,7 @@ pub(crate) fn sync_glow(
             } else {
                 style.entering_color
             };
+            glow.at = Some(*at + Vec3::Y * LIFT);
             let transform = Transform::from_translation(*at + Vec3::Y * LIFT)
                 .with_rotation(flat)
                 .with_scale(Vec3::new(style.disc_radius, style.disc_radius, 1.0));
@@ -305,9 +330,11 @@ pub(crate) fn sync_glow(
                 ),
                 opacity: 0.0,
                 radius: area.radius,
+                at: None,
             });
             // No member to stand it on: hidden until one comes back.
             if member_feet.is_empty() {
+                glow.at = None;
                 if let Ok((_, mut visibility, _)) = parts.get_mut(glow.entity) {
                     *visibility = Visibility::Hidden;
                 }
@@ -317,6 +344,7 @@ pub(crate) fn sync_glow(
             glow.radius = ease(glow.radius, area.radius, dt);
             glow.opacity = ease(glow.opacity, style.intensity * AREA_INTENSITY, dt);
             let [x, z] = area.center;
+            glow.at = Some(Vec3::new(x, y + LIFT, z));
             let transform = Transform::from_xyz(x, y + LIFT, z)
                 .with_rotation(flat)
                 .with_scale(Vec3::new(glow.radius, glow.radius, 1.0));
