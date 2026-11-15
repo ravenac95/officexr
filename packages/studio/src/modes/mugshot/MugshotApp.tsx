@@ -6,7 +6,6 @@ import type { BackgroundViewConfig, LightingViewConfig } from '@officexr/world/r
 import { createPersistentLocalState } from '@officexr/core-refactor';
 import { bodyPosition, setBevyReady, useApplication, usePrimaryBevyView, type BevyView } from '@officexr/world/react';
 import { downloadBlob } from '../../lib/utils.ts';
-import { bevySentinels } from '../headless/BevyCanvas.tsx';
 import {
   DEFAULT_MUGSHOT_BACKGROUND,
   DEFAULT_MUGSHOT_LIGHTING,
@@ -58,13 +57,10 @@ function readCharacterFromHash(): CharacterName {
 
 /** v2 of the mugshot export manifest. Captures rendering inputs but
  * deliberately OMITS `yOffset` — placement is gravity-driven, so the
- * manifest carries no Y at all. On manifest-load the body is dropped
- * back under gravity (manual override cleared), reproducing the
- * renderer's NATURAL settled placement. If we recorded a tuned Y, the
- * round-trip would re-apply the human's manual lift and mask any
- * underlying placement bug. The whole point of the mugshot is that
- * baselines show what the system NATURALLY produces; the Y slider in
- * the UI exists only for live diagnostic exploration. */
+ * manifest carries no Y at all: a recorded tuned Y would carry the
+ * human's manual lift into the reference shots and mask any underlying
+ * placement bug. The Y slider in the UI exists only for live diagnostic
+ * exploration. */
 export interface MugshotManifest {
   schemaVersion: 2;
   character: CharacterName;
@@ -97,9 +93,8 @@ export interface MugshotManifest {
  * The Y-offset slider is a MANUAL DIAGNOSTIC OVERRIDE for a human,
  * NOT a placement mechanism officexr relies on. While untouched
  * (`manualPlacement === false`) gravity owns the body. Once the human
- * drags the slider (or a test calls `__OFFICE_MUGSHOT_SET_Y_OFFSET__`)
- * the body is pinned at the slider value instead; "Auto (gravity)"
- * drops it back under gravity. See `tests/playwright/CLAUDE.md`.
+ * drags the slider the body is pinned at the slider value instead; "Auto (gravity)"
+ * drops it back under gravity.
  */
 export function MugshotApp() {
   const { catalog } = useApplication();
@@ -156,22 +151,13 @@ export function MugshotApp() {
     };
   }, [catalog]);
 
-  // Readiness, and the view for drivers that capture it (`captureBevyView`).
   useEffect(() => {
     if (!bevy) return;
-    const sentinels = bevySentinels();
-    sentinels.__officexrBevy = bevy.wasm;
-    sentinels.__officexrBevyViews = [bevy.view];
     let frame = requestAnimationFrame(function tick() {
       setBevyReady(bevy.wasm.isReady(bevy.view).ready);
       frame = requestAnimationFrame(tick);
     });
-    return () => {
-      cancelAnimationFrame(frame);
-      delete sentinels.__officexrBevy;
-      delete sentinels.__officexrBevyViews;
-      delete sentinels.__officexrBevyMugshotFeetY;
-    };
+    return () => cancelAnimationFrame(frame);
   }, [bevy]);
 
   // The scene, settled under gravity unless the slider has pinned the body.
@@ -183,11 +169,9 @@ export function MugshotApp() {
     local.actions.upsertPlayer({ id: SELF_ID, avatar: { model: character } });
     if (manualPlacement) {
       bevy.wasm.setWorld(bevy.view, json);
-      delete bevySentinels().__officexrBevyMugshotFeetY;
       return;
     }
     const feetY = bevy.wasm.setWorld(bevy.view, json, character) ?? NaN;
-    bevySentinels().__officexrBevyMugshotFeetY = feetY;
     const rootY = bodyPosition({ x: 0, y: feetY, z: 0 }, CHAR_RADIUS).y;
     local.actions.setSelfPosition({ x: 0, y: rootY, z: 0 }, { x: 0, y: 0, z: 0 }, 0, false);
   }, [bevy, catalogReady, catalog, local, character, cubeMode, lighting, background, manualPlacement]);
@@ -209,66 +193,16 @@ export function MugshotApp() {
     bevy?.wasm.setCamera(bevy.view, mugshotCamera({ azimuthDeg, distanceM, height: cameraHeight }));
   }, [bevy, azimuthDeg, distanceM, cameraHeight]);
 
-  // Expose test hooks for the manifest-load / per-angle capture
-  // comparison spec. Production code never reads these.
-  const onExportRef = useRef<typeof onExport | null>(null);
-  useEffect(() => {
-    const win = window as unknown as {
-      __OFFICE_MUGSHOT_APPLY_MANIFEST__?: (m: MugshotManifest) => void;
-      __OFFICE_MUGSHOT_SET_AZIMUTH__?: (deg: AzimuthDeg) => void;
-      __OFFICE_MUGSHOT_SET_Y_OFFSET__?: (y: number) => void;
-      __OFFICE_MUGSHOT_SET_CUBE_MODE__?: (mode: CubeMode) => void;
-      __OFFICE_MUGSHOT_SET_CAMERA_HEIGHT__?: (h: number) => void;
-      __OFFICE_MUGSHOT_TRIGGER_EXPORT__?: (opts?: {
-        download?: boolean;
-      }) => Promise<void>;
-    };
-    win.__OFFICE_MUGSHOT_APPLY_MANIFEST__ = (m: MugshotManifest) => {
-      setCharacter(m.character);
-      // Manifests carry no Y: the compare must see gravity's natural placement.
-      setManualPlacement(false);
-      setDistanceM(m.fixedCamera.distanceM);
-      setCameraHeight(m.fixedCamera.height);
-      setViewportWidth(m.viewportWidth);
-      setViewportHeight(m.viewportHeight);
-      setLighting(m.lighting);
-      setBackground(m.background);
-      // Not azimuthDeg: the driver sets it per angle via __OFFICE_MUGSHOT_SET_AZIMUTH__.
-    };
-    win.__OFFICE_MUGSHOT_SET_AZIMUTH__ = (deg) => setAzimuthDeg(deg);
-    // Driving the Y override pins the body, as the human grabbing the slider does.
-    win.__OFFICE_MUGSHOT_SET_Y_OFFSET__ = (y) => {
-      setManualPlacement(true);
-      setYOffset(y);
-    };
-    win.__OFFICE_MUGSHOT_SET_CUBE_MODE__ = (mode) => setCubeMode(mode);
-    win.__OFFICE_MUGSHOT_SET_CAMERA_HEIGHT__ = (h) => setCameraHeight(h);
-    win.__OFFICE_MUGSHOT_TRIGGER_EXPORT__ = (opts) =>
-      onExportRef.current?.(opts) ?? Promise.resolve();
-    return () => {
-      delete win.__OFFICE_MUGSHOT_APPLY_MANIFEST__;
-      delete win.__OFFICE_MUGSHOT_SET_AZIMUTH__;
-      delete win.__OFFICE_MUGSHOT_SET_Y_OFFSET__;
-      delete win.__OFFICE_MUGSHOT_SET_CUBE_MODE__;
-      delete win.__OFFICE_MUGSHOT_SET_CAMERA_HEIGHT__;
-      delete win.__OFFICE_MUGSHOT_TRIGGER_EXPORT__;
-    };
-  }, []);
-
-  const onExport = useCallback(async (opts?: { download?: boolean }) => {
+  const onExport = useCallback(async () => {
     if (exporting || !bevy) return;
     setExporting(true);
     const azimuthBefore = azimuthDeg;
     const cubeModeBefore = cubeMode;
-    // Records the body's y at each capture, so a regression test sees an
-    // export that snapped Y away from what the user tuned.
-    const capturedYs: Array<{ mode: string; angle: number; y: number }> = [];
     try {
       // The PNGs keep whatever Y the user tuned; only the manifest leaves it out.
       const zip = new JSZip();
       const angles: AzimuthDeg[] = [0, 90, 180, 270];
-      // Both cube modes, so the ZIP carries the GLB / primitive A/B pair under `ideal/`,
-      // which unzips over `tests/playwright/mugshot-baselines/<Character>/`.
+      // Both cube modes, so the ZIP carries the GLB / primitive A/B pair under `ideal/`.
       for (const mode of ['gltf', 'primitive'] as const) {
         setCubeMode(mode);
         await waitFrames(2);
@@ -279,8 +213,6 @@ export function MugshotApp() {
           setAzimuthDeg(angle);
           // React commits the angle and its effect sends the camera before the capture is asked for.
           await waitFrames(2);
-          const p = local.store.getState().players[SELF_ID];
-          if (p) capturedYs.push({ mode, angle, y: p.pos.y });
           const png = await sizedPng(await bevy.wasm.captureView(bevy.view), viewportWidth, viewportHeight);
           const fileName =
             mode === 'gltf'
@@ -307,24 +239,8 @@ export function MugshotApp() {
       };
       zip.file('manifest.json', JSON.stringify(manifest, null, 2));
       const blob = await zip.generateAsync({ type: 'blob' });
-      const download = opts?.download !== false;
-      if (download) {
-        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-        downloadBlob(blob, `mugshot-Barbarian-${stamp}.zip`);
-      }
-      (
-        window as unknown as {
-          __OFFICE_MUGSHOT_LAST_EXPORT__?: {
-            capturedYs: Array<{ mode: string; angle: number; y: number }>;
-            blobSize: number;
-            downloaded: boolean;
-          };
-        }
-      ).__OFFICE_MUGSHOT_LAST_EXPORT__ = {
-        capturedYs,
-        blobSize: blob.size,
-        downloaded: download,
-      };
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      downloadBlob(blob, `mugshot-Barbarian-${stamp}.zip`);
     } catch (err) {
       console.warn('[mugshot] export failed:', err);
     } finally {
@@ -341,16 +257,10 @@ export function MugshotApp() {
     cubeMode,
     viewportWidth,
     viewportHeight,
-    local,
     lighting,
     background,
     exporting,
   ]);
-
-  // The window hook above captured onExport from mount; keep it on the latest closure.
-  useEffect(() => {
-    onExportRef.current = onExport;
-  }, [onExport]);
 
   return (
     <div

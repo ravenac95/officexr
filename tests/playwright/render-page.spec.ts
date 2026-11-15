@@ -2,11 +2,11 @@
  * `?op=render`: draws a stored map / room / layout from a requested camera
  * and signals completion on `window.__officexrRenderReady` (or
  * `__officexrRenderError`). Runs hermetically (`?test=1`) against a seeded
- * map; baked GLBs are served by route interception.
+ * map; baked GLBs are served by route interception. That it draws is
+ * `rendering-smoke.spec.ts`'s.
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { PNG } from 'pngjs';
 import { forceWebgl2 } from './helpers.ts';
 import { boxGlb } from './lib/box-glb.ts';
 
@@ -96,78 +96,6 @@ const readySentinel = (page: Page) =>
   page.evaluate(() => (window as unknown as { __officexrRenderReady: RenderReady }).__officexrRenderReady);
 const errorSentinel = (page: Page) =>
   page.evaluate(() => (window as unknown as { __officexrRenderError?: string }).__officexrRenderError);
-
-/** The render target, which the page pins to the top left at the requested size. */
-async function renderTargetPng(page: Page): Promise<PNG> {
-  const box = (await page.locator('[data-render-target]').boundingBox())!;
-  return PNG.sync.read(await page.screenshot({ clip: box, timeout: 120_000 }));
-}
-
-function matching(png: PNG, predicate: (r: number, g: number, b: number) => boolean) {
-  const box = { count: 0, minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
-  for (let i = 0; i < png.data.length; i += 4) {
-    if (predicate(png.data[i], png.data[i + 1], png.data[i + 2])) {
-      const px = (i / 4) % png.width;
-      const py = Math.floor(i / 4 / png.width);
-      box.count += 1;
-      box.minX = Math.min(box.minX, px);
-      box.maxX = Math.max(box.maxX, px);
-      box.minY = Math.min(box.minY, py);
-      box.maxY = Math.max(box.maxY, py);
-    }
-  }
-  return box;
-}
-
-const isGreen = (r: number, g: number, b: number) => g - r > 60 && g - b > 60;
-const isBlue = (r: number, g: number, b: number) => b - r > 40 && b - g > 40;
-const distinctColors = (png: PNG) => new Set(Array.from({ length: png.width * png.height }, (_, i) => png.data.readUInt32LE(i * 4))).size;
-
-const CAMERAS: Array<[string, string]> = [
-  ['top', 'camera=top'],
-  ['iso', 'camera=iso'],
-  ['custom', 'camera=custom&px=6&py=14&pz=16&tx=4&ty=1&tz=4'],
-];
-const TARGETS: Array<[string, string]> = [
-  ['map', 'target=map&name=office'],
-  ['room', 'target=room&name=wing'],
-  ['layout', 'target=layout&name=wing-layout'],
-];
-
-for (const [targetLabel, targetQuery] of TARGETS) {
-  for (const [cameraLabel, cameraQuery] of CAMERAS) {
-    test(`renders ${targetLabel} from the ${cameraLabel} camera`, async ({ page }) => {
-      expect(await render(page, `${targetQuery}&${cameraQuery}`)).toBe('ready');
-      const ready = await readySentinel(page);
-      expect(ready.bounds.max[0]).toBeGreaterThan(ready.bounds.min[0]);
-      expect(ready.metresPerPixel !== undefined).toBe(cameraLabel === 'top');
-      const png = await renderTargetPng(page);
-      expect([png.width, png.height]).toEqual([400, 300]);
-      expect(distinctColors(png)).toBeGreaterThan(1);
-      expect(matching(png, targetLabel === 'layout' ? isBlue : isGreen).count).toBeGreaterThan(50);
-    });
-  }
-}
-
-test('draws both placements of a room, and rotates the other one', async ({ page }) => {
-  expect(await render(page, 'target=map&name=office&camera=top')).toBe('ready');
-  const png = await renderTargetPng(page);
-
-  // wing-a and wing-b are one layout placed twice, 4 m apart: two separate green runs along X.
-  const greenColumns = new Array<boolean>(png.width).fill(false);
-  for (let i = 0; i < png.data.length; i += 4) {
-    if (isGreen(png.data[i], png.data[i + 1], png.data[i + 2])) {
-      greenColumns[(i / 4) % png.width] = true;
-    }
-  }
-  const runs = greenColumns.filter((on, x) => on && !greenColumns[x - 1]).length;
-  expect(runs).toBe(2);
-
-  // The hall's two cubes run along X unrotated; placed a quarter turn they run along Z.
-  const blue = matching(png, isBlue);
-  expect(blue.count).toBeGreaterThan(50);
-  expect(blue.maxY - blue.minY).toBeGreaterThan(blue.maxX - blue.minX);
-});
 
 test('reports the framed bounds and scale for the top camera', async ({ page }) => {
   expect(await render(page, 'target=map&name=office&camera=top')).toBe('ready');

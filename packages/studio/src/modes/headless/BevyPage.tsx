@@ -61,7 +61,7 @@ export function BevyPage({ mugshot, views, pick }: { mugshot: string | null; vie
   );
 }
 
-/** As `bevy-mugshot-diff.spec.ts`: the Mugshot mode's fixed camera at azimuth 180°. */
+/** The Mugshot mode's fixed camera at azimuth 180°. */
 function MugshotFeed({ id, character, primary = false }: { id: string; character: string; primary?: boolean }) {
   const { catalog } = useApplication();
   return (
