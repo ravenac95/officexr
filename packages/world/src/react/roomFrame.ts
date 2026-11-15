@@ -1,11 +1,11 @@
 import type { Actions, Bus, OfficeState, PlayerState, Store, TrackerOutput, Vec3 } from '@officexr/sdk';
-import type { MoveIntent, WorldDiff } from '@officexr/render-wasm';
+import type { JoystickKind, MoveIntent, WorldDiff } from '@officexr/render-wasm';
 import type { BotPool } from '../bot/BotPool.ts';
 import { resolveCharacterTunables } from '../characters/resolve.ts';
 import { feetPosition } from '../physics/rules.ts';
 import type { CameraMode } from '../renderer/config.ts';
 import { yawFromDirection } from '../renderer/lookControls.ts';
-import { RUN_DEFLECTION, type AutoWalkSource, type MoveInput } from '../renderer/moveIntent.ts';
+import type { AutoWalkSource, MoveInput } from '../renderer/moveIntent.ts';
 import type { SeatingSource } from '../renderer/seated.ts';
 import type { ExcludeInstance } from '../scenes/compile-map.ts';
 import { extrapolatePos } from '../sim/extrapolate.ts';
@@ -38,6 +38,8 @@ export interface PlayersInput {
 export interface RoomView {
   takeIntent(): MoveIntent;
   setInputEnabled(enabled: boolean): void;
+  setStick(stick: [number, number]): void;
+  setJoystickKind(kind: JoystickKind): void;
   setWorld(diff: WorldDiff): void;
   setPlayers(players: PlayersInput): void;
   setFollowTarget(pos: Xyz, yaw: number): void;
@@ -65,8 +67,9 @@ export interface RoomFrameOptions {
   /** False until the world is ready; the player is held where it is. */
   selfReady: boolean;
   spawnPoints: readonly Vec3[];
-  /** Analog walking input, e.g. a touch joystick; keys win when held. */
+  /** The DOM touch joystick, sent to the view while `joystickKind` is `'dom'`; keys win when held. */
   moveInput?: { readonly current: MoveInput };
+  joystickKind: JoystickKind;
   autoWalk?: AutoWalkSource;
   seating?: SeatingSource;
   /** The character model `setPlayers` draws for a player. */
@@ -92,6 +95,7 @@ const xyz = (v: Vec3): Xyz => [v.x, v.y, v.z];
 export class RoomFrame {
   options: RoomFrameOptions;
   private inputEnabled: boolean | null = null;
+  private joystickKind: JoystickKind | null = null;
   private wasMoving = false;
   private airborne = false;
   private proximity: TrackerOutput | null = null;
@@ -108,11 +112,24 @@ export class RoomFrame {
   step(dtSec: number, nowMs: number): void {
     const { view, bots } = this.deps;
     this.syncInputEnabled();
+    this.syncJoystick();
     const intent = view.takeIntent();
     this.deps.onViewYaw?.(intent.yaw);
     this.simulate(intent, dtSec, nowMs);
     bots?.tick(dtSec * 1000);
     this.draw(nowMs);
+  }
+
+  private syncJoystick() {
+    const { view } = this.deps;
+    const { joystickKind, moveInput } = this.options;
+    if (joystickKind !== this.joystickKind) {
+      this.joystickKind = joystickKind;
+      view.setJoystickKind(joystickKind);
+    }
+    if (joystickKind === 'dom' && moveInput) {
+      view.setStick([moveInput.current.x, moveInput.current.z]);
+    }
   }
 
   private syncInputEnabled() {
@@ -132,10 +149,8 @@ export class RoomFrame {
     const { sim, autoWalk, seating } = this.options;
     // Free-fly flies the camera on the movement keys, and nothing walks the player.
     const freeFly = this.options.cameraMode === 'free-fly';
-    const keyed = !freeFly && (intent.dir[0] !== 0 || intent.dir[1] !== 0);
-    const stick = keyed || freeFly ? undefined : this.options.moveInput?.current;
-    const deflection = stick ? Math.hypot(stick.x, stick.z) : 0;
-    const hasMoveInput = keyed || deflection > 0;
+    const hasMoveInput = !freeFly && (intent.dir[0] !== 0 || intent.dir[1] !== 0);
+    const deflection = hasMoveInput ? (intent.deflection ?? 0) : 0;
     const jump = !freeFly && intent.jump;
     if (hasMoveInput) {
       autoWalk?.cancel();
@@ -202,15 +217,11 @@ export class RoomFrame {
       worldSettings,
       state.characterConfigs,
     );
-    const running = (!freeFly && intent.run) || deflection >= RUN_DEFLECTION;
+    const running = !freeFly && intent.run;
     const speed = autoWalkDir
       ? baseSpeed
       : (running ? baseSpeed * runSpeedMultiplier : baseSpeed) * (deflection > 0 ? deflection : 1);
-    const dir = keyed
-      ? { x: intent.dir[0], z: intent.dir[1] }
-      : stick && deflection > 0
-        ? stickDirection(stick, intent.yaw)
-        : (autoWalkDir ?? { x: 0, z: 0 });
+    const dir = hasMoveInput ? { x: intent.dir[0], z: intent.dir[1] } : (autoWalkDir ?? { x: 0, z: 0 });
     const moving = dir.x !== 0 || dir.z !== 0;
 
     const result = sim.step({
@@ -304,12 +315,4 @@ export class RoomFrame {
       runSpeed: ws.playerSpeed * ws.runSpeedMultiplier,
     };
   }
-}
-
-/** A stick's deflection turned into world space by the camera's yaw; unit length. */
-function stickDirection(stick: MoveInput, yaw: number): { x: number; z: number } {
-  const x = -Math.sin(yaw) * stick.z + Math.cos(yaw) * stick.x;
-  const z = -Math.cos(yaw) * stick.z - Math.sin(yaw) * stick.x;
-  const len = Math.hypot(x, z);
-  return { x: x / len, z: z / len };
 }

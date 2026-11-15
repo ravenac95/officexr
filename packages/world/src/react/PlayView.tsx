@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { BevyScene } from './BevyScene.tsx';
 import type { Actions, Bus, PlayerId, RuleRegistry, Store, SyncEngine, SnapshotHandshake, Vec3 } from '@officexr/sdk';
+import type { JoystickKind } from '@officexr/render-wasm';
 import type { BotPool } from '../bot/BotPool.ts';
 import type { FrameStatsSample } from '../renderer/FrameStatsProbe.tsx';
 import type { CameraMode } from '../renderer/config.ts';
@@ -56,8 +57,9 @@ export interface PlayViewProps {
   cameraMode?: CameraMode;
   onCameraModeChange?: (mode: CameraMode) => void;
   /** Steers the view with device motion; absent means off. */
-  // ponytail: Bevy's controls have no device-motion look yet, so this is ignored until they do.
   motionLook?: MotionLookState;
+  /** The touch joystick: Bevy's own (the default) or the DOM one. */
+  joystickKind?: JoystickKind;
   invertLook?: boolean;
   /** `'debug'` shows the camera, transport and layout status plus the focus chip; `'player'` shows none of it. */
   hud?: 'debug' | 'player';
@@ -86,6 +88,7 @@ export function PlayView(props: PlayViewProps) {
   const worldFocused = useWorldFocus();
   const moveInputRef = useRef<MoveInput>(NO_MOVE);
   const coarsePointer = useCoarsePointer();
+  const joystickKind = props.joystickKind ?? 'bevy';
   const [viewYaw] = useState(createViewYaw);
   const worldConstants = useWorldConstants(props.store);
   const navGrid = useBuildNavGrid(props.store);
@@ -137,6 +140,8 @@ export function PlayView(props: PlayViewProps) {
           view={worldConstants}
           worldFocused={worldFocused}
           moveInputRef={moveInputRef}
+          joystickKind={joystickKind}
+          motionLook={props.motionLook}
           autoWalk={autoWalk}
           seating={seating}
           spawnPoints={session.spawnPoints}
@@ -159,7 +164,7 @@ export function PlayView(props: PlayViewProps) {
       )}
       <TeleportFlash seating={seating} />
       <SeatRefusalToast seating={seating} />
-      {coarsePointer && <VirtualJoystick inputRef={moveInputRef} />}
+      {coarsePointer && joystickKind === 'dom' && <VirtualJoystick inputRef={moveInputRef} />}
       {props.error ? (
         <ErrorBanner message={props.error} onDismiss={() => props.onDismissError?.()} />
       ) : (

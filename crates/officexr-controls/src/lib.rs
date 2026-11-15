@@ -1,4 +1,4 @@
-//! Keyboard and mouse input and the gameplay camera modes, per view.
+//! Keyboard, mouse, touch and device-motion input and the gameplay camera modes, per view.
 //!
 //! Each view with controls has a [`Controls`] entry in the [`ControlsHub`],
 //! which callers outside the app (the web API, the native client) feed and
@@ -15,7 +15,9 @@
 
 mod config;
 pub mod look;
+pub mod motion;
 mod rig;
+pub mod touch;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -35,7 +37,10 @@ use look::{
     Drag, Look, MOUSE_SENSITIVITY, Modifiers, Orbit, apply_look_delta, apply_zoom, dom_wheel_delta,
     drag_for, fixed_movement_yaw, is_look_mode, is_yaw_pitch_mode, wheel_zoom_factor,
 };
+use motion::{DeviceReading, MotionPose, look_delta, to_pose};
 use rig::{FlyKeys, Rig};
+pub use touch::JoystickKind;
+use touch::{TOUCH_SENSITIVITY, TouchState, read_touches, spawn_stick};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -61,6 +66,8 @@ pub struct MoveIntent {
     pub run: bool,
     /// Space went down since the intent was last taken.
     pub jump: bool,
+    /// The stick's deflection when it, not the keys, gave `dir`; else 0.
+    pub deflection: f32,
 }
 
 impl MoveIntent {
@@ -73,9 +80,26 @@ impl MoveIntent {
             dir: (forward * fwd + right * strafe).normalize_or_zero().into(),
             run,
             jump,
+            deflection: 0.0,
+        }
+    }
+
+    /// As `moveIntent.ts`: held movement keys win over the `stick` (`x` strafe, `y` forward), and
+    /// a near-full deflection runs.
+    pub fn or_stick(self, stick: Vec2, yaw: f32) -> Self {
+        if self.dir != [0.0; 2] || stick == Vec2::ZERO {
+            return self;
+        }
+        let deflection = stick.length();
+        let run = self.run || deflection >= RUN_DEFLECTION;
+        Self {
+            deflection,
+            ..Self::from_axes(stick.y, stick.x, run, self.jump, yaw)
         }
     }
 }
+
+const RUN_DEFLECTION: f32 = 0.9;
 
 /// One view's camera and input state.
 #[derive(Debug)]
@@ -86,9 +110,14 @@ pub struct Controls {
     pub input_enabled: bool,
     /// The point the camera blends toward while the player is in a conversation.
     pub focus: Option<Vec3>,
+    /// The on-screen stick, `x` strafe (right +) and `y` forward (+), within the unit circle. The
+    /// Bevy joystick overwrites it each frame unless `joystick` is [`JoystickKind::Dom`].
+    pub stick: Vec2,
+    pub joystick: JoystickKind,
     follow: Option<Vec3>,
     look: Look,
     rig: Rig,
+    motion: Option<MotionPose>,
     intent: MoveIntent,
     /// The yaw `intent` is relative to.
     yaw: f32,
@@ -103,9 +132,12 @@ impl Default for Controls {
             config: CameraConfig::default(),
             input_enabled: true,
             focus: None,
+            stick: Vec2::ZERO,
+            joystick: JoystickKind::default(),
             follow: None,
             look: Look::default(),
             rig: Rig::default(),
+            motion: None,
             intent: MoveIntent::default(),
             yaw: 0.0,
             drag: None,
@@ -130,10 +162,26 @@ impl Controls {
         intent
     }
 
-    /// Turns the view by a drag of `delta` px, as locked mouse-look does, for touch.
+    /// Turns the view by a mouse move of `delta` px.
     pub fn look_by(&mut self, delta: Vec2) {
         let d = delta * self.look_sign() * MOUSE_SENSITIVITY;
         apply_look_delta(self.mode, d.x, d.y, &mut self.look);
+    }
+
+    fn touch_look(&mut self, delta: Vec2) {
+        let d = delta * self.look_sign() * TOUCH_SENSITIVITY;
+        apply_look_delta(self.mode, d.x, d.y, &mut self.look);
+    }
+
+    /// Turns the view by the device's orientation change since the previous reading. A reading
+    /// without an orientation forgets the previous one, so the next starts afresh.
+    pub fn orient(&mut self, reading: DeviceReading) {
+        let pose = to_pose(reading);
+        if let (Some(prev), Some(next)) = (self.motion, pose) {
+            let (d_yaw, d_pitch) = look_delta(prev, next);
+            apply_look_delta(self.mode, d_yaw, d_pitch, &mut self.look);
+        }
+        self.motion = pose;
     }
 
     /// The camera yaw the intent is relative to.
@@ -204,11 +252,19 @@ impl Plugin for ControlsPlugin {
             .init_resource::<PointerClaimed>()
             .init_resource::<ShortcutKeys>()
             .init_resource::<WindowInputs>()
+            .init_resource::<TouchState>()
             .add_message::<PointerLockLost>()
             .configure_sets(Update, ControlsSystems.before(SceneSystems))
+            .add_systems(Startup, spawn_stick)
             .add_systems(
                 Update,
-                (track_shortcuts, pointer_lock, gather_mouse, steer)
+                (
+                    track_shortcuts,
+                    pointer_lock,
+                    gather_mouse,
+                    read_touches,
+                    steer,
+                )
                     .chain()
                     .in_set(ControlsSystems),
             );
@@ -452,7 +508,7 @@ fn steer(
             !(controls.mode == CameraMode::Orbit && controls.config.orbit.move_keys);
         controls.intent = if controls.input_enabled && keys_move_player {
             let untaken_jump = controls.intent.jump;
-            let mut intent = intent(&keys, controls.yaw);
+            let mut intent = intent(&keys, controls.yaw).or_stick(controls.stick, controls.yaw);
             intent.jump |= untaken_jump;
             intent
         } else {
@@ -1012,5 +1068,61 @@ mod tests {
         let (shown, goal) = controls(&app, id, |c| (c.rig.orbit, c.rig.orbit_goal));
         assert_eq!(shown.distance, goal.distance);
         assert_ne!(goal.distance, 16.0);
+    }
+
+    #[test]
+    fn keys_win_over_the_stick() {
+        let keys = MoveIntent {
+            dir: [0.0, -1.0],
+            ..default()
+        };
+        assert_eq!(keys.or_stick(Vec2::new(1.0, 0.0), 0.0), keys);
+    }
+
+    #[test]
+    fn the_stick_steers_relative_to_the_camera_and_runs_near_full_deflection() {
+        let walk = MoveIntent::default().or_stick(Vec2::new(0.0, 0.4), 0.0);
+        assert_eq!(
+            (walk.dir, walk.run, walk.deflection),
+            ([0.0, -1.0], false, 0.4)
+        );
+        assert!(
+            MoveIntent::default()
+                .or_stick(Vec2::new(0.0, 0.95), 0.0)
+                .run
+        );
+    }
+
+    #[test]
+    fn the_dom_joysticks_stick_walks_the_player() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| {
+            c.joystick = JoystickKind::Dom;
+            c.stick = Vec2::new(1.0, 0.0);
+        });
+        app.update();
+        let intent = controls(&app, id, |c| c.take_intent());
+        assert!((Vec2::from(intent.dir).length() - 1.0).abs() < 1e-6);
+        assert_eq!(intent.deflection, 1.0);
+    }
+
+    #[test]
+    fn device_motion_turns_the_view_from_the_second_reading() {
+        let reading = |alpha| motion::DeviceReading {
+            alpha: Some(alpha),
+            beta: Some(90.0),
+            gamma: Some(0.0),
+        };
+        let mut c = Controls {
+            mode: CameraMode::FirstPerson,
+            ..default()
+        };
+        c.orient(reading(0.0));
+        assert_eq!(c.look.yaw, 0.0);
+        c.orient(reading(10.0));
+        assert!((c.look.yaw - 10f32.to_radians()).abs() < 1e-5);
+        c.orient(motion::DeviceReading::default());
+        c.orient(reading(20.0));
+        assert!((c.look.yaw - 10f32.to_radians()).abs() < 1e-5);
     }
 }

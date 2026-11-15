@@ -46,6 +46,7 @@ function fakeSim(log: string[], start: Vec3) {
 function fakeView(log: string[], intent: MoveIntent = STILL) {
   const players: PlayersInput[] = [];
   const inputEnabled: boolean[] = [];
+  const sent: { sticks: [number, number][]; joystickKinds: string[] } = { sticks: [], joystickKinds: [] };
   const state = { intent };
   const view: RoomView = {
     takeIntent: () => {
@@ -56,6 +57,8 @@ function fakeView(log: string[], intent: MoveIntent = STILL) {
       log.push('view.setInputEnabled');
       inputEnabled.push(enabled);
     },
+    setStick: (stick) => sent.sticks.push(stick),
+    setJoystickKind: (kind) => sent.joystickKinds.push(kind),
     setWorld: () => log.push('view.setWorld'),
     setPlayers: (p) => {
       log.push('view.setPlayers');
@@ -64,7 +67,7 @@ function fakeView(log: string[], intent: MoveIntent = STILL) {
     setFollowTarget: () => log.push('view.setFollowTarget'),
     setConversationFocus: () => log.push('view.setConversationFocus'),
   };
-  return { view, players, inputEnabled, state };
+  return { view, players, inputEnabled, sent, state };
 }
 
 async function setup(opts: { intent?: MoveIntent; options?: Partial<RoomFrameOptions> } = {}) {
@@ -73,7 +76,7 @@ async function setup(opts: { intent?: MoveIntent; options?: Partial<RoomFrameOpt
   alice.actions.upsertPlayer({ id: 'bob', name: 'Bob', pos: { x: 5, y: 0, z: 5 } });
   const log: string[] = [];
   const { sim, steps } = fakeSim(log, alice.store.getState().players.alice!.pos);
-  const { view, players, inputEnabled, state: viewState } = fakeView(log, opts.intent);
+  const { view, players, inputEnabled, sent, state: viewState } = fakeView(log, opts.intent);
   const setSelfPosition = alice.actions.setSelfPosition.bind(alice.actions);
   vi.spyOn(alice.actions, 'setSelfPosition').mockImplementation((...args) => {
     log.push('actions.setSelfPosition');
@@ -89,6 +92,7 @@ async function setup(opts: { intent?: MoveIntent; options?: Partial<RoomFrameOpt
       worldFocused: true,
       selfReady: true,
       spawnPoints: [],
+      joystickKind: 'bevy',
       characterOf: (p) => `char-${p.id}`,
       kinds: [],
       bakedLayouts: [],
@@ -102,6 +106,7 @@ async function setup(opts: { intent?: MoveIntent; options?: Partial<RoomFrameOpt
     sim,
     players,
     inputEnabled,
+    sent,
     actions: alice.actions,
     store: alice.store,
     setIntent: (intent: MoveIntent) => {
@@ -222,10 +227,9 @@ describe('RoomFrame', () => {
     expect(store.getState().players.alice!.vel).toEqual({ x: 0, y: 0, z: 0 });
   });
 
-  it("walks the stick at its deflection's share of walk speed, turned by the camera's yaw", async () => {
+  it("walks the stick at its deflection's share of walk speed", async () => {
     const { frame, steps, store } = await setup({
-      intent: { dir: [0, 0], run: false, jump: false, yaw: Math.PI / 2 },
-      options: { moveInput: { current: { x: 0, z: 0.5 } } },
+      intent: { dir: [-1, 0], run: false, jump: false, yaw: Math.PI / 2, deflection: 0.5 },
     });
 
     frame.step(0.016, 1000);
@@ -233,8 +237,22 @@ describe('RoomFrame', () => {
     const { playerSpeed } = store.getState().worldSettings;
     expect(steps[0]!.speed).toBeCloseTo(playerSpeed * 0.5);
     expect(steps[0]!.running).toBe(false);
-    expect(steps[0]!.dir.x).toBeCloseTo(-1);
-    expect(steps[0]!.dir.z).toBeCloseTo(0);
+    expect(steps[0]!.dir).toEqual({ x: -1, z: 0 });
+  });
+
+  it('sends the joystick setting when it changes, and the DOM stick only while it is picked', async () => {
+    const moveInput = { current: { x: 0, z: 0.5 } };
+    const { frame, sent } = await setup({ options: { moveInput } });
+
+    frame.step(0.016, 1000);
+    frame.step(0.016, 1016);
+    frame.options = { ...frame.options, joystickKind: 'dom' };
+    frame.step(0.016, 1032);
+    frame.options = { ...frame.options, joystickKind: 'bevy' };
+    frame.step(0.016, 1048);
+
+    expect(sent.joystickKinds).toEqual(['bevy', 'dom', 'bevy']);
+    expect(sent.sticks).toEqual([[0, 0.5]]);
   });
 
   it('auto-walks at walk speed without input, and keys cancel it', async () => {
@@ -254,7 +272,8 @@ describe('RoomFrame', () => {
   it('neither the stick nor auto-walk moves the player in free-fly', async () => {
     const autoWalk = { intent: vi.fn(() => ({ x: 1, z: 0 })), cancel: vi.fn() };
     const { frame, steps } = await setup({
-      options: { cameraMode: 'free-fly', autoWalk, moveInput: { current: { x: 0, z: 1 } } },
+      intent: { dir: [0, -1], run: false, jump: false, yaw: 0, deflection: 1 },
+      options: { cameraMode: 'free-fly', autoWalk },
     });
 
     frame.step(0.016, 1000);

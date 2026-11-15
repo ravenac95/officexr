@@ -199,6 +199,8 @@ export interface MoveIntent {
   jump: boolean;
   /** The camera yaw `dir` was turned by. */
   yaw: number;
+  /** The stick's deflection when it, not the keys, gave `dir`; else 0. */
+  deflection?: number;
 }
 
 /** The wasm-bindgen module of one backend, already instantiated by `loadRenderer`. */
@@ -272,7 +274,15 @@ export interface RendererModule {
   frameBounds(id: ViewId, aabb: { min: [number, number, number]; max: [number, number, number] }): void;
   /** Drive from `useWorldFocus` and `isTypingTarget`: off, keys and the mouse are ignored. */
   setInputEnabled(id: ViewId, enabled: boolean): void;
+  /** The page's touch stick: `x` strafe (right +), `y` forward (+), within the unit circle. Held keys win. */
+  setStick(id: ViewId, stick: [number, number]): void;
+  /** A `deviceorientation` event's angles; nulls forget the previous reading, so the next starts afresh. */
+  setDeviceOrientation(id: ViewId, reading: { alpha: number | null; beta: number | null; gamma: number | null }): void;
+  /** `'bevy'` shows the view's own touch stick; `'dom'` hides it for the page's, fed by `setStick`. */
+  setJoystickKind(id: ViewId, kind: JoystickKind): void;
 }
+
+export type JoystickKind = 'bevy' | 'dom';
 
 export type Gpu = { requestAdapter(): Promise<unknown> };
 
