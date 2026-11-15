@@ -63,6 +63,20 @@ pub struct MoveIntent {
     pub jump: bool,
 }
 
+impl MoveIntent {
+    /// Forward and strafe axes (+1 forward, +1 right) turned by the camera's `yaw` into a unit
+    /// world-space direction.
+    pub fn from_axes(fwd: f32, strafe: f32, run: bool, jump: bool, yaw: f32) -> Self {
+        let forward = Vec2::new(-yaw.sin(), -yaw.cos());
+        let right = Vec2::new(yaw.cos(), -yaw.sin());
+        Self {
+            dir: (forward * fwd + right * strafe).normalize_or_zero().into(),
+            run,
+            jump,
+        }
+    }
+}
+
 /// One view's camera and input state.
 #[derive(Debug)]
 pub struct Controls {
@@ -118,6 +132,12 @@ impl Controls {
         let intent = self.intent;
         self.intent.jump = false;
         intent
+    }
+
+    /// Turns the view by a drag of `delta` px, as locked mouse-look does, for touch.
+    pub fn look_by(&mut self, delta: Vec2) {
+        let d = delta * self.look_sign() * MOUSE_SENSITIVITY;
+        apply_look_delta(self.mode, d.x, d.y, &mut self.look);
     }
 
     /// The camera yaw the intent is relative to.
@@ -570,8 +590,7 @@ fn steer(
 fn mouse(controls: &mut Controls, input: &WindowInput, held: Modifiers) {
     let mode = controls.mode;
     if input.locked && is_yaw_pitch_mode(mode) {
-        let d = input.motion * controls.look_sign() * MOUSE_SENSITIVITY;
-        apply_look_delta(mode, d.x, d.y, &mut controls.look);
+        controls.look_by(input.motion);
     }
     let orbit = &controls.config.orbit;
     let rig = &mut controls.rig;
@@ -622,14 +641,13 @@ fn intent(keys: &MovementKeys, yaw: f32) -> MoveIntent {
         &[KeyCode::KeyD, KeyCode::ArrowRight],
         &[KeyCode::KeyA, KeyCode::ArrowLeft],
     );
-    let forward = Vec2::new(-yaw.sin(), -yaw.cos());
-    let right = Vec2::new(yaw.cos(), -yaw.sin());
-    let dir = (forward * fwd + right * strafe).normalize_or_zero();
-    MoveIntent {
-        dir: dir.into(),
-        run: keys.any(&SHIFT),
-        jump: keys.just_pressed(KeyCode::Space),
-    }
+    MoveIntent::from_axes(
+        fwd,
+        strafe,
+        keys.any(&SHIFT),
+        keys.just_pressed(KeyCode::Space),
+        yaw,
+    )
 }
 
 /// The map editor's: WASD across the ground, Q/E up and down, and nothing
