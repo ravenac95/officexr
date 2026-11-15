@@ -5,15 +5,31 @@
  * KindList + a 3D preview canvas.
  */
 
-import { expect, test } from '@playwright/test';
-import { goToMode } from './helpers.ts';
+import { expect, test, type Page } from '@playwright/test';
+import { canvasPixels, forceWebgl2, goToMode } from './helpers.ts';
+
+/** The editor's Bevy preview view, once it has one. */
+const PREVIEW = 'main canvas[data-officexr-view]';
+
+/** Waits until the preview draws more than a flat backdrop and holds still for a few seconds. */
+async function settledPreview(page: Page) {
+  let shown: number[] = [];
+  const still = async () => {
+    const before = (await canvasPixels(page, [PREVIEW]))[0];
+    await page.waitForTimeout(2_000);
+    shown = (await canvasPixels(page, [PREVIEW]))[0];
+    return new Set(before).size > 16 && before.every((p, i) => p === shown[i]);
+  };
+  await expect.poll(still, { timeout: 200_000, intervals: [1_000] }).toBe(true);
+  return shown;
+}
 
 test('Object editor hydrates the full catalog from /api/world-object-kinds', async ({
   page,
   request,
 }) => {
   // Source of truth: the catalog the dev server serves.
-  const apiResp = await request.get('http://localhost:5174/api/world-object-kinds');
+  const apiResp = await request.get('/api/world-object-kinds');
   const apiBody = (await apiResp.json()) as { kinds?: unknown[] };
   const expectedKindCount = apiBody.kinds?.length ?? 0;
   expect(expectedKindCount).toBeGreaterThan(0);
@@ -32,7 +48,7 @@ test('Object editor sums category row counts to the catalog total', async ({
   page,
   request,
 }) => {
-  const apiResp = await request.get('http://localhost:5174/api/world-object-kinds');
+  const apiResp = await request.get('/api/world-object-kinds');
   const apiBody = (await apiResp.json()) as { kinds?: { category: string }[] };
   const expectedTotal = apiBody.kinds?.length ?? 0;
 
@@ -66,8 +82,7 @@ test('Object editor renders a preview canvas and the kind controls panel', async
 }) => {
   await goToMode(page, 'object');
 
-  // The preview canvas is the only <canvas> on the page.
-  await expect(page.locator('canvas')).toBeVisible();
+  await expect(page.locator(PREVIEW)).toBeVisible();
 
   // KindEditorPanel uses our control kit; each Field renders a
   // <label> with the field name. Verify the standard rows are
@@ -95,7 +110,7 @@ test('Switching kinds does NOT clobber the new kind with previous kind values', 
   // unchanged after a kind switch with no user typing).
 
   // Pick two distinct kinds from the catalog to switch between.
-  const apiResp = await request.get('http://localhost:5174/api/world-object-kinds');
+  const apiResp = await request.get('/api/world-object-kinds');
   const apiBody = (await apiResp.json()) as {
     kinds: Array<{ id: string; label: string; scale: number; swatch: string }>;
   };
@@ -132,7 +147,7 @@ test('Switching kinds does NOT clobber the new kind with previous kind values', 
   // into B's catalog entry and the auto-save would have persisted it.
   await page.waitForTimeout(900);
 
-  const after = await request.get('http://localhost:5174/api/world-object-kinds');
+  const after = await request.get('/api/world-object-kinds');
   const afterBody = (await after.json()) as {
     kinds: Array<{ id: string; label: string }>;
   };
@@ -142,4 +157,79 @@ test('Switching kinds does NOT clobber the new kind with previous kind values', 
   expect(bAfter, 'kind B still in catalog').toBeDefined();
   expect(aAfter!.label, "kind A's label unchanged by switching").toBe(aLabelBefore);
   expect(bAfter!.label, "kind B's label unchanged by switching").toBe(bLabelBefore);
+});
+
+test('Object editor preview orbits on a left-drag and holds still under the pointer', async ({ page }) => {
+  test.setTimeout(300_000);
+  await forceWebgl2(page);
+  await goToMode(page, 'object');
+  await expect(page.locator(PREVIEW)).toBeVisible({ timeout: 60_000 });
+  // Read off the DOM: locator geometry waits on a compositor frame, too slow under SwiftShader.
+  const box = await page.evaluate((s) => document.querySelector(s)!.getBoundingClientRect().toJSON() as DOMRect, PREVIEW);
+  const [cx, cy] = [box.x + box.width / 2, box.y + box.height / 2];
+  // The pointer over the preview pauses the kind's spin.
+  await page.mouse.move(cx, cy);
+  const before = await settledPreview(page);
+
+  await page.mouse.down();
+  await page.mouse.move(cx + 200, cy + 40, { steps: 10 });
+  await page.mouse.up();
+  const after = await settledPreview(page);
+  const changed = after.filter((p, i) => p !== before[i]).length / after.length;
+  expect(changed).toBeGreaterThan(0.05);
+});
+
+test('Object editor preview paints an orbit within a few frames of the drag', async ({ page }) => {
+  test.setTimeout(300_000);
+  await forceWebgl2(page);
+  await goToMode(page, 'object');
+  await expect(page.locator(PREVIEW)).toBeVisible({ timeout: 60_000 });
+  const box = await page.evaluate((s) => document.querySelector(s)!.getBoundingClientRect().toJSON() as DOMRect, PREVIEW);
+  const [cx, cy] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(cx, cy);
+  await settledPreview(page);
+
+  // Counts animation frames until the preview's pixels change. Only the camera moves, so a readback
+  // that trails the frames drawn shows up as a long count.
+  const frames = page.evaluate((s) => new Promise<number>((resolve) => {
+    const canvas = document.querySelector<HTMLCanvasElement>(s)!;
+    const context = canvas.getContext('2d')!;
+    const hash = () => {
+      const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let h = 0;
+      for (let i = 0; i < data.length; i += 61) {
+        h = (h * 31 + data[i]) | 0;
+      }
+      return h;
+    };
+    const start = hash();
+    let count = 0;
+    requestAnimationFrame(function tick() {
+      count += 1;
+      if (hash() !== start || count >= 120) {
+        resolve(count);
+      } else {
+        requestAnimationFrame(tick);
+      }
+    });
+  }), PREVIEW);
+  await page.mouse.down();
+  await page.mouse.move(cx + 200, cy + 40, { steps: 10 });
+  await page.mouse.up();
+  expect(await frames).toBeLessThan(12);
+});
+
+test('Character editor draws its character in a Bevy preview', async ({ page }) => {
+  test.setTimeout(300_000);
+  await forceWebgl2(page);
+  await goToMode(page, 'character');
+  await expect(page.locator(PREVIEW)).toBeVisible({ timeout: 60_000 });
+  // The backdrop (#0a0a0a) and the grid's lines are all darker than 60 in every channel; the
+  // character is not. The top fifth, under the HUD's text, is left out.
+  const bright = async () => {
+    const pixels = (await canvasPixels(page, [PREVIEW], 0.2))[0];
+    const lit = pixels.filter((p) => Math.max(p >>> 24, (p >>> 16) & 0xff, (p >>> 8) & 0xff) > 60);
+    return lit.length / pixels.length;
+  };
+  await expect.poll(bright, { timeout: 200_000, intervals: [2_000] }).toBeGreaterThan(0.02);
 });

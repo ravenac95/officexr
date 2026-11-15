@@ -15,7 +15,7 @@ use bevy::render::gpu_readback::Readback;
 use bevy::render::render_resource::{Extent3d, TextureFormat, TextureUsages};
 use bevy::window::{PrimaryWindow, WindowOccluded, WindowRef};
 
-use crate::avatars::Bound;
+use crate::avatars::{Bound, Replaced};
 use crate::lighting::ObjectMaterial;
 use crate::overlays::{Overlay, OverlayIndex, ViewOverlays};
 use crate::proximity::{Proximity, ViewProximity};
@@ -380,7 +380,7 @@ fn report_status(
         Ref<ViewPlayers>,
         Option<Ref<ViewScene>>,
     )>,
-    bound: Query<&ChildOf, With<Bound>>,
+    bound: Query<&ChildOf, (With<Bound>, Without<Replaced>)>,
     children: Query<&Children>,
     drawn: Query<(&Mesh3d, Option<&MeshMaterial3d<ObjectMaterial>>)>,
     meshes: Res<Assets<Mesh>>,
@@ -712,6 +712,7 @@ mod tests {
                     vel: Vec3::ZERO,
                     name: String::new(),
                     airborne: false,
+                    animation: None,
                 })
                 .collect(),
             ..default()

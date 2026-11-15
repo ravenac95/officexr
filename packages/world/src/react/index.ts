@@ -18,6 +18,14 @@ export { bakedLayoutGlbUrl, blobAssetPath, bootBevy, playCanvas } from './bevyRe
 export { setBevyReady, usePrimaryBevyView, type BevyView } from './usePrimaryBevyView.ts';
 export { frameStatsMeter } from './frameStatsMeter.ts';
 export { diffWorld, type SentWorld } from './worldDiff.ts';
+export {
+  BevyPreview,
+  type BevyPreviewProps,
+  type PreviewAnimation,
+  type PreviewPlacement,
+  type PreviewSubject,
+  type PreviewView,
+} from './BevyPreview.tsx';
 export { WorldLoadingScreen, type WorldLoadingScreenProps } from './LoadingScreen.tsx';
 export {
   usePlaySession,

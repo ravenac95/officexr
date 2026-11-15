@@ -5,9 +5,12 @@
 use std::f32::consts::PI;
 use std::time::Duration;
 
+use bevy::animation::animated_field;
+use bevy::animation::animation_curves::{AnimatableCurve, AnimatableKeyframeCurve};
 use bevy::animation::{AnimatedBy, AnimationTargetId};
-use bevy::gltf::Gltf;
+use bevy::gltf::{Gltf, GltfNode};
 use bevy::prelude::*;
+use serde::Deserialize;
 
 use crate::AssetBase;
 use crate::lighting::{HemisphereFill, ObjectMaterial};
@@ -32,7 +35,8 @@ const FADE: Duration = Duration::from_millis(200);
 #[derive(Clone, Debug)]
 pub struct PlayerRender {
     pub id: String,
-    /// A `/models/characters/<character>.glb` name, e.g. `Barbarian`.
+    /// A `/models/characters/<character>.glb` name, e.g. `Barbarian`, or a
+    /// model's path or URL, as an uploaded character's.
     pub character: String,
     /// Body root: the ball collider's bottom sits `BODY_Y - char_radius` above it.
     pub pos: Vec3,
@@ -41,7 +45,92 @@ pub struct PlayerRender {
     /// Empty hides the tag, as for the local player.
     pub name: String,
     pub airborne: bool,
+    /// Plays this instead of the motion `vel` and `airborne` imply, as the character editor previews.
+    pub animation: Option<PlayerAnimation>,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+pub struct PlayerAnimation {
+    pub state: AnimationState,
+    /// The clip's time scale.
+    pub speed: f32,
+}
+
+/// `Adventurer.tsx`'s `AnimationState`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AnimationState {
+    Idle,
+    Walking,
+    Running,
+    Jumping,
+    Shooting,
+    Throwing,
+    Hit,
+    Sitting,
+}
+
+impl AnimationState {
+    const ALL: [AnimationState; 8] = [
+        AnimationState::Idle,
+        AnimationState::Walking,
+        AnimationState::Running,
+        AnimationState::Jumping,
+        AnimationState::Shooting,
+        AnimationState::Throwing,
+        AnimationState::Hit,
+        AnimationState::Sitting,
+    ];
+
+    /// The rig clip, or `None` for the sit pose, which no rig carries.
+    fn clip(self) -> Option<&'static str> {
+        Some(match self {
+            AnimationState::Idle => "Idle_A",
+            AnimationState::Walking => "Walking_C",
+            AnimationState::Running => "Running_A",
+            AnimationState::Jumping => "Jump_Full_Long",
+            AnimationState::Shooting => "1H_Ranged_Shoot",
+            AnimationState::Throwing => "2H_Ranged_Throwing",
+            AnimationState::Hit => "Hit_A",
+            AnimationState::Sitting => return None,
+        })
+    }
+
+    /// The rest play once and hold their last frame.
+    fn loops(self) -> bool {
+        !matches!(
+            self,
+            AnimationState::Shooting | AnimationState::Throwing | AnimationState::Hit
+        )
+    }
+}
+
+impl From<Motion> for AnimationState {
+    fn from(motion: Motion) -> Self {
+        match motion {
+            Motion::Idle => AnimationState::Idle,
+            Motion::Walking => AnimationState::Walking,
+            Motion::Running => AnimationState::Running,
+            Motion::Jumping => AnimationState::Jumping,
+        }
+    }
+}
+
+/// `sitPoseClip.ts`'s seated pose: absolute local XYZ Euler rotations in degrees.
+const SIT_POSE_DEGREES: [(&str, [f32; 3]); 11] = [
+    ("upperleg.l", [90.0, 0.0, 0.0]),
+    ("upperleg.r", [90.0, 0.0, 0.0]),
+    ("lowerleg.l", [90.0, 0.0, 0.0]),
+    ("lowerleg.r", [90.0, 0.0, 0.0]),
+    ("foot.l", [-44.0, 0.0, 0.0]),
+    ("foot.r", [-44.0, 0.0, 0.0]),
+    ("spine", [8.0, 0.0, 0.0]),
+    // Idle_A frame 0: the bind pose is a T-pose.
+    ("upperarm.l", [-52.6, 48.4, -109.2]),
+    ("upperarm.r", [-53.1, -52.3, 98.5]),
+    ("lowerarm.l", [0.0, 0.0, -42.0]),
+    ("lowerarm.r", [0.0, 0.0, 44.0]),
+];
 
 /// The players to draw this frame, with the world tunables their motion
 /// tier and placement derive from.
@@ -83,24 +172,6 @@ pub enum Motion {
     Walking,
     Running,
     Jumping,
-}
-
-impl Motion {
-    const ALL: [Motion; 4] = [
-        Motion::Idle,
-        Motion::Walking,
-        Motion::Running,
-        Motion::Jumping,
-    ];
-
-    fn clip(self) -> &'static str {
-        match self {
-            Motion::Idle => "Idle_A",
-            Motion::Walking => "Walking_C",
-            Motion::Running => "Running_A",
-            Motion::Jumping => "Jump_Full_Long",
-        }
-    }
 }
 
 /// `Players.tsx`'s locomotion tier, with its enter/exit hysteresis.
@@ -154,6 +225,7 @@ struct Avatar {
     id: String,
     character: String,
     motion: Motion,
+    playing: AnimationState,
     /// The `Rig_Medium` node, once bound.
     rig: Option<Entity>,
 }
@@ -163,10 +235,23 @@ struct Avatar {
 #[derive(Component)]
 pub struct Bound;
 
+/// An avatar whose player changed character: it stays drawn, as
+/// `SwapWhenLoaded` kept the old model, until the new one is bound.
+#[derive(Component)]
+pub(crate) struct Replaced;
+
+type AvatarItem<'a> = (
+    Entity,
+    &'a Avatar,
+    &'a mut Transform,
+    &'a ChildOf,
+    Has<Replaced>,
+);
+
 #[derive(Resource)]
 struct Clips {
     rigs: Vec<Handle<Gltf>>,
-    graph: Option<(Handle<AnimationGraph>, [AnimationNodeIndex; 4])>,
+    graph: Option<(Handle<AnimationGraph>, [AnimationNodeIndex; 8])>,
 }
 
 pub(crate) fn plugin(app: &mut App) {
@@ -196,7 +281,14 @@ pub(crate) fn plugin(app: &mut App) {
         .register_type::<bevy::camera::visibility::DynamicSkinnedMeshBounds>();
     app.add_systems(Startup, load_rigs).add_systems(
         Update,
-        (build_graph, sync_avatars, bind_avatars, animate, show_tags)
+        (
+            build_graph,
+            sync_avatars,
+            bind_avatars,
+            retire_replaced,
+            animate,
+            show_tags,
+        )
             .chain()
             .in_set(crate::views::SceneSystems)
             .after(crate::views::mirror_resources)
@@ -218,6 +310,8 @@ fn build_graph(
     mut clips: ResMut<Clips>,
     assets: Res<AssetServer>,
     gltfs: Res<Assets<Gltf>>,
+    nodes: Res<Assets<GltfNode>>,
+    mut animation_clips: ResMut<Assets<AnimationClip>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
 ) {
     if clips.graph.is_some()
@@ -234,10 +328,83 @@ fn build_graph(
             .rigs
             .iter()
             .find_map(|h| gltfs.get(h)?.named_animations.get(name).cloned())
-            .unwrap_or_else(|| panic!("no {name} clip in the Rig_Medium GLBs"))
     };
-    let (graph, nodes) = AnimationGraph::from_clips(Motion::ALL.map(|m| find(m.clip())));
-    clips.graph = Some((graphs.add(graph), nodes.try_into().unwrap()));
+    let rig = gltfs
+        .get(&clips.rigs[0])
+        .and_then(|g| g.named_nodes.get(RIG_ROOT))
+        .and_then(|n| nodes.get(n))
+        .unwrap_or_else(|| panic!("no {RIG_ROOT} node in {}", RIGS[0]));
+    let sit = animation_clips.add(sit_pose_clip(rig, &nodes));
+    let clips_by_state =
+        state_clips(find, sit).unwrap_or_else(|| panic!("no Idle_A clip in the Rig_Medium GLBs"));
+    let (graph, indices) = AnimationGraph::from_clips(clips_by_state);
+    clips.graph = Some((graphs.add(graph), indices.try_into().unwrap()));
+}
+
+/// Each state's clip, in [`AnimationState::ALL`] order: the sit pose for
+/// sitting, and idle for a state whose clip the rigs lack, as Adventurer.tsx
+/// falls back. `None` without an idle clip.
+fn state_clips<T: Clone>(find: impl Fn(&str) -> Option<T>, sit: T) -> Option<[T; 8]> {
+    let idle = find(AnimationState::Idle.clip()?)?;
+    Some(AnimationState::ALL.map(|s| match s.clip() {
+        Some(name) => find(name).unwrap_or_else(|| idle.clone()),
+        None => sit.clone(),
+    }))
+}
+
+/// Holds every bone under `rig` at its rest transform, except the seated
+/// pose's, as `sitPoseClip.ts` leaves the bones it doesn't list at their bind pose.
+fn sit_pose_clip(rig: &GltfNode, nodes: &Assets<GltfNode>) -> AnimationClip {
+    let mut clip = AnimationClip::default();
+    let mut path = vec![Name::new(rig.name.clone())];
+    add_sit_curves(&mut clip, rig, &mut path, nodes);
+    clip
+}
+
+/// Two keys, as a curve needs, a second apart like the TS clip's.
+fn held<T: Animatable + Copy>(value: T) -> AnimatableKeyframeCurve<T> {
+    AnimatableKeyframeCurve::new([(0.0, value), (1.0, value)]).expect("two ordered keys")
+}
+
+fn add_sit_curves(
+    clip: &mut AnimationClip,
+    node: &GltfNode,
+    path: &mut Vec<Name>,
+    nodes: &Assets<GltfNode>,
+) {
+    let target = AnimationTargetId::from_names(path.iter());
+    let rest = node.transform;
+    let rotation = SIT_POSE_DEGREES
+        .iter()
+        .find(|(bone, _)| *bone == node.name)
+        .map_or(rest.rotation, |(_, [x, y, z])| {
+            Quat::from_euler(
+                EulerRot::XYZ,
+                x.to_radians(),
+                y.to_radians(),
+                z.to_radians(),
+            )
+        });
+    clip.add_curve_to_target(
+        target,
+        AnimatableCurve::new(
+            animated_field!(Transform::translation),
+            held(rest.translation),
+        ),
+    );
+    clip.add_curve_to_target(
+        target,
+        AnimatableCurve::new(animated_field!(Transform::rotation), held(rotation)),
+    );
+    clip.add_curve_to_target(
+        target,
+        AnimatableCurve::new(animated_field!(Transform::scale), held(rest.scale)),
+    );
+    for child in node.children.iter().filter_map(|c| nodes.get(c)) {
+        path.push(Name::new(child.name.clone()));
+        add_sit_curves(clip, child, path, nodes);
+        path.pop();
+    }
 }
 
 fn sync_avatars(
@@ -245,7 +412,7 @@ fn sync_avatars(
     views: Query<(Entity, &ViewPlayers), Changed<ViewPlayers>>,
     base: Res<AssetBase>,
     assets: Res<AssetServer>,
-    mut avatars: Query<(Entity, &Avatar, &mut Transform, &ChildOf)>,
+    mut avatars: Query<AvatarItem>,
 ) {
     for (view, players) in &views {
         sync_view_avatars(&mut commands, view, players, &base, &assets, &mut avatars);
@@ -258,29 +425,39 @@ fn sync_view_avatars(
     players: &Players,
     base: &AssetBase,
     assets: &AssetServer,
-    avatars: &mut Query<(Entity, &Avatar, &mut Transform, &ChildOf)>,
+    avatars: &mut Query<AvatarItem>,
 ) {
-    for (entity, avatar, _, _) in avatars.iter().filter(|(.., v)| v.parent() == view) {
-        let kept = players
-            .players
-            .iter()
-            .any(|p| p.id == avatar.id && p.character == avatar.character);
-        if !kept {
-            commands.entity(entity).despawn();
+    for (entity, avatar, _, _, replaced) in
+        avatars.iter().filter(|(_, _, _, v, _)| v.parent() == view)
+    {
+        let player = players.players.iter().find(|p| p.id == avatar.id);
+        match player {
+            Some(p) if p.character == avatar.character => {
+                if replaced {
+                    commands.entity(entity).remove::<Replaced>();
+                }
+            }
+            Some(_) => {
+                commands.entity(entity).insert(Replaced);
+            }
+            None => commands.entity(entity).despawn(),
         }
     }
     for p in &players.players {
         // ponytail: the yaw snaps; Players.tsx eases it at `turnSpeed`.
         let transform = Transform::from_translation(players.feet(p))
             .with_rotation(Quat::from_rotation_y(p.yaw + AVATAR_YAW_OFFSET));
-        let existing = avatars
-            .iter_mut()
-            .find(|(_, a, _, v)| v.parent() == view && a.id == p.id && a.character == p.character);
-        if let Some((_, _, mut t, _)) = existing {
+        let existing = avatars.iter_mut().find(|(_, a, _, v, _)| {
+            v.parent() == view && a.id == p.id && a.character == p.character
+        });
+        if let Some((_, _, mut t, _, _)) = existing {
             *t = transform;
             continue;
         }
-        let path = base.asset_path(&format!("/models/characters/{}.glb", p.character));
+        let replacing = avatars
+            .iter()
+            .any(|(_, a, _, v, _)| v.parent() == view && a.id == p.id);
+        let path = base.asset_path(&character_path(&p.character));
         // ponytail: no bind-pose foot anchor; every KayKit character's lowest vertex is within 2 mm of y=0.
         let avatar = commands
             .spawn((
@@ -288,11 +465,16 @@ fn sync_view_avatars(
                     id: p.id.clone(),
                     character: p.character.clone(),
                     motion: Motion::Idle,
+                    playing: AnimationState::Idle,
                     rig: None,
                 },
                 PickTarget::Player { id: p.id.clone() },
                 transform,
-                Visibility::default(),
+                if replacing {
+                    Visibility::Hidden
+                } else {
+                    Visibility::default()
+                },
                 WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(path))),
                 ChildOf(view),
             ))
@@ -304,6 +486,32 @@ fn sync_view_avatars(
             avatar,
             Vec3::Y * TAG_HEIGHT_M,
         ));
+    }
+}
+
+type NewlyBound = (Added<Bound>, Without<Replaced>);
+
+/// Shows a newly bound avatar and drops the ones it replaced.
+fn retire_replaced(
+    mut commands: Commands,
+    mut bound: Query<(&Avatar, &ChildOf, &mut Visibility), NewlyBound>,
+    replaced: Query<(Entity, &Avatar, &ChildOf), With<Replaced>>,
+) {
+    for (avatar, view, mut visibility) in &mut bound {
+        *visibility = Visibility::Inherited;
+        for (old, old_avatar, old_view) in &replaced {
+            if old_view.parent() == view.parent() && old_avatar.id == avatar.id {
+                commands.entity(old).despawn();
+            }
+        }
+    }
+}
+
+fn character_path(character: &str) -> String {
+    if character.contains('/') {
+        character.to_string()
+    } else {
+        format!("/models/characters/{character}.glb")
     }
 }
 
@@ -386,6 +594,44 @@ fn tag_targets(
     path.pop();
 }
 
+/// The locomotion tier to remember, and the state and time scale to play:
+/// the player's `animation` when it has one, else its motion's.
+fn choose_clip(
+    previous: Motion,
+    p: &PlayerRender,
+    players: &Players,
+) -> (Motion, AnimationState, f32) {
+    if let Some(PlayerAnimation { state, speed }) = p.animation {
+        return (previous, state, speed);
+    }
+    let (walk, run) = (players.player_speed, players.run_speed);
+    let motion = next_motion(previous, p.vel, p.airborne, walk, run);
+    (motion, motion.into(), anim_scale(motion, p.vel, walk, run))
+}
+
+/// Fades to `state`'s clip when it isn't what's `playing`, looping it unless
+/// it is a one-shot, which then holds its last frame.
+fn play(
+    player: &mut AnimationPlayer,
+    transitions: &mut AnimationTransitions,
+    nodes: &[AnimationNodeIndex; 8],
+    playing: &mut AnimationState,
+    state: AnimationState,
+    speed: f32,
+) {
+    let node = nodes[state as usize];
+    if state != *playing || !player.is_playing_animation(node) {
+        *playing = state;
+        let active = transitions.play(player, node, FADE);
+        if state.loops() {
+            active.repeat();
+        }
+    }
+    if let Some(active) = player.animation_mut(node) {
+        active.set_speed(speed);
+    }
+}
+
 fn animate(
     views: Query<&ViewPlayers>,
     clips: Res<Clips>,
@@ -408,26 +654,16 @@ fn animate(
         let Some(Ok((mut player, mut transitions))) = avatar.rig.map(|r| rigs.get_mut(r)) else {
             continue;
         };
-        let motion = next_motion(
-            avatar.motion,
-            p.vel,
-            p.airborne,
-            players.player_speed,
-            players.run_speed,
+        let (motion, state, speed) = choose_clip(avatar.motion, p, &players.0);
+        avatar.motion = motion;
+        play(
+            &mut player,
+            &mut transitions,
+            nodes,
+            &mut avatar.playing,
+            state,
+            speed,
         );
-        let node = nodes[motion as usize];
-        if motion != avatar.motion || !player.is_playing_animation(node) {
-            avatar.motion = motion;
-            transitions.play(&mut player, node, FADE).repeat();
-        }
-        if let Some(active) = player.animation_mut(node) {
-            active.set_speed(anim_scale(
-                motion,
-                p.vel,
-                players.player_speed,
-                players.run_speed,
-            ));
-        }
     }
 }
 
@@ -459,6 +695,8 @@ fn show_tags(
 
 #[cfg(test)]
 mod tests {
+    use bevy::animation::RepeatAnimation;
+
     use super::*;
 
     fn step(previous: Motion, speed: f32) -> Motion {
@@ -482,5 +720,170 @@ mod tests {
     fn airborne_overrides_speed() {
         let m = next_motion(Motion::Running, Vec3::new(6.0, 0.0, 0.0), true, 3.0, 6.0);
         assert_eq!(m, Motion::Jumping);
+    }
+
+    fn player(vel: Vec3, animation: Option<PlayerAnimation>) -> PlayerRender {
+        PlayerRender {
+            id: "p".into(),
+            character: "Barbarian".into(),
+            pos: Vec3::ZERO,
+            yaw: 0.0,
+            vel,
+            name: String::new(),
+            airborne: false,
+            animation,
+        }
+    }
+
+    #[test]
+    fn an_animation_plays_its_state_at_its_speed_and_leaves_the_tier_alone() {
+        let shoot = PlayerAnimation {
+            state: AnimationState::Shooting,
+            speed: 0.5,
+        };
+        let p = player(Vec3::new(6.0, 0.0, 0.0), Some(shoot));
+        let chosen = choose_clip(Motion::Walking, &p, &Players::default());
+        assert_eq!(chosen, (Motion::Walking, AnimationState::Shooting, 0.5));
+    }
+
+    #[test]
+    fn without_an_animation_the_velocity_picks_the_clip_as_before() {
+        let p = player(Vec3::new(3.0, 0.0, 0.0), None);
+        let chosen = choose_clip(Motion::Idle, &p, &Players::default());
+        assert_eq!(chosen, (Motion::Walking, AnimationState::Walking, 1.0));
+    }
+
+    #[test]
+    fn missing_clips_play_idle_and_sitting_plays_the_sit_pose() {
+        let rigs = |name: &str| {
+            ["Idle_A", "Walking_C", "Hit_A"]
+                .contains(&name)
+                .then(|| name.to_string())
+        };
+        let clips = state_clips(rigs, "sit".to_string()).unwrap();
+        let of = |s: AnimationState| clips[s as usize].as_str();
+        assert_eq!(of(AnimationState::Walking), "Walking_C");
+        assert_eq!(of(AnimationState::Hit), "Hit_A");
+        assert_eq!(of(AnimationState::Shooting), "Idle_A");
+        assert_eq!(of(AnimationState::Sitting), "sit");
+        assert!(state_clips(|_| None::<String>, "sit".into()).is_none());
+    }
+
+    #[test]
+    fn one_shots_play_once_and_hold_and_loops_repeat() {
+        let mut graph = AnimationGraph::new();
+        let nodes: [AnimationNodeIndex; 8] =
+            std::array::from_fn(|_| graph.add_clip(Handle::default(), 1.0, graph.root));
+        let mut player = AnimationPlayer::default();
+        let mut transitions = AnimationTransitions::new();
+        let mut playing = AnimationState::Idle;
+        let mut play_state = |player: &mut AnimationPlayer, state| {
+            play(player, &mut transitions, &nodes, &mut playing, state, 2.0);
+            *player.animation(nodes[state as usize]).unwrap()
+        };
+
+        let idle = play_state(&mut player, AnimationState::Idle);
+        assert_eq!(idle.repeat_mode(), RepeatAnimation::Forever);
+        let shot = play_state(&mut player, AnimationState::Shooting);
+        assert_eq!(shot.repeat_mode(), RepeatAnimation::Never);
+        assert_eq!(shot.speed(), 2.0);
+
+        // Finished, it stays in the player at its end rather than restarting.
+        player
+            .animation_mut(nodes[AnimationState::Shooting as usize])
+            .unwrap()
+            .seek_to(1.0);
+        let held = play_state(&mut player, AnimationState::Shooting);
+        assert_eq!(held.seek_time(), 1.0);
+    }
+
+    #[test]
+    fn the_sit_pose_holds_every_rig_bone() {
+        let mut nodes = Assets::<GltfNode>::default();
+        let node = |name: &str, children| GltfNode {
+            index: 0,
+            name: name.into(),
+            children,
+            mesh: None,
+            skin: None,
+            transform: Transform::from_xyz(0.0, 0.5, 0.0),
+            is_animation_root: false,
+            extras: None,
+        };
+        let leg = nodes.add(node("upperleg.l", vec![]));
+        let hips = nodes.add(node("hips", vec![leg]));
+        let rig = node(RIG_ROOT, vec![hips]);
+        let clip = sit_pose_clip(&rig, &nodes);
+
+        let target = |path: &[&str]| {
+            AnimationTargetId::from_names(
+                path.iter()
+                    .map(|n| Name::new(n.to_string()))
+                    .collect::<Vec<_>>()
+                    .iter(),
+            )
+        };
+        for path in [
+            &[RIG_ROOT][..],
+            &[RIG_ROOT, "hips"],
+            &[RIG_ROOT, "hips", "upperleg.l"],
+        ] {
+            assert_eq!(
+                clip.curves_for_target(target(path)).map(Vec::len),
+                Some(3),
+                "{path:?}"
+            );
+        }
+        assert_eq!(clip.duration(), 1.0);
+    }
+
+    #[test]
+    fn a_changed_character_keeps_the_old_model_until_the_new_one_binds() {
+        use crate::views::{ViewHub, ViewKind, ViewMsg, ViewTarget};
+        let mut app = crate::tests::bare_app();
+        app.init_asset::<WorldAsset>().add_systems(
+            Update,
+            (sync_avatars, retire_replaced)
+                .chain()
+                .after(crate::views::mirror_resources),
+        );
+        let hub = app.world().resource::<ViewHub>().clone();
+        let id = hub.create(ViewKind::Preview, |_| ViewTarget::Window("#c".into()));
+        let as_character = |character: &str| Players {
+            players: vec![PlayerRender {
+                character: character.into(),
+                ..player(Vec3::ZERO, None)
+            }],
+            ..default()
+        };
+        let avatars = |app: &mut App| {
+            let mut q = app
+                .world_mut()
+                .query::<(Entity, &Avatar, &Visibility, Has<Replaced>)>();
+            let mut all: Vec<_> = q
+                .iter(app.world())
+                .map(|(e, a, v, r)| (e, a.character.clone(), *v, r))
+                .collect();
+            all.sort_by(|a, b| a.1.cmp(&b.1));
+            all
+        };
+
+        hub.send(id, ViewMsg::Players(as_character("Barbarian")));
+        app.update();
+        let (old, ..) = avatars(&mut app)[0];
+        app.world_mut().entity_mut(old).insert(Bound);
+        hub.send(id, ViewMsg::Players(as_character("Knight")));
+        app.update();
+        let both = avatars(&mut app);
+        assert_eq!(both.len(), 2);
+        assert!(both[0].3, "the Barbarian is replaced but kept");
+        assert_eq!(both[1].2, Visibility::Hidden, "the Knight waits hidden");
+
+        let new = both[1].0;
+        app.world_mut().entity_mut(new).insert(Bound);
+        app.update();
+        let left = avatars(&mut app);
+        assert_eq!(left.len(), 1);
+        assert_eq!((left[0].0, left[0].2), (new, Visibility::Inherited));
     }
 }

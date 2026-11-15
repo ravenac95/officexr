@@ -3,6 +3,8 @@
 //! back as the view's follow target.
 
 mod page_input;
+#[cfg(feature = "webgl2")]
+pub(super) mod view_pointer;
 
 use std::sync::OnceLock;
 
@@ -22,6 +24,8 @@ static HUB: OnceLock<ControlsHub> = OnceLock::new();
 pub(super) fn add(app: &mut App) {
     app.add_plugins(ControlsPlugin);
     page_input::add(app);
+    #[cfg(feature = "webgl2")]
+    view_pointer::add(app);
     let _ = HUB.set(app.world().resource::<ControlsHub>().clone());
 }
 
@@ -155,6 +159,13 @@ pub fn frame_bounds(id: ViewId, aabb: JsValue) -> Result<(), JsError> {
 #[wasm_bindgen(js_name = setInputEnabled)]
 pub fn set_input_enabled(id: ViewId, enabled: bool) -> Result<(), JsError> {
     with(id, |c| c.input_enabled = enabled)
+}
+
+/// Off while a text field beside the view has focus: keys are ignored, but
+/// drags and the wheel still move the camera.
+#[wasm_bindgen(js_name = setKeysEnabled)]
+pub fn set_keys_enabled(id: ViewId, enabled: bool) -> Result<(), JsError> {
+    with(id, |c| c.keys_enabled = enabled)
 }
 
 /// The host's on-screen stick `[x, y]`: `x` strafe (right +), `y` forward (+), within the unit

@@ -83,7 +83,7 @@ function PreviewHud({ kind }: { kind: string | null }) {
         whiteSpace: 'pre-line',
       }}
     >
-      {kind ? `Kind: ${kind}\nright-drag rotate · scroll zoom` : 'No kind selected'}
+      {kind ? `Kind: ${kind}\ndrag to rotate · scroll to zoom` : 'No kind selected'}
     </div>
   );
 }
