@@ -134,6 +134,18 @@ async function voiceZoneOverlay(page: Page, canvas: Locator) {
   };
 }
 
+/** On a failed Move check: the editor's picks, inst-a's row and the overlay centroids, in the report and the job log. */
+async function attachMoveEvidence(page: Page, centroids: Record<string, unknown>) {
+  const evidence = {
+    ...centroids,
+    instARow: await page.getByTestId('room-row-inst-a').innerText(),
+    picks: await page.evaluate(() => (globalThis as { __OFFICEXR_TEST_API__?: { mapPicks: unknown[] } }).__OFFICEXR_TEST_API__?.mapPicks ?? null),
+  };
+  const body = JSON.stringify(evidence, null, 2);
+  console.log(`[map-editor move evidence] ${body}`);
+  await test.info().attach('map-editor-move-evidence', { body, contentType: 'text/plain' });
+}
+
 test('hermetic mode loads the seeded map and exposes the explicit tool model', async ({ page }) => {
   await openMap(page);
   await expect(page.getByText(/Placed rooms \(3\)/)).toBeVisible({ timeout: 8_000 });
@@ -151,40 +163,55 @@ test('voice zone toggle previews the footprint, follows rotate and move, and sur
   const zoneSwitch = (id: string) =>
     page.getByTestId(`room-row-${id}`).getByRole('switch', { name: 'Voice zone' });
   const overlay = () => voiceZoneOverlay(page, canvas);
+  const row = (id: string) => page.getByTestId(`room-row-${id}`);
+  // Each edit is first confirmed in its DOM row; this then bounds only the overlay's redraw. On
+  // CI's software GL the editor runs near 1 fps and each overlay sample takes a screenshot, so 5 s
+  // covered only a few frames (a captured run: drag events 1.1 s apart, the move landed, the poll
+  // timed out with the overlay already 52 px over).
+  const redraw = { timeout: 30_000 };
 
   await expect(page.getByText(/Placed rooms \(3\)/)).toBeVisible();
   expect((await overlay()).count).toBe(0);
 
   // Baked room: its geometry only exists in the layout.
   await zoneSwitch('inst-c').click();
-  await expect.poll(async () => (await overlay()).count).toBeGreaterThan(200);
+  await expect.poll(async () => (await overlay()).count, redraw).toBeGreaterThan(200);
   const placed = await overlay();
 
-  await page.getByTestId('room-row-inst-c').getByTitle('Rotate 90°').click();
+  const rotationBefore = await row('inst-c').innerText();
+  await row('inst-c').getByTitle('Rotate 90°').click();
+  await expect(row('inst-c')).not.toHaveText(rotationBefore);
   await expect
     .poll(async () => {
       const o = await overlay();
       return Math.hypot(o.x - placed.x, o.y - placed.y);
-    })
+    }, redraw)
     .toBeGreaterThan(12);
 
   // Move a placement with the Move tool; its overlay goes along.
   await zoneSwitch('inst-c').click();
-  await expect.poll(async () => (await overlay()).count).toBe(0);
+  await expect.poll(async () => (await overlay()).count, redraw).toBe(0);
   await zoneSwitch('inst-a').click();
-  await expect.poll(async () => (await overlay()).count).toBeGreaterThan(100);
+  await expect.poll(async () => (await overlay()).count, redraw).toBeGreaterThan(100);
   const before = await overlay();
+  const positionBefore = await row('inst-a').innerText();
   await page.getByRole('button', { name: 'Move', exact: true }).click();
   await page.mouse.move(before.x, before.y);
   await page.mouse.down();
   await page.mouse.move(before.x + 60, before.y + 30, { steps: 10 });
   await page.mouse.up();
-  await expect
-    .poll(async () => {
-      const o = await overlay();
-      return Math.hypot(o.x - before.x, o.y - before.y);
-    })
-    .toBeGreaterThan(20);
+  try {
+    await expect(row('inst-a')).not.toHaveText(positionBefore, redraw);
+    await expect
+      .poll(async () => {
+        const o = await overlay();
+        return Math.hypot(o.x - before.x, o.y - before.y);
+      }, redraw)
+      .toBeGreaterThan(20);
+  } catch (error) {
+    await attachMoveEvidence(page, { before, after: await overlay() });
+    throw error;
+  }
 
   await page.locator('select').selectOption('other');
   await expect(page.getByText(/Placed rooms \(0\)/)).toBeVisible();
@@ -192,7 +219,7 @@ test('voice zone toggle previews the footprint, follows rotate and move, and sur
   await expect(page.getByText(/Placed rooms \(3\)/)).toBeVisible();
   await expect(zoneSwitch('inst-a')).toBeChecked();
   await expect(zoneSwitch('inst-c')).not.toBeChecked();
-  await expect.poll(async () => (await overlay()).count).toBeGreaterThan(100);
+  await expect.poll(async () => (await overlay()).count, redraw).toBeGreaterThan(100);
 });
 
 test('the Spawn tool drops a spawn on a room, and the Desk area tool draws an area', async ({ page }) => {
