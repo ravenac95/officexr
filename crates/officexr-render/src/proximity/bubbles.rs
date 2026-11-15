@@ -1,6 +1,7 @@
 //! `BubbleParticles.tsx`: soft bubbles rising in a ring around each
 //! approaching player's disc and each meeting area's rim, wrapping back to
-//! the floor at the float height.
+//! the floor at the float height. They rise from the feet their disc lies
+//! at, where three.js starts them at the body root.
 
 use std::collections::HashMap;
 use std::f32::consts::TAU;
@@ -12,7 +13,8 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 
 use super::{GlowMaterial, Glows, ViewProximity};
-use crate::views::View;
+use crate::camera_transform;
+use crate::views::ViewCamera;
 
 /// Bubbles per player or area.
 const COUNT: usize = 120;
@@ -121,11 +123,16 @@ pub(crate) fn sync_bubbles(
     time: Res<Time>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<GlowMaterial>>,
-    mut views: Query<(Entity, &View, &ViewProximity, &Glows, Option<&mut Bubbles>)>,
-    cameras: Query<(&GlobalTransform, &Projection)>,
+    mut views: Query<(
+        Entity,
+        &ViewCamera,
+        &ViewProximity,
+        &Glows,
+        Option<&mut Bubbles>,
+    )>,
 ) {
     let t = time.elapsed_secs_f64();
-    for (view, v, proximity, glows, bubbles) in &mut views {
+    for (view, camera, proximity, glows, bubbles) in &mut views {
         let mut fresh = Bubbles::default();
         let bubbles = match bubbles {
             Some(b) => b.into_inner(),
@@ -172,15 +179,12 @@ pub(crate) fn sync_bubbles(
             }
             kept
         });
-        let Some((camera, projection)) = v.camera.and_then(|c| cameras.get(c).ok()) else {
-            continue;
-        };
-        let tan_half_fov = match projection {
-            Projection::Perspective(p) => (p.fov / 2.0).tan(),
-            _ => 1.0,
-        };
+        // This frame's pose: the controls set it before the scene systems
+        // run, and the camera entity only takes it in `PostUpdate`.
+        let pose = camera_transform(camera);
+        let tan_half_fov = (camera.fov_deg.to_radians() / 2.0).tan();
         let half = POINT_SIZE * style.sparkle_size * tan_half_fov / 2.0;
-        let (right, up) = (camera.right() * half, camera.up() * half);
+        let (right, up) = (pose.right() * half, pose.up() * half);
         let corners = [-right + up, right + up, right - up, -right - up];
 
         for (key, ring) in &rings {
@@ -206,11 +210,12 @@ pub(crate) fn sync_bubbles(
                 }
             });
             let color = (ring.color.to_linear() * OPACITY).with_alpha(OPACITY);
-            if materials
-                .get(&emitter.material)
-                .is_some_and(|m| m.color != color)
+            // Only on a change, so the material isn't re-uploaded every frame.
+            if let Some(material) = materials.get(&emitter.material)
+                && material.color != color
+                && let Some(mut material) = materials.get_mut(&emitter.material)
             {
-                materials.get_mut(&emitter.material).unwrap().color = color;
+                material.color = color;
             }
             let Some(mut mesh) = meshes.get_mut(&emitter.mesh) else {
                 continue;
@@ -225,7 +230,7 @@ pub(crate) fn sync_bubbles(
                     let r = ring.inner + s.radial * band;
                     let rise =
                         f64::from(s.y) + t * f64::from(s.speed * style.sparkle_speed) * RISE_RATE;
-                    let y = rise.fract() as f32 * style.sparkle_float_height;
+                    let y = rise.rem_euclid(1.0) as f32 * style.sparkle_float_height;
                     let at = ring.center + Vec3::new(angle.cos() * r, y, angle.sin() * r);
                     corners.map(|c| (at + c).to_array())
                 })
@@ -383,5 +388,43 @@ mod tests {
             .world_mut()
             .query_filtered::<(), (With<NoFrustumCulling>, With<MeshMaterial3d<GlowMaterial>>)>();
         assert_eq!(emitters.iter(app.world()).count(), 0);
+    }
+
+    #[test]
+    fn bubbles_rise_on_camera_facing_quads_the_size_of_three_js_points() {
+        let (mut app, id) = app();
+        set(&mut app, id, json!({"bubbles": ["a"]}));
+        let before = rings(&mut app, id).remove("player:a").unwrap();
+        app.update();
+        let after = rings(&mut app, id).remove("player:a").unwrap();
+        let risen = before.iter().zip(&after).filter(|(b, a)| a.y > b.y).count();
+        // All but the few that wrapped back to the floor.
+        assert!(risen > COUNT * 9 / 10, "{risen} of {COUNT} rose");
+
+        let view = find_view(app.world_mut(), id).unwrap();
+        let emitter = &app.world().get::<Bubbles>(view).unwrap().0["player:a"];
+        let mesh = app
+            .world()
+            .resource::<Assets<Mesh>>()
+            .get(&emitter.mesh)
+            .unwrap();
+        let quad: Vec<Vec3> = mesh
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .unwrap()
+            .as_float3()
+            .unwrap()[..4]
+            .iter()
+            .map(|&c| Vec3::from(c))
+            .collect();
+        let pose = camera(0.0);
+        let forward = (Vec3::from(pose.look_at) - Vec3::from(pose.position)).normalize();
+        let side = POINT_SIZE * (pose.fov_deg.to_radians() / 2.0).tan();
+        for edge in [quad[1] - quad[0], quad[2] - quad[1]] {
+            assert!(
+                edge.dot(forward).abs() < 1e-4,
+                "{edge} doesn't face the camera"
+            );
+            assert!((edge.length() - side).abs() < 1e-4, "{edge} isn't {side} m");
+        }
     }
 }
