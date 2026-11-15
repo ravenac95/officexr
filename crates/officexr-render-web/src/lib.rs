@@ -31,6 +31,7 @@ use officexr_render::{
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
+mod blob_assets;
 mod controls;
 mod overlays;
 mod picking;
@@ -164,6 +165,7 @@ pub fn init(origin: String, primary_canvas: JsValue) -> Result<(), JsError> {
     };
     let mut app = App::new();
     app.add_plugins((
+        blob_assets::plugin,
         AssetBase::Http(origin),
         DefaultPlugins
             .set(WindowPlugin {
