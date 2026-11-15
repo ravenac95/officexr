@@ -6,6 +6,8 @@ import type { TopDownPlayViewProps } from '@officexr/world/top-down';
 import { Switch } from '../hud/ui/Switch';
 import { CameraModeControl } from './CameraModeControl';
 import { CharacterAction, CharacterPane } from './CharacterPane';
+import { DebugFps, type DebugFpsSample } from './DebugFps';
+import { debugFpsEnabled } from './debugFpsFlag';
 import { storedJoystickKind, storeJoystickKind } from './joystickKind';
 import { MotionLookControl } from './MotionLookControl';
 import type { SettingsAction, SettingsTab } from './Settings';
@@ -32,6 +34,8 @@ export default function PlayView3d({
   const [motionUnsupported, setMotionUnsupported] = useState(false);
   const [invertLook, setInvertLook] = useState(false);
   const [joystickKind, setJoystickKind] = useState(() => storedJoystickKind());
+  const [showFps] = useState(() => debugFpsEnabled(window.location.search, safeLocalStorage()));
+  const [fps, setFps] = useState<DebugFpsSample | null>(null);
 
   const controls = (
     <>
@@ -75,6 +79,7 @@ export default function PlayView3d({
       joystickKind={joystickKind}
       hud="player"
       sim={simFromSearch(window.location.search)}
+      onFrameStats={showFps ? setFps : undefined}
     >
       <SettingsModal
         title={viewProps.title}
@@ -85,6 +90,16 @@ export default function PlayView3d({
         actions={[...settings.actions, ...actions]}
       />
       {children}
+      {showFps && <DebugFps sample={fps} />}
     </PlayView>
   );
+}
+
+/** `localStorage`, or undefined where reading it throws (a sandboxed frame). */
+function safeLocalStorage(): Storage | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
 }
