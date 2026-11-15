@@ -16,6 +16,8 @@ import {
 } from '@officexr/world/react';
 import type { DeskArea, LayoutDocument, RoomDocument, SerializedMap } from '@officexr/world/scenes';
 import { publishFrameStats } from '../../perf/frame-stats.ts';
+import { testApi } from '../../test-harness/pageTestApi.ts';
+import { useTestStorages } from '../../test-harness/TestStorageContext.tsx';
 import { studioBakedLayoutUrl } from '../bakedLayoutUrl.ts';
 import { useBakedLayoutBlobs } from '../useBakedLayoutBlobs.ts';
 import { reduceDeskAreaDrag, type DeskAreaDrag } from './deskAreaDrag.ts';
@@ -30,6 +32,8 @@ import { roomPlacements } from './roomPlacements.ts';
 import type { MapSelection } from './useMapDocument.ts';
 
 type Vec3 = [number, number, number];
+
+const LOGGED_PICKS: ReadonlySet<PickEvent['kind']> = new Set(['down', 'dragStart', 'drag', 'up', 'dragEnd']);
 
 /** Room-to-room boundary snap during a Move drag; see `roomBoundarySnap.ts`. */
 const ROOM_SNAP_THRESHOLD_VOXELS = 2;
@@ -173,7 +177,12 @@ export function MapEditorCanvas(props: MapEditorCanvasProps) {
 
   /** The room being moved, and the press's floor offset from its anchor. */
   const roomDrag = useRef<{ id: string; offset: { x: number; z: number } } | null>(null);
+  // Only the hermetic test mode records picks, for the Playwright spec to read on a failure.
+  const pickLog = useTestStorages() ? testApi().mapPicks : null;
   const handlePick = useEffectEvent((e: PickEvent) => {
+    if (pickLog && LOGGED_PICKS.has(e.kind)) {
+      pickLog.push({ kind: e.kind, target: e.target, tool, dragging: roomDrag.current?.id ?? null, t: Math.round(performance.now()) });
+    }
     if (!bevy || e.button !== 0) return;
     if (e.kind === 'up' || e.kind === 'dragEnd') {
       roomDrag.current = null;
