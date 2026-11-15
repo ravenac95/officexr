@@ -94,10 +94,10 @@ impl CameraProjection for XrProjection {
         1000.0
     }
     fn get_frustum_corners(&self, z_near: f32, z_far: f32) -> [Vec3A; 8] {
-        let right = (1.0 - self.p20) / self.p00;
-        let left = (-1.0 - self.p20) / self.p00;
-        let top = (1.0 - self.p21) / self.p11;
-        let bottom = (-1.0 - self.p21) / self.p11;
+        let right = (1.0 + self.p20) / self.p00;
+        let left = (-1.0 + self.p20) / self.p00;
+        let top = (1.0 + self.p21) / self.p11;
+        let bottom = (-1.0 + self.p21) / self.p11;
         let at = |z: f32, x: f32, y: f32| Vec3A::new(x * z.abs(), y * z.abs(), z);
         [
             at(z_near, right, bottom),
