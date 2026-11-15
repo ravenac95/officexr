@@ -365,6 +365,7 @@ mod tests {
                 vel: Vec3::ZERO,
                 name: String::new(),
                 airborne: false,
+                ..default()
             })
             .collect();
         hub.send(
