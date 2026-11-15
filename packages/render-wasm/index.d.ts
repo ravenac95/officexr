@@ -235,9 +235,10 @@ export interface RendererModule {
    * Sends `callback` the view's pick events, from pointer events on its canvas, replacing any callback
    * it had; `null` stops them. A view without a callback does no picking. A throwing callback is logged
    * with `console.error` and the frame's other events are still delivered. Throws for a destroyed view.
-   * A left press on any target but the ground doesn't take the controls' pointer lock.
+   * A left press on any target but the ground doesn't take the controls' pointer lock,
+   * unless `bellClaimsOnly`: then only a press on a ping bell doesn't.
    */
-  onPick(id: ViewId, callback: ((event: PickEvent) => void) | null): void;
+  onPick(id: ViewId, callback: ((event: PickEvent) => void) | null, options?: { bellClaimsOnly?: boolean }): void;
   /**
    * The view camera's ray through `(x, y)`, in CSS pixels from its canvas's top left, from the pose last
    * drawn (the controls' when they drive it) or a `setCamera` since.

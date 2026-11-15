@@ -295,6 +295,11 @@ export class RoomFrame {
     const { selfId } = this.deps;
     const { sim, cameraMode } = this.options;
     const ws = state.worldSettings;
+    for (const id of this.bumps.keys()) {
+      if (!(id in state.players)) {
+        this.bumps.delete(id);
+      }
+    }
     const players = Object.values(state.players)
       .filter((p) => p.id !== selfId || cameraMode !== 'first-person')
       .map((p): PlayerInput => {

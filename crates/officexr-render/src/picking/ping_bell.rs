@@ -1,6 +1,14 @@
 //! The hover ping bell: a [`PingBell`] label shows over a named player the
 //! pointer hovers, and a click on it reports [`PickTarget::PingBell`].
+//!
+// OCP/SRP bend: the bell hit-tests its own rect and keeps its own press state
+// instead of being a pick target like the rest. Bevy's UI picking backend
+// needs a pointer whose `Location` targets a camera's render target, and the
+// view pointers (`feed_pointers`) deliberately target none. Giving them a
+// real target, and enabling `bevy/ui_picking`, would let `forward` report the
+// bell and this module go.
 
+use bevy::picking::PickingSystems;
 use bevy::picking::hover::HoverMap;
 use bevy::picking::pointer::{PointerAction, PointerButton, PointerId, PointerInput, PointerMap};
 use bevy::prelude::*;
@@ -15,7 +23,8 @@ use crate::world_label::{self, LabelOf, WorldLabel};
 const LINGER_S: f32 = 0.4;
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(Update, (show_bells, click_bells).chain());
+    app.add_systems(Update, show_bells)
+        .add_systems(PreUpdate, click_bells.after(PickingSystems::Hover));
 }
 
 /// A bell is shown while its player, or the bell itself, is hovered, and a moment after.
@@ -115,6 +124,7 @@ fn click_bells(
                         view: state.view,
                         button,
                     });
+                    break;
                 }
                 PointerAction::Release(_) => {
                     let click = std::mem::take(&mut bell.armed) && on_bell;

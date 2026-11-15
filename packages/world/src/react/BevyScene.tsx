@@ -278,7 +278,7 @@ export function BevyScene(props: BevySceneProps) {
       return;
     }
     const { wasm, view } = bevy;
-    wasm.onPick(view, pingBellPicks(view, onPing));
+    wasm.onPick(view, pingBellPicks(view, onPing), { bellClaimsOnly: true });
     const room = new RoomFrame(
       {
         store,

@@ -125,15 +125,28 @@ fn size(canvas: &Canvas) -> Vec2 {
     Vec2::new(canvas.css_width() as f32, canvas.css_height() as f32)
 }
 
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct PickOptions {
+    #[serde(default)]
+    bell_claims_only: bool,
+}
+
 /// Sends `callback` the view's pick events, replacing any it had; `null` stops them.
 #[wasm_bindgen(js_name = onPick)]
-pub fn on_pick(id: ViewId, callback: JsValue) -> Result<(), JsError> {
+pub fn on_pick(id: ViewId, callback: JsValue, options: JsValue) -> Result<(), JsError> {
     unsubscribe(id);
     if callback.is_null() || callback.is_undefined() {
         return Ok(());
     }
-    let canvas = view_canvas(id)?;
+    let options: PickOptions = if options.is_undefined() {
+        PickOptions::default()
+    } else {
+        serde_wasm_bindgen::from_value(options).map_err(js_err)?
+    };
     let picks = PICKS.get().ok_or_else(|| js_err("call init first"))?;
+    picks.claim_only_bells(id, options.bell_claims_only);
+    let canvas = view_canvas(id)?;
     let listener = |action: fn(&PointerEvent) -> Option<PointerMsgAction>| {
         let canvas: Canvas = JsValue::clone(&canvas).unchecked_into();
         let picks = picks.clone();
@@ -205,6 +218,9 @@ fn button(e: &PointerEvent) -> Option<PointerButton> {
 }
 
 fn unsubscribe(id: ViewId) {
+    if let Some(picks) = PICKS.get() {
+        picks.claim_only_bells(id, false);
+    }
     let Some(gone) = SUBSCRIPTIONS.with(|s| s.borrow_mut().remove(&id)) else {
         return;
     };

@@ -115,6 +115,7 @@ impl Plugin for OfficeXrRenderPlugin {
         embedded_asset!(app, "sky.wesl");
         embedded_asset!(app, "overlay.wesl");
         embedded_asset!(app, "grid.wesl");
+        embedded_asset!(app, "bell.png");
         app.add_plugins((
             MaterialPlugin::<ObjectMaterial>::default(),
             MaterialPlugin::<SkyMaterial>::default(),

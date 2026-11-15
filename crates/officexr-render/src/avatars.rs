@@ -58,6 +58,7 @@ pub struct PlayerRender {
 }
 
 /// Where a seated player sits: the body root and yaw the seat puts them at.
+/// The web frame passes the player's own `pos` and `yaw`, which the seat already set.
 #[derive(Clone, Copy, Debug)]
 pub struct Seat {
     pub pos: Vec3,
@@ -534,9 +535,10 @@ fn sync_view_avatars(
         ));
         commands.spawn((
             PingBell::default(),
-            world_label::label(
-                "Ping".into(),
-                14.0,
+            world_label::icon_badge(
+                assets.load("embedded://officexr_render/bell.png"),
+                28.0,
+                16.0,
                 Color::srgb(0.07, 0.07, 0.07),
                 avatar,
                 Vec3::Y * BELL_HEIGHT_M,
@@ -746,6 +748,10 @@ fn animate(
                 AnimationState::Hit,
                 HIT_SPEED,
             );
+            // A bump during a reaction starts it over, as Adventurer.tsx does.
+            if let Some(active) = player.animation_mut(hit) {
+                active.replay();
+            }
         }
         // A bump's reaction plays over the loop, which resumes when it ends.
         let reacting = avatar.playing == AnimationState::Hit && p.animation.is_none();

@@ -26,6 +26,7 @@ use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::time::TimeUpdateStrategy;
 use bevy::winit::WinitPlugin;
 use officexr_render::overlays::{Overlay, ViewOverlays};
+use officexr_render::picking::{Modifiers, PickHub, PointerMsg, PointerMsgAction};
 use officexr_render::placement::VOXEL_SIZE;
 use officexr_render::views::View;
 use officexr_render::{
@@ -65,6 +66,8 @@ struct Scenario {
     /// Sim frames to save from every camera.
     captures: Vec<usize>,
     assert: Vec<Assertion>,
+    /// A pointer resting here (pixels from the top left) from the first step, hovering what's under it.
+    hover: Option<[f32; 2]>,
     /// As `setOverlays` takes them; their ghosts' kinds join the scene's.
     #[serde(default)]
     overlays: Vec<Value>,
@@ -161,6 +164,7 @@ struct Step {
 
 #[derive(Resource)]
 struct Timeline {
+    hover: Option<(Vec2, Vec2)>,
     frames: Vec<Vec<PlayerRender>>,
     steps: Vec<Step>,
     cameras: Vec<CameraPose>,
@@ -407,6 +411,8 @@ fn drive(
     target: Res<OffscreenTarget>,
     mut time_step: ResMut<TimeUpdateStrategy>,
     mut exit: MessageWriter<AppExit>,
+    hub: Res<PickHub>,
+    view_ids: Query<&View>,
 ) {
     let t = &mut *timeline;
     if t.ready_for < READY_FRAMES {
@@ -443,6 +449,19 @@ fn drive(
         }
         return;
     };
+    if let (Some((screen, size)), Some(view)) = (t.hover, view_ids.iter().next()) {
+        let modifiers = Modifiers::default();
+        let action = PointerMsgAction::Move;
+        hub.pointer(
+            view.id,
+            PointerMsg {
+                action,
+                screen,
+                size,
+                modifiers,
+            },
+        );
+    }
     players.players.clone_from(&t.frames[step.frame]);
     *camera = scene_camera(&t.cameras[step.camera]);
     if !step.files.is_empty() {
@@ -500,6 +519,9 @@ fn render(
             ..players
         })
         .insert_resource(Timeline {
+            hover: scenario
+                .hover
+                .map(|p| (Vec2::from(p), Vec2::new(w as f32, h as f32))),
             frames,
             steps,
             cameras: scenario.cameras.clone(),
