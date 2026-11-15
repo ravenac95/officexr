@@ -2,7 +2,7 @@
 
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { forceWebgl2, goToDebugWithMap, waitForBevyReady } from './helpers.ts';
+import { forceWebgl2, goToDebugWithMap, pageErrors, waitForBevyReady } from './helpers.ts';
 
 const SELF_ID = 'local-player';
 
@@ -22,10 +22,11 @@ const selfPos = (page: Page): Promise<Pos | null> =>
 test('sim=rust: the local player walks under keyboard input', async ({ page }) => {
   test.setTimeout(240_000);
   await forceWebgl2(page);
+  const errors = pageErrors(page);
   const wasmLoaded = page.waitForResponse((r) => /officexr_sim_wasm_bg.*\.wasm/.test(r.url()) && r.ok());
   await goToDebugWithMap(page, 'default', 'rust');
   await wasmLoaded;
-  await waitForBevyReady(page);
+  await waitForBevyReady(page, errors);
 
   const before = await selfPos(page);
   expect(before).not.toBeNull();

@@ -88,7 +88,7 @@ Non-hermetic Debug specs get the defaults: the dev server does not seed
 `world-settings.json` into its scratch data dir (`seed: false`), so a developer's
 gitignored `packages/world/world-settings.json` is never loaded.
 
-**CI** runs `pnpm test:e2e:ci`, which lists every spec under `tests/playwright/`.
+**CI** runs `pnpm test:e2e:ci`: every spec under `tests/playwright/`, in the chromium project.
 
 The previously-rotted specs are repaired:
 

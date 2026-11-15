@@ -5,7 +5,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { forceWebgl2, goToModeHermetic, waitForBevyReady } from './helpers.ts';
+import { forceWebgl2, goToModeHermetic, pageErrors, waitForBevyReady } from './helpers.ts';
 import { DEFAULT_WORLD_CONSTANTS, type WorldConstants } from '../../packages/sdk/src/index.ts';
 import { SAVE_DEBOUNCE_MS } from '../../packages/studio/src/panels/world/saveDebounce.ts';
 
@@ -66,8 +66,9 @@ test('seeded world constants show in the panels, drive the scene and save once p
   test.setTimeout(240_000);
 
   await forceWebgl2(page);
+  const errors = pageErrors(page);
   await goToModeHermetic(page, 'debug', { worldConstants: SEEDED });
-  await waitForBevyReady(page);
+  await waitForBevyReady(page, errors);
 
   await expect.poll(async () => (await storeConstants(page))?.animation.walkSpeed).toBe(4.25);
   await expect.poll(() => redFraction(page), { timeout: 60_000 }).toBeGreaterThan(0.05);

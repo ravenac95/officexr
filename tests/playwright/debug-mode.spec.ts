@@ -5,7 +5,7 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { forceWebgl2, goToDebugWithMap, waitForBevyReady } from './helpers.ts';
+import { forceWebgl2, goToDebugWithMap, pageErrors, waitForBevyReady } from './helpers.ts';
 
 const SELF_ID = 'local-player';
 
@@ -39,8 +39,9 @@ async function walkForward(page: Page): Promise<number> {
 test('Debug mode: the player walks, and stays put in free-fly', async ({ page }) => {
   test.setTimeout(240_000);
   await forceWebgl2(page);
+  const errors = pageErrors(page);
   await goToDebugWithMap(page, 'default');
-  await waitForBevyReady(page);
+  await waitForBevyReady(page, errors);
 
   const summary = await storeSummary(page);
   expect(summary.self, 'local player').not.toBeNull();
@@ -75,8 +76,9 @@ test('Map switch in Debug loads the new map and its baked layout', async ({ page
     }
   });
   await forceWebgl2(page);
+  const errors = pageErrors(page);
   await goToDebugWithMap(page, a);
-  await waitForBevyReady(page);
+  await waitForBevyReady(page, errors);
   expect((await storeSummary(page)).layoutCount, `map "${a}" layout instances`).toBeGreaterThan(0);
   const before = new Set(bakedFetches);
 

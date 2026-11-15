@@ -1,22 +1,24 @@
 /** `?op=bevy`: the studio boots `crates/officexr-render-web` on the current map. */
 
 import { test, expect, type Page } from '@playwright/test';
-import { canvasPixels, forceWebgl2, waitForBevyReady } from './helpers.ts';
+import { canvasPixels, forceWebgl2, pageErrors, waitForBevyReady } from './helpers.ts';
 
 test('op=bevy boots the Bevy renderer', async ({ page }) => {
   test.setTimeout(180_000);
   await forceWebgl2(page);
+  const errors = pageErrors(page);
   await page.goto('/?op=bevy');
   await expect(page.locator('#bevy-canvas')).toBeVisible();
-  await waitForBevyReady(page);
+  await waitForBevyReady(page, errors);
   expect(await page.evaluate(() => (window as { __officexrRenderBackend?: string }).__officexrRenderBackend)).toBe('webgl2');
 });
 
 test('op=bevy&views=2 draws two live canvases from one Bevy app', async ({ page }) => {
   test.setTimeout(540_000);
   await forceWebgl2(page);
+  const errors = pageErrors(page);
   await page.goto('/?op=bevy&views=2');
-  await waitForBevyReady(page, 230_000);
+  await waitForBevyReady(page, errors, 230_000);
   expect(await page.evaluate(() => (window as { __officexrBevyViews?: number[] }).__officexrBevyViews?.length)).toBe(2);
   // The right view is read back, a few slow SwiftShader frames after it reports ready.
   const pixels = async () => {
@@ -42,8 +44,9 @@ test('op=bevy&views=2 draws two live canvases from one Bevy app', async ({ page 
 test('op=bevy&pick=1 reports a click on the canvas centre', async ({ page }) => {
   test.setTimeout(240_000);
   await forceWebgl2(page);
+  const errors = pageErrors(page);
   await page.goto('/?op=bevy&pick=1');
-  await waitForBevyReady(page);
+  await waitForBevyReady(page, errors);
   // Read off the DOM: locator geometry waits on a compositor frame, too slow under SwiftShader.
   const box = await page.evaluate(() => document.querySelector('#bevy-canvas')!.getBoundingClientRect().toJSON() as DOMRect);
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);

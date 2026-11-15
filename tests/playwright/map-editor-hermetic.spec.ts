@@ -10,7 +10,7 @@
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
-import { forceWebgl2, goToModeHermetic, waitForBevyReady } from './helpers.ts';
+import { forceWebgl2, goToModeHermetic, pageErrors, waitForBevyReady } from './helpers.ts';
 
 const blueBlock = (id: string, position: number[]) => ({
   id,
@@ -101,8 +101,9 @@ test.setTimeout(240_000);
 /** The map editor on the seeded `default` map, once Bevy has loaded it. */
 async function openMap(page: Page): Promise<Locator> {
   await forceWebgl2(page);
+  const errors = pageErrors(page);
   await goToModeHermetic(page, 'map', SEED);
-  await waitForBevyReady(page);
+  await waitForBevyReady(page, errors);
   return page.locator('main canvas');
 }
 

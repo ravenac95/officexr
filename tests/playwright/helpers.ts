@@ -11,17 +11,27 @@ export async function forceWebgl2(page: Page) {
 }
 
 /**
- * Waits until the page's Bevy view has loaded every model (`__officexrBevyReady`), failing
- * fast on a page error such as a wasm panic. Boots slowly under SwiftShader, hence the long timeout.
+ * Rejects on the page's first uncaught error, such as a wasm panic. Call it before navigating, so
+ * an error while the page boots counts, and race it against a wait to fail fast.
  */
-export async function waitForBevyReady(page: Page, timeout = 170_000): Promise<void> {
-  const pageError = new Promise<never>((_, reject) => page.once('pageerror', reject));
+export function pageErrors(page: Page): Promise<never> {
+  const errors = new Promise<never>((_, reject) => page.once('pageerror', reject));
+  // Handled where it is raced; an error after the test's waits must not fail the run.
+  errors.catch(() => {});
+  return errors;
+}
+
+/**
+ * Waits until the page's Bevy view has loaded every model (`__officexrBevyReady`), failing as soon
+ * as `errors` (from {@link pageErrors}) does. Boots slowly under SwiftShader, hence the long timeout.
+ */
+export async function waitForBevyReady(page: Page, errors: Promise<never>, timeout = 170_000): Promise<void> {
   const ready = page.waitForFunction(
     () => (window as { __officexrBevyReady?: boolean }).__officexrBevyReady === true,
     null,
     { timeout },
   );
-  await Promise.race([ready, pageError]);
+  await Promise.race([ready, errors]);
 }
 
 export type Mode = 'map' | 'room' | 'layout' | 'object' | 'character' | 'debug' | 'mugshot' | 'sounds';
