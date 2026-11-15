@@ -13,11 +13,12 @@ import { useStoreWorldObjects } from '../renderer/useStoreWorldObjects.ts';
 import { excludeLayoutInstances } from '../scenes/compile-map.ts';
 import type { SimBakedColliders, SimCore } from '../sim/SimCore.ts';
 import { useApplication, useCatalog, useCatalogCharacters } from './application-context.tsx';
-import { bootBevy, playCanvas } from './bevyRenderer.ts';
+import { bakedLayoutGlbUrl } from './bevyRenderer.ts';
 import { FrameLoop } from './frameLoop.ts';
 import { frameStatsMeter } from './frameStatsMeter.ts';
 import { RoomFrame, type RoomView } from './roomFrame.ts';
 import { useCreateSim, type SimImplementation } from './useCreateSim.ts';
+import { setBevyReady, usePrimaryBevyView } from './usePrimaryBevyView.ts';
 import { useStoreSelector } from './useStoreSelector.ts';
 import { hasCommandModifier, isTypingTarget } from './useWorldFocus.ts';
 import type { ViewYaw } from './viewYaw.tsx';
@@ -55,21 +56,14 @@ export interface BevySceneProps {
   onError?: (error: Error) => void;
 }
 
-interface BevySentinels {
-  /** The play view has loaded every model; for Playwright. */
-  __officexrBevyReady?: boolean;
-}
-
 const SCROLL_KEYS = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 const NO_SPAWNS: readonly Vec3[] = [];
 
 const selectCharRadius = (s: { worldSettings: { charRadius: number } }) => s.worldSettings.charRadius;
 
-/** The URL Bevy loads a baked layout from: absolute, as Bevy resolves relative paths against the model origin. */
 // ponytail: no bake version in the URL, so Bevy keeps drawing a layout re-baked mid-session until a reload.
 function bakedLayoutDiff(p: SceneBakedLayout): BakedLayoutDiff {
-  const path = p.gltfPath.endsWith('.glb') ? p.gltfPath : `${p.gltfPath}.glb`;
-  return { gltfPath: new URL(path, window.location.href).href, position: p.position, rotationY: p.rotationY };
+  return { gltfPath: bakedLayoutGlbUrl(p.gltfPath), position: p.position, rotationY: p.rotationY };
 }
 
 function cameraConfig(c: WorldConstants, charRadius: number, invertLook: boolean): CameraConfig {
@@ -113,31 +107,8 @@ function roomView(wasm: RendererModule, view: ViewId): RoomView {
 export function BevyScene(props: BevySceneProps) {
   const { store, selfId, sync, seating, bakedLayouts } = props;
   const container = useRef<HTMLDivElement>(null);
-  const [bevy, setBevy] = useState<{ wasm: RendererModule; view: ViewId } | null>(null);
   const reportError = useEffectEvent((error: Error) => props.onError?.(error));
-
-  useEffect(() => {
-    const canvas = playCanvas();
-    container.current?.append(canvas);
-    let cancelled = false;
-    let mounted: { wasm: RendererModule; view: ViewId } | null = null;
-    bootBevy(canvas)
-      .then((wasm) => {
-        if (!cancelled) {
-          mounted = { wasm, view: wasm.createView(canvas, 'world') };
-          setBevy(mounted);
-        }
-      })
-      .catch((error: Error) => reportError(error));
-    return () => {
-      cancelled = true;
-      if (mounted) {
-        mounted.wasm.destroyView(mounted.view);
-      }
-      canvas.remove();
-      delete (window as BevySentinels).__officexrBevyReady;
-    };
-  }, []);
+  const bevy = usePrimaryBevyView(container, (error) => props.onError?.(error));
 
   // Broadcast the world once mounted: the store's change diffs only send what changes, so a bot
   // that joined on the SDK defaults would otherwise never hear a map that matches them.
@@ -301,7 +272,7 @@ export function BevyScene(props: BevySceneProps) {
         }
         if (ready) {
           loading.done = true;
-          (window as BevySentinels).__officexrBevyReady = true;
+          setBevyReady(true);
           onModelsReady();
         }
       }

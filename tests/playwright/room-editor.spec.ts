@@ -1,9 +1,10 @@
 /**
  * Room editor smoke test on the Bevy view (hermetic `?test=1`): the editor
  * opens, and an Add-tool click on the canvas places a block in the
- * document. Placement and tool behaviour are covered by the store-level
- * tests in `packages/studio/src/modes/scene-editor/__tests__/`; the
- * renderer's visual contract lives in `crates/officexr-render`'s visual tests.
+ * document. The tools themselves are tested through `useSceneEditorTools`
+ * in `packages/studio/src/modes/scene-editor/__tests__/editorStore.test.tsx`,
+ * and picks → tool input in `editorPicks.test.ts`; the renderer's visual
+ * contract lives in `crates/officexr-render`'s visual tests.
  */
 
 import { expect, test } from '@playwright/test';

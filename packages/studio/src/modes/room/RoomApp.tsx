@@ -35,8 +35,8 @@ export function RoomApp() {
   // Defaults to hidden so the Room palette focuses on furnishings.
   const [showLayoutObjects, setShowLayoutObjects] = useState(false);
   // Current build height (integer voxel y). The Add tool's floor
-  // picker sits at this y; Q lowers it, E raises it. The visible
-  // EndlessGrid stays at world y=0 as a reference plane — the build
+  // plane sits at this y; Q lowers it, E raises it. The ground grid
+  // stays at world y=0 as a reference plane — the build
   // height is independent of it so the user can place cubes below
   // y=0 (negative voxels) by pressing Q, or stack high in the sky by
   // pressing E.

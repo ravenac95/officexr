@@ -32,3 +32,13 @@ export function playCanvas(): HTMLCanvasElement {
   playCanvasElement ??= document.createElement('canvas');
   return playCanvasElement;
 }
+
+/** The URL Bevy loads a baked layout from: absolute, as Bevy resolves relative paths against the model origin. */
+export function bakedLayoutGlbUrl(path: string): string {
+  return new URL(path.endsWith('.glb') ? path : `${path}.glb`, window.location.href).href;
+}
+
+/** The renderer's `blob://` asset path for one of this page's `blob:` URLs; `ext` picks Bevy's loader. */
+export function blobAssetPath(blobUrl: string, ext: string): string {
+  return `blob://${blobUrl.slice(blobUrl.lastIndexOf('/') + 1)}.${ext}`;
+}
