@@ -4458,6 +4458,7 @@ name = "officexr-client"
 version = "0.0.0"
 dependencies = [
  "bevy",
+ "officexr-controls",
  "officexr-protocol",
  "officexr-render",
  "officexr-sim",

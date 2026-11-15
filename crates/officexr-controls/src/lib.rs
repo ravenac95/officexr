@@ -116,6 +116,12 @@ impl Controls {
         intent
     }
 
+    /// Turns the view by a drag of `delta` px, as locked mouse-look does, for touch.
+    pub fn look_by(&mut self, delta: Vec2) {
+        let d = delta * self.look_sign() * MOUSE_SENSITIVITY;
+        apply_look_delta(self.mode, d.x, d.y, &mut self.look);
+    }
+
     /// The camera yaw the intent is relative to.
     pub fn camera_yaw(&self) -> f32 {
         self.yaw

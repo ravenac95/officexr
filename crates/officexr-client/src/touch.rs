@@ -4,7 +4,9 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-use crate::camera::Orbit;
+use officexr_controls::ControlsHub;
+
+use crate::player::VIEW;
 
 const BASE_SIZE: f32 = 110.0;
 const KNOB_SIZE: f32 = 46.0;
@@ -69,7 +71,7 @@ pub fn read_touches(
     touches: Res<Touches>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut controls: ResMut<TouchControls>,
-    mut orbit: ResMut<Orbit>,
+    hub: Res<ControlsHub>,
     mut parts: Query<(&StickPart, &mut Node, &mut Visibility)>,
 ) {
     let Ok(window) = windows.single() else {
@@ -101,7 +103,7 @@ pub fn read_touches(
             joystick_vector(t.position() - stick_centre(size), TRAVEL, DEAD_ZONE)
         });
     if let Some(t) = controls.look_touch.and_then(|id| touches.get_pressed(id)) {
-        orbit.look(t.delta());
+        hub.with(VIEW, |c| c.look_by(t.delta()));
     }
 
     // Stays shown once a touch device has revealed it.
