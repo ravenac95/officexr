@@ -96,6 +96,12 @@ pub fn apply_zoom(factor: f32, offsets: &mut ViewOffsets) {
     offsets.zoom = (offsets.zoom * factor).clamp(ZOOM_MIN, ZOOM_MAX);
 }
 
+/// As `lookControls.ts`: a drag of `delta` px as `(d_yaw, d_pitch)` radians for
+/// [`apply_look_delta`]; `sign` is -1, or 1 with inverted look.
+pub fn drag_look_delta(delta: Vec2, sensitivity: f32, sign: f32) -> Vec2 {
+    delta * sign * sensitivity
+}
+
 /// A wheel delta in DOM units: lines, or CSS px. Positive scrolls down.
 pub fn dom_wheel_delta(y: f32, unit: MouseScrollUnit, scale_factor: f32) -> f32 {
     match unit {
