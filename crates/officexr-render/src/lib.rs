@@ -25,6 +25,7 @@ mod world_label;
 
 use bevy::asset::embedded_asset;
 use bevy::asset::io::AssetSourceBuilder;
+use bevy::camera::visibility::VisibilitySystems;
 use bevy::camera::{Exposure, PerspectiveProjection, Projection};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::gltf::{
@@ -34,6 +35,7 @@ use bevy::image::CompressedImageFormatSupport;
 use bevy::light::GlobalAmbientLight;
 use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
+use bevy::ui::UiSystems;
 
 pub use avatars::{Bound as AvatarBound, Motion, PlayerRender, Players, next_motion};
 pub use layouts::LayoutIndex;
@@ -156,6 +158,14 @@ fn gltf_loader(app: &App) -> GltfLoader {
 fn scene_systems(app: &mut App) {
     app.add_plugins(views::plugin)
         .add_systems(PostUpdate, apply_camera.before(TransformSystems::Propagate))
+        // With this frame's camera and anchor poses, before the UI lays the labels out.
+        .add_systems(
+            PostUpdate,
+            world_label::place_labels
+                .after(TransformSystems::Propagate)
+                .before(VisibilitySystems::VisibilityPropagate)
+                .before(UiSystems::Layout),
+        )
         .add_systems(
             Update,
             (
@@ -176,7 +186,6 @@ fn scene_systems(app: &mut App) {
                 )
                     .chain(),
                 (spawn_camera, sky::sync_background).chain(),
-                world_label::place_labels,
             )
                 .chain()
                 .in_set(views::SceneSystems)
