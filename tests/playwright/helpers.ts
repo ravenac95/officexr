@@ -11,7 +11,7 @@ export async function forceWebgl2(page: Page) {
 }
 
 /**
- * Waits until the play view's Bevy renderer has loaded every model (`__officexrBevyReady`), failing
+ * Waits until the page's Bevy view has loaded every model (`__officexrBevyReady`), failing
  * fast on a page error such as a wasm panic. Boots slowly under SwiftShader, hence the long timeout.
  */
 export async function waitForBevyReady(page: Page, timeout = 170_000): Promise<void> {
@@ -31,9 +31,7 @@ export type Mode = 'map' | 'room' | 'layout' | 'object' | 'character' | 'debug' 
  * Uses `waitUntil: 'domcontentloaded'` because:
  *   - `'networkidle'` never fires (Debug opens a long-lived WebSocket).
  *   - `'load'` is gated on every transitive sub-resource (heavy GLTFs,
- *     animation rigs) finishing — Adventurer pulls in 5 GLTFs and they
- *     can still be in-flight from a prior test against the same
- *     dev-server process.
+ *     wasm) finishing.
  *
  * The active-tab assertion below is the real "mode mounted" gate. */
 export async function goToMode(
