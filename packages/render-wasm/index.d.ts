@@ -111,6 +111,8 @@ export interface ProximityInput {
   areas: { id: string; center: [number, number]; radius: number; members: string[] }[];
   /** The feet of players `setPlayers` left out, as the first-person local player. */
   undrawn?: Record<string, [number, number, number]>;
+  /** The players bubbles rise around: both ends of each of the local player's `entering` pairs. */
+  bubbles?: string[];
   /** The world constants' `proximity` tunables; each defaults to `DEFAULT_WORLD_CONSTANTS`'. */
   style?: {
     discRadius?: number;
@@ -119,6 +121,12 @@ export interface ProximityInput {
     enteringColor?: HexColor;
     enteredColor?: HexColor;
     exitingColor?: HexColor;
+    meetingBorderInset?: number;
+    meetingBorderOutset?: number;
+    sparkleSpeed?: number;
+    sparkleFloatHeight?: number;
+    /** With the camera mode's multiplier already applied: `ProximityGlow` uses 5 in the fixed camera. */
+    sparkleSize?: number;
   };
 }
 

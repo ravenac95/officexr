@@ -20,6 +20,10 @@ function fakeSim(log: string[], start: Vec3) {
         events: [{ kind: 'proximity:entering', a: 'alice', b: 'bob' }],
         conversationFocus: { x: 3, y: 0, z: 4 },
         playerStates: new Map([['alice', 'entered']]),
+        pairStates: new Map([
+          ['alice|bob', 'entering'],
+          ['bob|carol', 'entering'],
+        ]),
         areas: [{ id: 'm', members: new Set(['alice', 'bob']), center: { x: 3, z: 4 }, radius: 2 }],
       } as unknown as TrackerOutput;
     },
@@ -160,13 +164,15 @@ describe('RoomFrame', () => {
 
     frame.step(0.016, 1000);
 
-    const { discRadius, enteredColor } = store.getState().worldConstants.proximity;
+    const { discRadius, enteredColor, sparkleSize } = store.getState().worldConstants.proximity;
     expect(proximity).toEqual([
       {
         players: { alice: 'entered' },
         areas: [{ id: 'm', center: [3, 4], radius: 2, members: ['alice', 'bob'] }],
         undrawn: {},
-        style: expect.objectContaining({ discRadius, enteredColor }),
+        bubbles: ['alice', 'bob'],
+        // The fixed camera's bubbles are 5× as big.
+        style: expect.objectContaining({ discRadius, enteredColor, sparkleSize: sparkleSize * 5 }),
       },
     ]);
   });

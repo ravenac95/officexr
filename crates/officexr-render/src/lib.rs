@@ -183,6 +183,7 @@ fn scene_systems(app: &mut App) {
                     layouts::sync_layouts,
                     overlays::sync_overlays,
                     proximity::sync_glow,
+                    proximity::sync_bubbles,
                 )
                     .chain(),
                 (
