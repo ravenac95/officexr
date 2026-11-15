@@ -86,6 +86,9 @@ pub struct Proximity {
     /// Each player's disc state; a player left out shows no disc.
     pub players: HashMap<String, DiscState>,
     pub areas: Vec<MeetingArea>,
+    /// The feet of players the view doesn't draw, as the first-person local
+    /// player; the drawn ones stand where `setPlayers` put them.
+    pub undrawn: HashMap<String, [f32; 3]>,
     pub style: GlowStyle,
 }
 
@@ -208,7 +211,6 @@ fn draw(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn sync_glow(
     mut commands: Commands,
     time: Res<Time>,
@@ -229,12 +231,20 @@ pub(crate) fn sync_glow(
             None => &mut fresh,
         };
         let style = &proximity.style;
-        let pulse = 0.5 + 0.5 * (time.elapsed_secs() * style.pulse_speed * TAU).sin();
+        // The phase in f64, so it stays smooth however long the view runs.
+        let phase = (time.elapsed_secs_f64() * f64::from(style.pulse_speed)).fract() as f32;
+        let pulse = 0.5 + 0.5 * (phase * TAU).sin();
         let flat = Quat::from_rotation_x(-FRAC_PI_2);
         let feet: HashMap<&str, Vec3> = players
             .players
             .iter()
             .map(|p| (p.id.as_str(), players.feet(p)))
+            .chain(
+                proximity
+                    .undrawn
+                    .iter()
+                    .map(|(id, at)| (id.as_str(), Vec3::from(*at))),
+            )
             .collect();
 
         glows.discs.retain(|id, glow| {
@@ -286,11 +296,6 @@ pub(crate) fn sync_glow(
                 .iter()
                 .filter_map(|m| feet.get(m.as_str()).map(|f| f.y))
                 .collect();
-            // ponytail: a member not drawn (the first-person self) gives the area no height.
-            if member_feet.is_empty() {
-                continue;
-            }
-            let y = member_feet.iter().sum::<f32>() / member_feet.len() as f32;
             let glow = glows.areas.entry(area.id.clone()).or_insert_with(|| Glow {
                 entity: spawn_glow(
                     &mut commands,
@@ -301,6 +306,14 @@ pub(crate) fn sync_glow(
                 opacity: 0.0,
                 radius: area.radius,
             });
+            // No member to stand it on: hidden until one comes back.
+            if member_feet.is_empty() {
+                if let Ok((_, mut visibility, _)) = parts.get_mut(glow.entity) {
+                    *visibility = Visibility::Hidden;
+                }
+                continue;
+            }
+            let y = member_feet.iter().sum::<f32>() / member_feet.len() as f32;
             glow.radius = ease(glow.radius, area.radius, dt);
             glow.opacity = ease(glow.opacity, style.intensity * AREA_INTENSITY, dt);
             let [x, z] = area.center;
@@ -390,6 +403,21 @@ mod tests {
         shown
     }
 
+    /// The colour of each shown glow, ordered by its translation's x.
+    fn colors(app: &mut App) -> Vec<LinearRgba> {
+        let mut q = app
+            .world_mut()
+            .query::<(&Transform, &Visibility, &MeshMaterial3d<GlowMaterial>)>();
+        let materials = app.world().resource::<Assets<GlowMaterial>>();
+        let mut shown: Vec<_> = q
+            .iter(app.world())
+            .filter(|(_, v, _)| **v != Visibility::Hidden)
+            .map(|(t, _, m)| (t.translation.x, materials.get(&m.0).unwrap().color))
+            .collect();
+        shown.sort_by(|a, b| a.0.total_cmp(&b.0));
+        shown.into_iter().map(|(_, c)| c).collect()
+    }
+
     fn glows(app: &mut App) -> usize {
         let mut q = app.world_mut().query::<&MeshMaterial3d<GlowMaterial>>();
         q.iter(app.world()).count()
@@ -417,6 +445,11 @@ mod tests {
         assert_eq!(shown[1].0, 4.0);
         assert!(shown[1].1 > 0.0);
         assert_eq!(glows(&mut app), 4);
+        let colors = colors(&mut app);
+        let green = GlowStyle::default().entered_color.to_linear();
+        let yellow = GlowStyle::default().entering_color.to_linear();
+        assert!((colors[0].green / colors[0].red - green.green / green.red).abs() < 1e-3);
+        assert!((colors[1].green / colors[1].red - yellow.green / yellow.red).abs() < 1e-3);
     }
 
     #[test]
@@ -437,5 +470,25 @@ mod tests {
         }
         assert!(shown(&mut app).is_empty());
         assert_eq!(glows(&mut app), 3, "one disc per player, no area");
+    }
+
+    #[test]
+    fn an_undrawn_player_gets_a_disc_and_a_leaving_one_loses_it() {
+        let (mut app, id) = app();
+        set(
+            &mut app,
+            id,
+            json!({"players": {"me": "entering"}, "undrawn": {"me": [9, 0, 0]}}),
+        );
+        assert_eq!(
+            shown(&mut app).iter().map(|s| s.0).collect::<Vec<_>>(),
+            [9.0]
+        );
+        assert_eq!(glows(&mut app), 4);
+
+        let hub = app.world().resource::<ViewHub>().clone();
+        hub.send(id, ViewMsg::Players(Players::default()));
+        set(&mut app, id, json!({}));
+        assert_eq!(glows(&mut app), 0);
     }
 }

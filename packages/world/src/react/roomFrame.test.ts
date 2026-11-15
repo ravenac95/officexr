@@ -151,9 +151,21 @@ describe('RoomFrame', () => {
       {
         players: { alice: 'entered' },
         areas: [{ id: 'm', center: [3, 4], radius: 2, members: ['alice', 'bob'] }],
+        undrawn: {},
         style: expect.objectContaining({ discRadius, enteredColor }),
       },
     ]);
+  });
+
+  it('sends the first-person player\'s feet, which setPlayers leaves out', async () => {
+    const { frame, proximity, players, store } = await setup({ options: { cameraMode: 'first-person' } });
+
+    frame.step(0.016, 1000);
+
+    expect(players[0]!.players.map((p) => p.id)).not.toContain('alice');
+    const { pos } = store.getState().players.alice!;
+    const charRadius = store.getState().worldSettings.charRadius;
+    expect(proximity[0]!.undrawn).toEqual({ alice: [pos.x, pos.y + 0.9 - charRadius, pos.z] });
   });
 
   it("steps the sim along the view's intent and moves the store's player", async () => {

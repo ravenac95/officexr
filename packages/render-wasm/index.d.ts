@@ -109,6 +109,8 @@ export interface ProximityInput {
   /** Each player's disc state; a player left out shows no disc. */
   players: Record<string, 'entering' | 'entered' | 'exiting'>;
   areas: { id: string; center: [number, number]; radius: number; members: string[] }[];
+  /** The feet of players `setPlayers` left out, as the first-person local player. */
+  undrawn?: Record<string, [number, number, number]>;
   /** The world constants' `proximity` tunables; each defaults to `DEFAULT_WORLD_CONSTANTS`'. */
   style?: {
     discRadius?: number;

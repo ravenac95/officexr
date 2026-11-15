@@ -262,7 +262,12 @@ export class RoomFrame {
       focus && self ? [focus.x, feetPosition(self.pos, state.worldSettings.charRadius).y, focus.z] : null,
     );
     if (this.proximity) {
-      view.setProximity(proximityInput(this.proximity, state.worldConstants.proximity));
+      // `setPlayers` leaves the first-person player out; its disc still shows at its feet.
+      const undrawn =
+        self && this.options.cameraMode === 'first-person'
+          ? { [selfId]: xyz(feetPosition(self.pos, state.worldSettings.charRadius)) }
+          : {};
+      view.setProximity(proximityInput(this.proximity, state.worldConstants.proximity, undrawn));
     }
   }
 
@@ -319,7 +324,11 @@ export class RoomFrame {
   }
 }
 
-function proximityInput(output: TrackerOutput, style: ProximityConstants): ProximityInput {
+function proximityInput(
+  output: TrackerOutput,
+  style: ProximityConstants,
+  undrawn: Record<string, Xyz>,
+): ProximityInput {
   const { discRadius, pulseSpeed, intensity, enteringColor, enteredColor, exitingColor } = style;
   return {
     players: Object.fromEntries(output.playerStates),
@@ -329,6 +338,7 @@ function proximityInput(output: TrackerOutput, style: ProximityConstants): Proxi
       radius: a.radius,
       members: [...a.members],
     })),
+    undrawn,
     style: { discRadius, pulseSpeed, intensity, enteringColor, enteredColor, exitingColor },
   };
 }
