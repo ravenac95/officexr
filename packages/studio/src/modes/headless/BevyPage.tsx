@@ -1,30 +1,21 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPersistentLocalState } from '@officexr/core-refactor';
-import type { CameraPose, PickEvent, RendererModule, ViewId, ViewKind } from '@officexr/render-wasm';
+import type { CameraPose, PickEvent, RendererModule, ViewId } from '@officexr/render-wasm';
 import type { OfficeState } from '@officexr/sdk';
 import { pickCharacterForPlayer } from '@officexr/world/characters';
-import { bootBevy, useApplication, usePlaySession } from '@officexr/world/react';
+import { useApplication, usePlaySession } from '@officexr/world/react';
 import { createStorages } from '../debug/DebugApp.tsx';
 import { useMapPicker } from '../debug/useMapPicker.ts';
-import { DEFAULT_MUGSHOT_BACKGROUND, DEFAULT_MUGSHOT_LIGHTING, cubesForMode } from '../mugshot/MugshotApp.tsx';
+import {
+  DEFAULT_MUGSHOT_BACKGROUND,
+  DEFAULT_MUGSHOT_LIGHTING,
+  mugshotCamera,
+  mugshotWorld,
+} from '../mugshot/mugshotScene.ts';
 import { buildInMemoryStack } from '../../realtime/services.ts';
+import { BevyCanvas, bevySentinels as sentinels, useReadySentinel } from './BevyCanvas.tsx';
 
 type BakedLayout = ReturnType<typeof usePlaySession>['bakedLayouts'][number];
-
-interface BevySentinels {
-  /** The wasm module, for drivers to call it directly. */
-  __officexrBevy?: RendererModule;
-  /** The page's view ids, in canvas order. */
-  __officexrBevyViews?: ViewId[];
-  /** Every view has loaded and settled. */
-  __officexrBevyReady?: boolean;
-  /** Where the mugshot character's feet settled, in metres. */
-  __officexrBevyMugshotFeetY?: number;
-  /** With `&pick=1`, the world view's pick events so far. */
-  __officexrBevyPicks?: PickEvent[];
-}
-
-const sentinels = () => window as unknown as BevySentinels;
 
 const SELF_ID = 'bevy-player';
 /** The Mugshot mode's 512 px viewport inside its 1 px border, as its ideal PNGs are cropped. */
@@ -33,69 +24,6 @@ const MUGSHOT_SIZE_PX = 510;
 const PREVIEW_CHARACTER = 'Barbarian';
 const NEAR = 0.1;
 const FAR = 2000;
-
-const canvasStyle: React.CSSProperties = { display: 'block', width: '100%', height: '100%' };
-
-/** A Bevy view on a canvas for the component's lifetime; `onView` feeds it. */
-function BevyCanvas({
-  id,
-  kind,
-  primary = false,
-  onView,
-}: {
-  id: string;
-  kind: ViewKind;
-  /** Draws into Bevy's primary window; mount it before the page's other canvases. */
-  primary?: boolean;
-  onView: (wasm: RendererModule, view: ViewId) => (() => void) | void;
-}) {
-  const canvas = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    let cancelled = false;
-    let cleanup: (() => void) | void;
-    let view: ViewId | null = null;
-    void bootBevy(primary && canvas.current ? canvas.current : undefined).then((wasm) => {
-      if (cancelled || !canvas.current) {
-        return;
-      }
-      view = wasm.createView(canvas.current, kind);
-      const s = sentinels();
-      s.__officexrBevy = wasm;
-      s.__officexrBevyViews = [...(s.__officexrBevyViews ?? []), view];
-      cleanup = onView(wasm, view);
-    });
-    return () => {
-      cancelled = true;
-      cleanup?.();
-      if (view !== null) {
-        const gone = view;
-        void bootBevy().then((wasm) => wasm.destroyView(gone));
-        sentinels().__officexrBevyViews = sentinels().__officexrBevyViews?.filter((v) => v !== gone);
-      }
-    };
-    // A view lives as long as its canvas, so onView runs once.
-  }, []);
-  return <canvas id={id} ref={canvas} style={canvasStyle} />;
-}
-
-/** Keeps `window.__officexrBevyReady` in step with every view's readiness. */
-function useReadySentinel() {
-  useEffect(() => {
-    const poll = window.setInterval(() => {
-      const s = sentinels();
-      const views = s.__officexrBevyViews ?? [];
-      s.__officexrBevyReady = views.length > 0 && views.every((v) => s.__officexrBevy?.isReady(v).ready);
-    }, 100);
-    return () => {
-      window.clearInterval(poll);
-      delete sentinels().__officexrBevy;
-      delete sentinels().__officexrBevyViews;
-      delete sentinels().__officexrBevyReady;
-      delete sentinels().__officexrBevyMugshotFeetY;
-      delete sentinels().__officexrBevyPicks;
-    };
-  }, []);
-}
 
 /**
  * `?op=bevy`: the current map drawn by `crates/officexr-render` compiled to
@@ -148,24 +76,9 @@ function MugshotFeed({ id, character, primary = false }: { id: string; character
           if (cancelled) {
             return;
           }
-          const instances = cubesForMode('gltf');
-          const kindIds = new Set(instances.map((i) => i.kindId));
-          const scene = {
-            kinds: catalog.getCatalog().kinds.filter((k) => kindIds.has(k.id)),
-            objects: { cubeSize: 0.5, instances },
-            lighting: DEFAULT_MUGSHOT_LIGHTING,
-            background: DEFAULT_MUGSHOT_BACKGROUND,
-          };
-          const pitch = (-8 * Math.PI) / 180;
-          const distance = 6;
+          const scene = mugshotWorld(catalog.getCatalog().kinds, 'gltf', DEFAULT_MUGSHOT_LIGHTING, DEFAULT_MUGSHOT_BACKGROUND);
           sentinels().__officexrBevyMugshotFeetY = wasm.setWorld(view, JSON.stringify(scene), character);
-          wasm.setCamera(view, {
-            position: [0, 1.7, distance],
-            lookAt: [0, 1.7 + Math.sin(pitch), distance - Math.cos(pitch)],
-            fovDeg: 40,
-            near: NEAR,
-            far: FAR,
-          });
+          wasm.setCamera(view, mugshotCamera({ azimuthDeg: 180, distanceM: 6, height: 1.7 }));
         });
         return () => {
           cancelled = true;

@@ -1,26 +1,18 @@
-import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { useGLTF } from '@react-three/drei';
-import { bakedLayoutUrl } from '@officexr/world/app';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import type { Overlay, RendererModule, ViewId, WorldDiff } from '@officexr/render-wasm';
+import { DEFAULT_WORLD_CONSTANTS } from '@officexr/sdk';
+import { bakedLayoutUrl, DEFAULT_EDITOR_LIGHTING, type ApplicationApi } from '@officexr/world/app';
 import { useApplication } from '@officexr/world/react';
 import {
   FilesystemLayoutStorage,
   FilesystemMapStorage,
   FilesystemRoomStorage,
 } from '@officexr/world/scenes';
-import {
-  BakedLayout,
-  BakedLayoutErrorBoundary,
-  DEFAULT_EDITOR_LIGHTING,
-  EndlessGrid,
-  LightingRig,
-  ObjectInstances,
-} from '@officexr/world/renderer';
 import { useTestStorages } from '../../test-harness/TestStorageContext.tsx';
-import { RoomsLayer } from '../map/MapEditorCanvas.tsx';
-import { ReadySignal } from './ReadySignal.tsx';
-import { bakedLayoutNames, loadRenderContent, type RenderContent, type RenderStorages } from './renderContent.ts';
-import { frameCamera, type Bounds, type CameraSetup } from './renderFraming.ts';
+import { roomPlacements, type RoomPlacements } from '../map/roomPlacements.ts';
+import { BevyCanvas, useReadySentinel } from './BevyCanvas.tsx';
+import { loadRenderContent, type RenderContent, type RenderStorages } from './renderContent.ts';
+import { cameraPose, frameCamera, type Bounds, type CameraSetup } from './renderFraming.ts';
 import { parseRenderParams, type RenderParams } from './renderParams.ts';
 import { paths, studioApiOptions, studioApiUrl } from '../../apiOrigin.ts';
 
@@ -30,7 +22,10 @@ interface RenderSentinels {
 }
 
 const sentinels = () => window as unknown as RenderSentinels;
-const noop = () => {};
+const BACKDROP = '#1b1d22';
+/** `EndlessGrid fadeDistance={400}`. */
+const GRID: Overlay = { tag: 'grid', kind: 'grid', y: 0, cellSize: 1, fade: 400 };
+const READY_POLL_MS = 50;
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 type PageState =
@@ -99,10 +94,10 @@ export function RenderPage() {
   if (state.status === 'loading' || !parsed.ok) {
     return null;
   }
-  return <RenderCanvas params={parsed.params} content={state.content} onError={fail} />;
+  return <RenderView params={parsed.params} content={state.content} onError={fail} />;
 }
 
-function RenderCanvas({
+function RenderView({
   params,
   content,
   onError,
@@ -111,46 +106,82 @@ function RenderCanvas({
   content: RenderContent;
   onError: (message: string) => void;
 }) {
+  const api = useApplication();
+  useReadySentinel();
   const setup = useMemo(() => frameCamera(params.camera, content.bounds, params), [params, content.bounds]);
-  const ortho = setup.type === 'orthographic';
-  const cameraProps = ortho
-    ? { position: setup.position, up: setup.up, zoom: setup.zoom, near: setup.near, far: setup.far }
-    : { position: setup.position, fov: setup.fov, near: setup.near, far: setup.far };
-  // ponytail: baked layouts load without credentials; fine while headless render only runs same-origin.
-  const glbUrls = useMemo(
-    () => [...bakedLayoutNames(content).map((n) => bakedLayoutUrl(n, studioApiUrl(paths.bakedLayouts))), ...content.modelUrls],
-    [content],
-  );
-  const onAssetError = (err: Error) => onError(`failed to load asset: ${err.message}`);
+
+  const onView = (wasm: RendererModule, view: ViewId) => {
+    let cancelled = false;
+    const world = renderWorld(api, content);
+    const glbUrls = [...world.bakedLayouts.map((b) => b.gltfPath), ...content.modelUrls];
+    void (async () => {
+      // Bevy never reports a model that fails to load, so a missing one is caught here first.
+      for (const url of glbUrls) {
+        const response = await fetch(url).catch((err: unknown) => err);
+        if (!(response instanceof Response) || !response.ok) {
+          const why = response instanceof Response ? `HTTP ${response.status}` : errorMessage(response);
+          throw new Error(`failed to load asset: ${url} (${why})`);
+        }
+      }
+      if (cancelled) {
+        return;
+      }
+      wasm.setWorld(view, JSON.stringify(world));
+      wasm.setOverlays(view, [GRID]);
+      wasm.setCamera(view, cameraPose(setup, params));
+      // A capture resolves on a drawn frame, so readiness is read once the diff has been applied,
+      // and the frame after it has the loaded models in it.
+      await wasm.captureView(view);
+      while (!cancelled && !wasm.isReady(view).ready) {
+        await new Promise((resolve) => setTimeout(resolve, READY_POLL_MS));
+      }
+      if (!cancelled) {
+        await wasm.captureView(view);
+        reportReady(content.bounds, setup);
+      }
+    })().catch((err: unknown) => !cancelled && onError(errorMessage(err)));
+    return () => {
+      cancelled = true;
+    };
+  };
 
   return (
     <div
       data-render-target={params.target}
       style={{ position: 'absolute', top: 0, left: 0, width: params.width, height: params.height }}
     >
-      <Canvas
-        orthographic={ortho}
-        dpr={1}
-        camera={cameraProps}
-        gl={{ preserveDrawingBuffer: true, antialias: true, alpha: false }}
-        style={{ width: '100%', height: '100%' }}
-        onCreated={({ camera }) => camera.lookAt(...setup.target)}
-      >
-        <color attach="background" args={['#1b1d22']} />
-        <LightingRig lighting={DEFAULT_EDITOR_LIGHTING} />
-        <EndlessGrid fadeDistance={400} />
-        <Suspense fallback={null}>
-          <BakedLayoutErrorBoundary resetKey={params.name} onError={onAssetError}>
-            {/* Baked layouts suspend in their own boundary, so the ready signal
-                would otherwise fire before their GLBs arrive. */}
-            <PreloadGlbs urls={glbUrls} />
-            <RenderedContent content={content} onAssetError={onAssetError} />
-          </BakedLayoutErrorBoundary>
-          <ReadySignal onReady={() => reportReady(content.bounds, setup)} />
-        </Suspense>
-      </Canvas>
+      <BevyCanvas kind="world" primary onView={onView} onError={(m) => onError(`renderer failed to load: ${m}`)} />
     </div>
   );
+}
+
+// ponytail: baked layouts load without credentials; fine while headless render only runs same-origin.
+const layoutUrl = (layoutName: string) =>
+  new URL(`${bakedLayoutUrl(layoutName, studioApiUrl(paths.bakedLayouts))}.glb`, window.location.href).href;
+
+/** The content as one world diff, under the editors' lighting on a flat backdrop. */
+function renderWorld(api: ApplicationApi, content: RenderContent) {
+  const placed: RoomPlacements =
+    content.type === 'map'
+      ? roomPlacements(content.doc, content.rooms, api.rooms, layoutUrl)
+      : {
+          instances: content.worldObjects.instances,
+          bakedLayouts:
+            content.type === 'room' && content.layoutName
+              ? [{ gltfPath: layoutUrl(content.layoutName), position: [0, 0, 0], rotationY: 0, layoutName: content.layoutName }]
+              : [],
+        };
+  const kindIds = new Set(placed.instances.map((i) => i.kindId));
+  const diff: WorldDiff = {
+    replace: true,
+    kinds: api.catalog.getCatalog().kinds.filter((k) => kindIds.has(k.id)),
+    objects: { instances: placed.instances },
+    bakedLayouts: placed.bakedLayouts,
+    lighting: DEFAULT_EDITOR_LIGHTING,
+    background: DEFAULT_WORLD_CONSTANTS.background,
+    clearColor: BACKDROP,
+  };
+  return { ...diff, bakedLayouts: placed.bakedLayouts };
 }
 
 function reportReady(bounds: Bounds, setup: CameraSetup) {
@@ -161,44 +192,4 @@ function reportReady(bounds: Bounds, setup: CameraSetup) {
       metresPerPixel: setup.type === 'orthographic' ? setup.metresPerPixel : undefined,
     };
   }
-}
-
-function PreloadGlbs({ urls }: { urls: string[] }) {
-  useGLTF(urls);
-  return null;
-}
-
-function RenderedContent({
-  content,
-  onAssetError,
-}: {
-  content: RenderContent;
-  onAssetError: (err: Error) => void;
-}) {
-  if (content.type === 'map') {
-    return (
-      <RoomsLayer
-        doc={content.doc}
-        rooms={content.rooms}
-        layouts={content.layouts}
-        selection={null}
-        onSelect={noop}
-        onMove={noop}
-        tool="select"
-        onPlaceSpawn={noop}
-      />
-    );
-  }
-  return (
-    <>
-      {content.type === 'room' && content.layoutName ? (
-        <BakedLayout
-          gltfPath={bakedLayoutUrl(content.layoutName, studioApiUrl(paths.bakedLayouts))}
-          layoutName={content.layoutName}
-          onLoadError={onAssetError}
-        />
-      ) : null}
-      <ObjectInstances worldObjects={content.worldObjects} />
-    </>
-  );
 }

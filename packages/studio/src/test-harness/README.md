@@ -105,11 +105,7 @@ The previously-rotted specs are repaired:
   cube-field regression grid is sized to the global `VOXEL_SIZE=0.5`
   (the geometry service ignores a snapshot's `cubeSize`).
 
-`character-on-surface.spec.ts` uses Playwright's per-platform
-`toHaveScreenshot`. Its stale `SETTLED_BODY_Y` was fixed (cube tops
-moved y=2→y=1 when `cubeSize` aligned to `VOXEL_SIZE`), and BOTH
-platforms' baselines were regenerated and hand-verified (character
-stands on the surface): the `-darwin.png` set locally, and the
-`-linux.png` set in an amd64 Playwright container via podman (see
-CLAUDE.md — the committed `-linux.png` set is what CI compares against,
-so it must come from a linux/amd64 render, not a macOS dev box).
+`character-on-surface.spec.ts` is a smoke test of the Bevy mugshot: each
+character loads, the ready flag is set and its feet settle on the cube tops.
+The native harness (`crates/officexr-render/tests/visual/`) owns placement
+and pixels.

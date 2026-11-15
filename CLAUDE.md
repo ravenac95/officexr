@@ -140,13 +140,12 @@ escape hatch is for genuine constraints, not for skipping refactors.
     Playwright specs still hold its contract until they are trimmed to
     smoke tests: the mugshot specs (`pnpm exec playwright test
     tests/playwright/mugshot-*`, baselines under
-    `tests/playwright/mugshot-baselines/`) and
-    `character-on-surface.spec.ts`, which `pnpm test:e2e:ci` runs.
+    `tests/playwright/mugshot-baselines/`).
   - Never widen a diff threshold to make a suite green.
 - **Regenerating `*-chromium-linux.png` Playwright baselines: use
-  podman.** `character-on-surface.spec.ts` writes OS-suffixed
-  baselines and CI runs on linux. From a macOS box, run the spec in
-  `mcr.microsoft.com/playwright:v<version>-noble` (the installed
+  podman.** A spec that writes OS-suffixed `toHaveScreenshot` baselines
+  must have them rendered on linux, as CI is. From a macOS box, run the
+  spec in `mcr.microsoft.com/playwright:v<version>-noble` (the installed
   Playwright version) via **podman** against a throwaway `git clone`
   (not a mount of the working tree: an in-container `pnpm install`
   clobbers the host's node_modules), with `--update-snapshots`, then

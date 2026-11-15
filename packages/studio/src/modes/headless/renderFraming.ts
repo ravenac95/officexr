@@ -1,4 +1,5 @@
 import type { CameraSpec, Vec3 } from './renderParams.ts';
+import type { CameraPose } from '@officexr/render-wasm';
 
 export interface Bounds {
   readonly min: Vec3;
@@ -104,5 +105,32 @@ export function frameCamera(spec: CameraSpec, bounds: Bounds, size: FrameSize): 
     fov: FOV_DEG,
     near: CUSTOM_NEAR,
     far: CUSTOM_FAR,
+  };
+}
+
+/** The near-orthographic stand-in's field of view, for Bevy's perspective-only view cameras. */
+const TOP_FOV_DEG = 1;
+/** Leans the top camera off vertical so `looking_at`'s Y up resolves to -Z at the top of the image. */
+const TOP_LEAN = 1e-3;
+
+/**
+ * `setup` as a Bevy view camera. The top camera becomes a narrow perspective from far overhead that
+ * shows the same ground area as the orthographic one.
+ */
+// ponytail: a 1° perspective stands in for ortho; things H m up draw D/(D-H) larger, under 1% for a room-sized frame.
+export function cameraPose(setup: CameraSetup, size: FrameSize): CameraPose {
+  if (setup.type === 'perspective') {
+    return { position: [...setup.position], lookAt: [...setup.target], fovDeg: setup.fov, near: setup.near, far: setup.far };
+  }
+  const halfHeightM = size.height / setup.zoom / 2;
+  const distance = halfHeightM / Math.tan(((TOP_FOV_DEG / 2) * Math.PI) / 180);
+  const [x, eyeY, z] = setup.position;
+  const groundY = setup.target[1];
+  return {
+    position: [x, groundY + distance, z + distance * TOP_LEAN],
+    lookAt: [...setup.target],
+    fovDeg: TOP_FOV_DEG,
+    near: Math.max(setup.near, distance - (eyeY - groundY)),
+    far: distance + (setup.far - (eyeY - groundY)),
   };
 }
