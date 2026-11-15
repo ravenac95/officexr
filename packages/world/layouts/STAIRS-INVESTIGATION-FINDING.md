@@ -189,8 +189,8 @@ step colliders) and a corresponding change to `worldObjectsToCuboids` in
 Before marking task-08 complete, run:
 
 ```bash
-pnpm exec playwright test tests/playwright/mugshot-*
-pnpm exec playwright test tests/playwright/character-on-surface.spec.ts
+cargo test -p officexr-render --features visual-tests
+pnpm exec playwright test tests/playwright/rendering-smoke.spec.ts
 ```
 
 The compound collider change only affects objects whose kind has

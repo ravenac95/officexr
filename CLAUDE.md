@@ -138,18 +138,7 @@ escape hatch is for genuine constraints, not for skipping refactors.
     `OFFICEXR_UPDATE_BASELINES=1` writes them. CI renders on
     ubuntu-24.04 lavapipe, so regenerate on linux and review each PNG
     by hand before committing.
-  - The studio Mugshot mode and `?op=render` page draw through Bevy;
-    their Playwright specs (`character-on-surface`, `render-page`,
-    `render-view-mcp`) are smoke tests. The older `mugshot-*` specs
-    and their three.js ideals under `tests/playwright/mugshot-baselines/`
-    are evidence only, until they are trimmed.
+  - Playwright only smoke-tests rendering: `rendering-smoke.spec.ts`
+    checks each surface boots Bevy and draws a non-blank canvas. It
+    holds no baseline PNGs; pixels belong in the native harness above.
   - Never widen a diff threshold to make a suite green.
-- **Regenerating `*-chromium-linux.png` Playwright baselines: use
-  podman.** A spec that writes OS-suffixed `toHaveScreenshot` baselines
-  must have them rendered on linux, as CI is. From a macOS box, run the
-  spec in `mcr.microsoft.com/playwright:v<version>-noble` (the installed
-  Playwright version) via **podman** against a throwaway `git clone`
-  (not a mount of the working tree: an in-container `pnpm install`
-  clobbers the host's node_modules), with `--update-snapshots`, then
-  copy the PNGs back into `tests/playwright/<spec>-snapshots/` and
-  review each by hand.

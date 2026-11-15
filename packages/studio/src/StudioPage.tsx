@@ -39,20 +39,6 @@ export function StudioPage() {
   const [highlightId] = useState(linkedRequestId);
   const [agentTokensOpen, setAgentTokensOpen] = useState(highlightId !== null);
 
-  // `?perfFooter=0` suppresses the perf footer for pixel-capture
-  // contexts. The Playwright motion-keyframe specs screenshot the
-  // Debug canvas against committed baselines; the footer's height
-  // changes the canvas viewport, which would shift every baseline
-  // whenever the footer changes. Same URL-param-seam pattern as
-  // `?test=1` (hermetic boot) and `?thumbnailMode=true` (object
-  // thumbnails). Read once at mount — the search string can't change
-  // without a full page load.
-  const [showPerfFooter] = useState(
-    () =>
-      typeof window === 'undefined' ||
-      new URLSearchParams(window.location.search).get('perfFooter') !== '0',
-  );
-
   // Mirror mode → hash so links survive a hard reload. Compare only
   // the BASE hash (before any `/sub-route`) so `#mugshot/Barbarian`
   // isn't clobbered back to `#mugshot` whenever this effect runs.
@@ -109,11 +95,9 @@ export function StudioPage() {
           BakeStatusBar: whichever mode's canvas is mounted publishes
           FPS / draw-call samples to the frame-stats bus and this
           footer renders them, mode-agnostically. Suppressed in
-          Mugshot mode: that canvas is a pixel-deterministic capture
-          surface (character-on-surface / mugshot baselines) and the
-          footer's height would change its viewport, shifting every
-          screenshot baseline. */}
-      {showPerfFooter && studioMode !== 'mugshot' && <PerfFooter />}
+          Mugshot mode: its exported reference shots keep a fixed
+          viewport, which the footer's height would change. */}
+      {studioMode !== 'mugshot' && <PerfFooter />}
     </div>
   );
 }

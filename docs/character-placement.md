@@ -35,9 +35,10 @@ character.
 
 - `cargo test -p officexr-render --features visual-tests` renders the
   visual scenarios and asserts feet within 10 cm of the surface (see
-  CLAUDE.md).
-- The studio Mugshot mode and the `character-on-surface` Playwright smoke
-  test stand each built-in character on the cubes.
+  CLAUDE.md). Its `character-on-surface.json` scenario stands each built-in
+  character on the cubes.
+- The studio Mugshot mode shows one character on a platform for a quick
+  look.
 
 ## Adding a character
 

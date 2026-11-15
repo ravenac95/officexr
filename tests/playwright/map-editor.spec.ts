@@ -10,6 +10,9 @@
 import { expect, test } from '@playwright/test';
 import { goToMode, waitForCanvasReady } from './helpers.ts';
 
+// SwiftShader draws the Bevy page a frame or two a second, and each real input waits on one.
+test.use({ actionTimeout: 30_000 });
+
 test('Map editor mounts canvas + RoomPalette + map dropdown', async ({ page }) => {
   await goToMode(page, 'map');
   await waitForCanvasReady(page);
