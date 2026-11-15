@@ -1,5 +1,5 @@
-//! The local player: the controls plugin's (or touch-stick) intent stepped through `officexr-sim` each frame, as
-//! `SceneFrame.tsx` does, drawn with the peers and broadcast to them.
+//! The local player: the controls plugin's (or touch-stick) intent stepped through `officexr-sim`
+//! each frame, as `SceneFrame.tsx` does, drawn with the peers and broadcast to them.
 
 use bevy::prelude::*;
 use officexr_controls::{ControlsHub, MoveIntent};
