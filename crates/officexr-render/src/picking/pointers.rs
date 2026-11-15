@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use bevy::app::HierarchyPropagatePlugin;
@@ -87,6 +88,8 @@ pub struct TargetPressed {
 
 #[derive(Default)]
 struct Queues {
+    /// Views whose presses only a ping bell announces: the play view, where any other takes pointer lock.
+    bell_only: HashSet<ViewId>,
     pointer: Vec<(ViewId, PointerMsg)>,
     picks: Vec<(ViewId, PickEvent)>,
 }
@@ -105,6 +108,19 @@ impl PickHub {
         self.lock().pointer.push((view, msg));
     }
 
+    pub fn claim_only_bells(&self, view: ViewId, only: bool) {
+        let mut hub = self.lock();
+        if only {
+            hub.bell_only.insert(view);
+        } else {
+            hub.bell_only.remove(&view);
+        }
+    }
+
+    pub(super) fn push(&self, view: ViewId, pick: PickEvent) {
+        self.lock().picks.push((view, pick));
+    }
+
     pub fn take_picks(&self) -> Vec<(ViewId, PickEvent)> {
         std::mem::take(&mut self.lock().picks)
     }
@@ -112,13 +128,13 @@ impl PickHub {
 
 /// A view's pointer, a child of the view alongside its [`PickTarget::Ground`].
 #[derive(Component)]
-struct ViewPointer {
-    view: ViewId,
+pub(super) struct ViewPointer {
+    pub(super) view: ViewId,
     ground: Entity,
     /// `None` while the pointer is off the view.
-    screen: Option<Vec2>,
+    pub(super) screen: Option<Vec2>,
     size: Vec2,
-    modifiers: Modifiers,
+    pub(super) modifiers: Modifiers,
 }
 
 pub(crate) fn plugin(app: &mut App) {
@@ -131,6 +147,7 @@ pub(crate) fn plugin(app: &mut App) {
         MeshPickingPlugin,
         HierarchyPropagatePlugin::<Pickable>::new(PostUpdate),
     ))
+    .add_plugins(super::ping_bell::plugin)
     .init_resource::<PickHub>()
     .add_message::<TargetPressed>()
     .add_systems(First, feed_pointers.in_set(PickingSystems::Input))
@@ -378,6 +395,7 @@ fn forward<E>(
     event.propagate(false);
     if let (PickKind::Down, Some(button)) = (E::KIND, event.button())
         && *target != PickTarget::Ground
+        && !hub.lock().bell_only.contains(&state.view)
     {
         pressed.write(TargetPressed {
             view: state.view,
@@ -398,7 +416,7 @@ fn forward<E>(
         modifiers: state.modifiers,
         screen: pointer.position.into(),
     };
-    hub.lock().picks.push((state.view, pick));
+    hub.push(state.view, pick);
 }
 
 #[cfg(test)]
@@ -692,5 +710,148 @@ mod tests {
             "pos": at, "yaw": 0, "color": "#22d3ee"});
         set_overlays(&mut app, id, serde_json::json!([grid(None), spawn]));
         assert_eq!(click_centre(&mut app, id)[0].target, overlay("spawn"));
+    }
+
+    /// A named player whose avatar is a 2 m cube centred on the view, with its bell.
+    fn view_with_bell() -> (App, ViewId, Entity) {
+        let (mut app, id) = view_of(&[], Vec3::new(1.0, 6.0, 7.0), Vec3::ONE);
+        let player = crate::PlayerRender {
+            id: "pat".into(),
+            name: "Pat".into(),
+            ..default()
+        };
+        let players = crate::Players {
+            players: vec![player],
+            ..default()
+        };
+        app.world()
+            .resource::<ViewHub>()
+            .send(id, ViewMsg::Players(players));
+        app.update();
+        let view = find_view(app.world_mut(), id).unwrap();
+        // The avatar systems need loaded rigs; a cube of its own stands in for the model.
+        let cube = app
+            .world_mut()
+            .resource_mut::<Assets<Mesh>>()
+            .add(Cuboid::from_length(2.0));
+        let avatar = app
+            .world_mut()
+            .spawn((
+                PickTarget::Player { id: "pat".into() },
+                Transform::from_xyz(1.0, 1.0, 1.0),
+                Visibility::default(),
+                Mesh3d(cube),
+                ChildOf(view),
+            ))
+            .id();
+        let bell = app
+            .world_mut()
+            .spawn((
+                crate::avatars::PingBell::default(),
+                crate::world_label::icon_badge(
+                    Handle::default(),
+                    28.0,
+                    16.0,
+                    Color::BLACK,
+                    avatar,
+                    Vec3::Y,
+                ),
+            ))
+            .id();
+        (app, id, bell)
+    }
+
+    /// Stands in for the UI's layout and placement: the bell is a 10 px square at the view's corner.
+    fn lay_out_bell(app: &mut App, bell: Entity) {
+        let mut entity = app.world_mut().entity_mut(bell);
+        let mut node = entity.get_mut::<Node>().unwrap();
+        node.left = Val::Px(0.0);
+        node.top = Val::Px(0.0);
+        entity.get_mut::<ComputedNode>().unwrap().size = Vec2::splat(10.0);
+    }
+
+    fn bell_shown(app: &App, bell: Entity) -> bool {
+        app.world()
+            .get::<crate::world_label::WorldLabel>(bell)
+            .unwrap()
+            .shown
+    }
+
+    #[test]
+    fn hovering_a_named_player_shows_the_bell_and_it_outlasts_the_hover_while_the_pointer_is_on_it()
+    {
+        let (mut app, id, bell) = view_with_bell();
+        lay_out_bell(&mut app, bell);
+        app.update();
+        assert!(!bell_shown(&app, bell), "no hover, no bell");
+
+        send(&app, id, PointerMsgAction::Move, CENTRE);
+        app.update();
+        app.update();
+        assert!(bell_shown(&app, bell));
+
+        // Off the player and onto the bell: still shown, well past the linger.
+        send(&app, id, PointerMsgAction::Move, Vec2::splat(5.0));
+        for _ in 0..40 {
+            app.update();
+        }
+        assert!(bell_shown(&app, bell));
+    }
+
+    #[test]
+    fn a_press_and_release_on_the_bell_pings_once_and_claims_the_press() {
+        let (mut app, id, bell) = view_with_bell();
+        lay_out_bell(&mut app, bell);
+        // The play view's configuration: only a bell's press is announced.
+        app.world().resource::<PickHub>().claim_only_bells(id, true);
+        send(&app, id, PointerMsgAction::Move, CENTRE);
+        app.update();
+        app.update();
+        let on_bell = Vec2::splat(5.0);
+        send(&app, id, PointerMsgAction::Move, on_bell);
+        send(&app, id, PointerMsgAction::Press(PRIMARY), on_bell);
+        send(&app, id, PointerMsgAction::Release(PRIMARY), on_bell);
+        let clicks: Vec<_> = picks(&mut app, id)
+            .into_iter()
+            .filter(|p| {
+                p.kind == PickKind::Click && matches!(p.target, PickTarget::PingBell { .. })
+            })
+            .collect();
+        assert_eq!(clicks.len(), 1, "{clicks:?}");
+        assert_eq!(clicks[0].target, PickTarget::PingBell { id: "pat".into() });
+        let pressed = presses(&mut app);
+        assert_eq!(pressed.len(), 1, "{pressed:?}");
+    }
+
+    #[test]
+    fn releasing_off_the_bell_pings_nothing() {
+        let (mut app, id, bell) = view_with_bell();
+        lay_out_bell(&mut app, bell);
+        send(&app, id, PointerMsgAction::Move, CENTRE);
+        app.update();
+        app.update();
+        let on_bell = Vec2::splat(5.0);
+        send(&app, id, PointerMsgAction::Move, on_bell);
+        send(&app, id, PointerMsgAction::Press(PRIMARY), on_bell);
+        send(
+            &app,
+            id,
+            PointerMsgAction::Release(PRIMARY),
+            Vec2::splat(30.0),
+        );
+        let picks = picks(&mut app, id);
+        assert!(
+            picks
+                .iter()
+                .all(|p| p.target != PickTarget::PingBell { id: "pat".into() })
+        );
+    }
+
+    #[test]
+    fn a_bell_only_view_announces_no_press_on_a_target() {
+        let (mut app, id) = view_of_a();
+        app.world().resource::<PickHub>().claim_only_bells(id, true);
+        click_centre(&mut app, id);
+        assert_eq!(presses(&mut app), []);
     }
 }

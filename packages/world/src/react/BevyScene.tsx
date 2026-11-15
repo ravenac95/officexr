@@ -2,7 +2,7 @@ import React, { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, use
 import type { CameraConfig, JoystickKind, RendererModule, ViewId } from '@officexr/render-wasm';
 import type { Actions, Bus, PlayerState, RuleRegistry, SnapshotHandshake, Store, SyncEngine, Vec3, WorldConstants } from '@officexr/sdk';
 import type { BotPool } from '../bot/BotPool.ts';
-import { pickCharacterForPlayer } from '../characters/registry.ts';
+import { resolveCharacter } from '../characters/registry.ts';
 import type { CameraMode } from '../renderer/config.ts';
 import type { FrameStatsSample } from '../renderer/FrameStatsProbe.tsx';
 import type { MotionLookState } from '../renderer/motionLook.ts';
@@ -16,6 +16,7 @@ import type { SimBakedColliders, SimCore } from '../sim/SimCore.ts';
 import { useApplication, useCatalog, useCatalogCharacters } from './application-context.tsx';
 import { bakedLayoutGlbUrl } from './bevyRenderer.ts';
 import { FrameLoop } from './frameLoop.ts';
+import { pingBellPicks } from './pingBell.ts';
 import { frameStatsMeter } from './frameStatsMeter.ts';
 import { RoomFrame, type RoomView } from './roomFrame.ts';
 import { useCreateSim, type SimImplementation } from './useCreateSim.ts';
@@ -59,6 +60,8 @@ export interface BevySceneProps {
   onModelsReady?: () => void;
   onCollidersReady?: (roomInstanceId: string) => void;
   onError?: (error: Error) => void;
+  /** A click on the bell over a hovered player. */
+  onPing?: (view: ViewId, playerId: string) => void;
 }
 
 const SCROLL_KEYS = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
@@ -253,7 +256,8 @@ export function BevyScene(props: BevySceneProps) {
     joystickKind: props.joystickKind,
     autoWalk: props.autoWalk,
     seating,
-    characterOf: (p: PlayerState) => pickCharacterForPlayer(p.id, p.avatar.model, characters),
+    // The model's URL, not its id: a catalog character's id names no `/models/characters/` file.
+    characterOf: (p: PlayerState) => resolveCharacter(p.id, p.avatar.model, characters).url,
     kinds,
     bakedLayouts: bakedLayoutDiffs,
     excludeInstance,
@@ -267,6 +271,7 @@ export function BevyScene(props: BevySceneProps) {
 
   const onProgress = useEffectEvent((percent: number) => props.onLoadProgress?.(percent));
   const onModelsReady = useEffectEvent(() => props.onModelsReady?.());
+  const onPing = useEffectEvent((view: ViewId, playerId: string) => props.onPing?.(view, playerId));
   const onDomJoystick = useEffectEvent((dom: boolean) => props.onDomJoystick?.(dom));
   const onFrameStats = useEffectEvent((sample: FrameStatsSample | null) => props.onFrameStats?.(sample));
   const { actions, rules, bus, handshake, bots, viewYaw } = props;
@@ -275,6 +280,7 @@ export function BevyScene(props: BevySceneProps) {
       return;
     }
     const { wasm, view } = bevy;
+    wasm.onPick(view, pingBellPicks(view, onPing), { bellClaimsOnly: true });
     const room = new RoomFrame(
       {
         store,
@@ -313,6 +319,8 @@ export function BevyScene(props: BevySceneProps) {
     return () => {
       loop.stop();
       frame.current = null;
+      room.dispose();
+      wasm.onPick(view, null);
       onFrameStats(null);
     };
     // The frame takes every other input through `options`.

@@ -77,7 +77,7 @@ pub fn mugshot_player(scene_json: &str, character: String) -> Players {
             vel: Vec3::ZERO,
             name: String::new(),
             airborne: false,
-            animation: None,
+            ..default()
         }],
         ..players
     }

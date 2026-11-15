@@ -712,7 +712,7 @@ mod tests {
                     vel: Vec3::ZERO,
                     name: String::new(),
                     airborne: false,
-                    animation: None,
+                    ..default()
                 })
                 .collect(),
             ..default()

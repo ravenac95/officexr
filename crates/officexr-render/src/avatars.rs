@@ -30,9 +30,14 @@ const AVATAR_YAW_OFFSET: f32 = PI;
 const TAG_HEIGHT_M: f32 = 2.0;
 const WALK_THRESHOLD: f32 = 0.05;
 const FADE: Duration = Duration::from_millis(200);
+/// Faster than authored so a bump reads as a quick recoil, not a flinch.
+const HIT_SPEED: f32 = 1.6;
+const BUMP_KICK_M: f32 = 0.16;
+/// Where the ping bell hangs, above the name tag.
+const BELL_HEIGHT_M: f32 = 2.45;
 
 /// One player as the renderer needs it, as `OfficeState.players` holds it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct PlayerRender {
     pub id: String,
     /// A `/models/characters/<character>.glb` name, e.g. `Barbarian`, or a
@@ -47,6 +52,31 @@ pub struct PlayerRender {
     pub airborne: bool,
     /// Plays this instead of the motion `vel` and `airborne` imply, as the character editor previews.
     pub animation: Option<PlayerAnimation>,
+    /// Sitting overrides the motion `vel` and `airborne` imply, and places the player at the seat.
+    pub seat: Option<Seat>,
+    pub bump: Bump,
+}
+
+/// Where a seated player sits: the body root and yaw the seat puts them at.
+/// The web frame passes the player's own `pos` and `yaw`, which the seat already set.
+#[derive(Clone, Copy, Debug)]
+pub struct Seat {
+    pub pos: Vec3,
+    pub yaw: f32,
+}
+
+/// Collision bumps a player has had; each increase of `count` is a new one,
+/// pushed along `normal` (XZ, out of whoever they hit).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Bump {
+    pub count: u32,
+    pub normal: Vec2,
+}
+
+impl PlayerRender {
+    fn placed(&self) -> (Vec3, f32) {
+        self.seat.map_or((self.pos, self.yaw), |s| (s.pos, s.yaw))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
@@ -142,6 +172,8 @@ pub struct Players {
     pub body_y: f32,
     pub player_speed: f32,
     pub run_speed: f32,
+    /// How long a bump's push takes to ease out.
+    pub bump_easing_ms: f32,
     /// Bind pose, no clips and no name tags, as the mugshot renders.
     pub paused: bool,
 }
@@ -149,7 +181,7 @@ pub struct Players {
 impl Players {
     /// Where `player`'s character model stands: the ball collider's bottom.
     pub fn feet(&self, player: &PlayerRender) -> Vec3 {
-        player.pos + Vec3::Y * (self.body_y - self.char_radius)
+        player.placed().0 + Vec3::Y * (self.body_y - self.char_radius)
     }
 }
 
@@ -161,6 +193,7 @@ impl Default for Players {
             body_y: 0.9,
             player_speed: 3.0,
             run_speed: 6.0,
+            bump_easing_ms: 180.0,
             paused: false,
         }
     }
@@ -221,13 +254,29 @@ fn anim_scale(motion: Motion, vel: Vec3, player_speed: f32, run_speed: f32) -> f
 }
 
 #[derive(Component)]
-struct Avatar {
+pub(crate) struct Avatar {
     id: String,
     character: String,
     motion: Motion,
     playing: AnimationState,
+    /// The player's `bump.count` last seen, and the running bump's start (seconds) and push.
+    bumps: u32,
+    bump: Option<(f32, Vec2)>,
     /// The `Rig_Medium` node, once bound.
     rig: Option<Entity>,
+}
+
+/// The label a hovered player shows to be pinged; `picking::ping_bell` drives it.
+#[derive(Component, Default)]
+#[cfg_attr(
+    not(feature = "picking"),
+    expect(dead_code, reason = "only `picking::ping_bell` reads the bell's state")
+)]
+pub(crate) struct PingBell {
+    /// Seconds the bell stays after the pointer leaves, so it can cross to it.
+    pub linger: f32,
+    /// A press landed on the bell, awaiting its release.
+    pub armed: bool,
 }
 
 /// Set once the character's skeleton is bound to the clips (or, paused,
@@ -446,7 +495,7 @@ fn sync_view_avatars(
     for p in &players.players {
         // ponytail: the yaw snaps; Players.tsx eases it at `turnSpeed`.
         let transform = Transform::from_translation(players.feet(p))
-            .with_rotation(Quat::from_rotation_y(p.yaw + AVATAR_YAW_OFFSET));
+            .with_rotation(Quat::from_rotation_y(p.placed().1 + AVATAR_YAW_OFFSET));
         let existing = avatars.iter_mut().find(|(_, a, _, v, _)| {
             v.parent() == view && a.id == p.id && a.character == p.character
         });
@@ -466,6 +515,8 @@ fn sync_view_avatars(
                     character: p.character.clone(),
                     motion: Motion::Idle,
                     playing: AnimationState::Idle,
+                    bumps: p.bump.count,
+                    bump: None,
                     rig: None,
                 },
                 PickTarget::Player { id: p.id.clone() },
@@ -485,6 +536,17 @@ fn sync_view_avatars(
             Color::srgba(0.0, 0.0, 0.0, 0.55),
             avatar,
             Vec3::Y * TAG_HEIGHT_M,
+        ));
+        commands.spawn((
+            PingBell::default(),
+            world_label::icon_badge(
+                assets.load("embedded://officexr_render/bell.png"),
+                28.0,
+                16.0,
+                Color::srgb(0.07, 0.07, 0.07),
+                avatar,
+                Vec3::Y * BELL_HEIGHT_M,
+            ),
         ));
     }
 }
@@ -604,6 +666,10 @@ fn choose_clip(
     if let Some(PlayerAnimation { state, speed }) = p.animation {
         return (previous, state, speed);
     }
+    // Locomotion's hysteresis restarts from idle once the player stands.
+    if p.seat.is_some() {
+        return (Motion::Idle, AnimationState::Sitting, 1.0);
+    }
     let (walk, run) = (players.player_speed, players.run_speed);
     let motion = next_motion(previous, p.vel, p.airborne, walk, run);
     (motion, motion.into(), anim_scale(motion, p.vel, walk, run))
@@ -632,16 +698,19 @@ fn play(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn animate(
+    time: Res<Time>,
     views: Query<&ViewPlayers>,
     clips: Res<Clips>,
-    mut avatars: Query<(&mut Avatar, &ChildOf), With<Bound>>,
+    mut avatars: Query<(&mut Avatar, &mut Transform, &ChildOf), With<Bound>>,
     mut rigs: Query<(&mut AnimationPlayer, &mut AnimationTransitions)>,
 ) {
     let Some((_, nodes)) = &clips.graph else {
         return;
     };
-    for (mut avatar, view) in &mut avatars {
+    let now = time.elapsed_secs();
+    for (mut avatar, mut transform, view) in &mut avatars {
         let Ok(players) = views.get(view.parent()) else {
             continue;
         };
@@ -651,11 +720,48 @@ fn animate(
         let Some(p) = players.players.iter().find(|p| p.id == avatar.id) else {
             continue;
         };
+        let bumped = p.bump.count != avatar.bumps;
+        if bumped {
+            avatar.bumps = p.bump.count;
+            avatar.bump = Some((now, p.bump.normal));
+        }
+        // Players.tsx's visual-only kick: a decaying wave along the bump's normal.
+        let mut kick = Vec3::ZERO;
+        if let Some((start, normal)) = avatar.bump {
+            let t = (now - start) * 1000.0 / players.bump_easing_ms;
+            if t >= 1.0 {
+                avatar.bump = None;
+            } else {
+                let env = (-3.2 * t).exp() * (2.0 * PI * 1.1 * t).cos();
+                kick = Vec3::new(normal.x, 0.0, normal.y) * env * BUMP_KICK_M;
+            }
+        }
+        transform.translation = players.feet(p) + kick;
         let Some(Ok((mut player, mut transitions))) = avatar.rig.map(|r| rigs.get_mut(r)) else {
             continue;
         };
         let (motion, state, speed) = choose_clip(avatar.motion, p, &players.0);
         avatar.motion = motion;
+        let hit = nodes[AnimationState::Hit as usize];
+        if bumped && p.animation.is_none() && state != AnimationState::Sitting {
+            play(
+                &mut player,
+                &mut transitions,
+                nodes,
+                &mut avatar.playing,
+                AnimationState::Hit,
+                HIT_SPEED,
+            );
+            // A bump during a reaction starts it over, as Adventurer.tsx does.
+            if let Some(active) = player.animation_mut(hit) {
+                active.replay();
+            }
+        }
+        // A bump's reaction plays over the loop, which resumes when it ends.
+        let reacting = avatar.playing == AnimationState::Hit && p.animation.is_none();
+        if reacting && player.animation(hit).is_some_and(|a| !a.is_finished()) {
+            continue;
+        }
         play(
             &mut player,
             &mut transitions,
@@ -671,7 +777,7 @@ fn animate(
 fn show_tags(
     views: Query<(&View, &ViewPlayers)>,
     avatars: Query<(&Avatar, &Labels, &ChildOf)>,
-    mut tags: Query<&mut WorldLabel>,
+    mut tags: Query<&mut WorldLabel, Without<PingBell>>,
 ) {
     for (avatar, labels, view) in &avatars {
         let Ok((view, players)) = views.get(view.parent()) else {
@@ -732,6 +838,7 @@ mod tests {
             name: String::new(),
             airborne: false,
             animation,
+            ..default()
         }
     }
 
@@ -744,6 +851,32 @@ mod tests {
         let p = player(Vec3::new(6.0, 0.0, 0.0), Some(shoot));
         let chosen = choose_clip(Motion::Walking, &p, &Players::default());
         assert_eq!(chosen, (Motion::Walking, AnimationState::Shooting, 0.5));
+    }
+
+    #[test]
+    fn a_seat_overrides_motion_but_not_an_animation_preview() {
+        let seat = Seat {
+            pos: Vec3::new(1.0, 2.0, 3.0),
+            yaw: 0.5,
+        };
+        let mut p = player(Vec3::new(6.0, 0.0, 0.0), None);
+        p.airborne = true;
+        p.seat = Some(seat);
+        let players = Players::default();
+        let chosen = choose_clip(Motion::Running, &p, &players);
+        assert_eq!(chosen, (Motion::Idle, AnimationState::Sitting, 1.0));
+        assert_eq!(players.feet(&p), Vec3::new(1.0, 2.5, 3.0));
+        assert_eq!(p.placed().1, 0.5);
+
+        let shoot = PlayerAnimation {
+            state: AnimationState::Shooting,
+            speed: 1.0,
+        };
+        p.animation = Some(shoot);
+        assert_eq!(
+            choose_clip(Motion::Idle, &p, &players).1,
+            AnimationState::Shooting
+        );
     }
 
     #[test]

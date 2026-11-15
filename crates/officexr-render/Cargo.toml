@@ -41,7 +41,7 @@ mugshot = ["dep:officexr-sim"]
 # Mesh picking on views, fed pointer input through `picking::PickHub`.
 picking = ["bevy/mesh_picking"]
 # The scenario harness in `tests/visual/`; needs a GPU or Mesa lavapipe.
-visual-tests = ["mugshot"]
+visual-tests = ["mugshot", "picking"]
 
 [[bin]]
 name = "render"

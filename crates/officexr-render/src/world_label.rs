@@ -22,6 +22,23 @@ pub(crate) struct LabelOf(pub Entity);
 #[relationship_target(relationship = LabelOf, linked_spawn)]
 pub(crate) struct Labels(Vec<Entity>);
 
+/// What every label shares: it follows `anchor`, `offset` above it, and stays hidden until placed.
+fn anchored(anchor: Entity, offset: Vec3, node: Node, background: Color) -> impl Bundle {
+    (
+        WorldLabel {
+            offset,
+            shown: true,
+        },
+        LabelOf(anchor),
+        Node {
+            position_type: PositionType::Absolute,
+            ..node
+        },
+        BackgroundColor(background),
+        Visibility::Hidden,
+    )
+}
+
 pub(crate) fn label(
     text: String,
     font_size: f32,
@@ -29,22 +46,62 @@ pub(crate) fn label(
     anchor: Entity,
     offset: Vec3,
 ) -> impl Bundle {
+    let node = Node {
+        padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+        ..default()
+    };
     (
-        WorldLabel {
-            offset,
-            shown: true,
-        },
-        LabelOf(anchor),
+        anchored(anchor, offset, node, background),
         Text::new(text),
         TextFont::from_font_size(font_size),
-        Node {
-            position_type: PositionType::Absolute,
-            padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-            ..default()
-        },
-        BackgroundColor(background),
-        Visibility::Hidden,
     )
+}
+
+/// A round `badge_px` badge holding `icon` at `icon_px`.
+pub(crate) fn icon_badge(
+    icon: Handle<Image>,
+    badge_px: f32,
+    icon_px: f32,
+    background: Color,
+    anchor: Entity,
+    offset: Vec3,
+) -> impl Bundle {
+    let node = Node {
+        width: Val::Px(badge_px),
+        height: Val::Px(badge_px),
+        justify_content: JustifyContent::Center,
+        align_items: AlignItems::Center,
+        border_radius: BorderRadius::MAX,
+        ..default()
+    };
+    (
+        anchored(anchor, offset, node, background),
+        children![(
+            ImageNode::new(icon),
+            Node {
+                width: Val::Px(icon_px),
+                height: Val::Px(icon_px),
+                ..default()
+            },
+        )],
+    )
+}
+
+/// Where a placed label is, in its view's logical pixels.
+// ponytail: logical px equal the pointer's CSS px only for the primary window; an image-target view is CSS px times DPR at scale 1.
+#[cfg_attr(
+    not(feature = "picking"),
+    expect(dead_code, reason = "only the ping bell hit-tests labels")
+)]
+pub(crate) fn rect(node: &Node, computed: &ComputedNode) -> Option<Rect> {
+    let (Val::Px(left), Val::Px(top)) = (node.left, node.top) else {
+        return None;
+    };
+    let size = computed.size() * computed.inverse_scale_factor();
+    Some(Rect::from_corners(
+        Vec2::new(left, top),
+        Vec2::new(left, top) + size,
+    ))
 }
 
 /// The camera of the view `anchor` is in, once it has one.
