@@ -439,6 +439,9 @@ importers:
       '@officexr/core-refactor':
         specifier: workspace:*
         version: link:../core-refactor
+      '@officexr/render-wasm':
+        specifier: workspace:*
+        version: link:../render-wasm
       '@officexr/sdk':
         specifier: workspace:*
         version: link:../sdk
@@ -536,6 +539,9 @@ importers:
       '@officexr/realtime-server':
         specifier: workspace:*
         version: link:../realtime-server
+      '@officexr/render-wasm':
+        specifier: workspace:*
+        version: link:../render-wasm
       '@officexr/sdk':
         specifier: workspace:*
         version: link:../sdk

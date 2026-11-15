@@ -1,7 +1,8 @@
 import { fileURLToPath } from 'node:url';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { dropBundledRenderWasm } from '@officexr/render-wasm/vite-plugin';
 import studioStorage, { seedDataDir } from '@officexr/world/vite-plugin-storage';
 import studioMcp from '@officexr/studio-mcp';
 import bots from '@officexr/world/vite-plugin-bots';
@@ -24,7 +25,7 @@ const REALTIME_TARGET =
 const backend = studioBackend(process.env);
 const PUBLIC_DIR = fileURLToPath(new URL('./public', import.meta.url));
 
-export default defineConfig(({ command, mode }) => ({
+export default defineConfig(({ command }) => ({
   // Only builds move to /studio/: in dev, Vite's base middleware would 404 root /models and /mcp.
   base: command === 'build' ? '/studio/' : '/',
   plugins: [
@@ -39,22 +40,7 @@ export default defineConfig(({ command, mode }) => ({
     //   /api/scenes     → packages/world/scenes/     (legacy back-compat for the
     //                                                 existing Scenes editor until Task 5)
     studioStorage(backend.storageOptions),
-    {
-      // The glue's `new URL(...wasm)` emits the bundled renderer wasm even once `loadRenderer` can't
-      // reach it, so with a remote base URL drop it from the build (it's too big for Pages).
-      name: 'officexr:drop-render-wasm',
-      apply: 'build',
-      generateBundle(_, bundle) {
-        if (!loadEnv(mode, import.meta.dirname, 'VITE_').VITE_RENDER_WASM_BASE_URL) {
-          return;
-        }
-        for (const name of Object.keys(bundle)) {
-          if (/officexr_render_web_bg.*\.wasm$/.test(name)) {
-            delete bundle[name];
-          }
-        }
-      },
-    },
+    dropBundledRenderWasm(),
     studioMcp({ modelRoot: PUBLIC_DIR, chromiumPath: process.env.OFFICEXR_RENDER_CHROMIUM_PATH || undefined }),
     {
       name: 'officexr:seed-data-dir',

@@ -1,11 +1,10 @@
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { useProgress } from '@react-three/drei';
+import { BevyScene } from './BevyScene.tsx';
 import type { Actions, Bus, PlayerId, RuleRegistry, Store, SyncEngine, SnapshotHandshake, Vec3 } from '@officexr/sdk';
 import type { BotPool } from '../bot/BotPool.ts';
 import type { FrameStatsSample } from '../renderer/FrameStatsProbe.tsx';
 import type { CameraMode } from '../renderer/config.ts';
 import type { MotionLookState } from '../renderer/motionLook.ts';
-import { Scene, type SimImplementation } from '../renderer/Scene.tsx';
 import {
   ErrorBanner,
   FocusIndicator,
@@ -15,7 +14,7 @@ import {
   WorldHud,
   type HudRealtime,
 } from './hud.tsx';
-import { WorldLoadingScreen, type WorldLoadingScreenProps } from './LoadingScreen.tsx';
+import { WorldLoadingScreen } from './LoadingScreen.tsx';
 import { useCameraMode } from './useCameraMode.ts';
 import { useCoarsePointer } from './useCoarsePointer.ts';
 import { NO_MOVE, type MoveInput } from '../renderer/moveIntent.ts';
@@ -23,6 +22,7 @@ import { VirtualJoystick } from './VirtualJoystick.tsx';
 import { createViewYaw, ViewYawProvider } from './viewYaw.tsx';
 import { usePlaySession, type PlayStorages } from './usePlaySession.ts';
 import { useWorldConstants } from './useWorldConstants.ts';
+import type { SimImplementation } from './useCreateSim.ts';
 import { useSlowNotice } from './useSlowNotice.ts';
 import { useWorldFocus } from './useWorldFocus.ts';
 import { NavGridProvider, useBuildNavGrid } from './useNavGrid.ts';
@@ -56,11 +56,13 @@ export interface PlayViewProps {
   cameraMode?: CameraMode;
   onCameraModeChange?: (mode: CameraMode) => void;
   /** Steers the view with device motion; absent means off. */
+  // ponytail: Bevy's controls have no device-motion look yet, so this is ignored until they do.
   motionLook?: MotionLookState;
   invertLook?: boolean;
   /** `'debug'` shows the camera, transport and layout status plus the focus chip; `'player'` shows none of it. */
   hud?: 'debug' | 'player';
-  /** Shows a ping bell when hovering another player's avatar in the fixed camera. */
+  /** Pings another player; the 3D view has no hover bell yet, so pings come from the participant list. */
+  // ponytail(OSO-7939): the 3D hover bell waits on Bevy picking; this is the seam it hooks into.
   onPingPlayer?: (id: PlayerId) => void;
   /** The local player's simulation; default `'ts'`. */
   sim?: SimImplementation;
@@ -73,7 +75,7 @@ export const simFromSearch = (search: string): SimImplementation =>
   new URLSearchParams(search).get('sim') === 'rust' ? 'rust' : 'ts';
 
 /**
- * Plays a map: loads it into the store, renders `<Scene>` once it has
+ * Plays a map: loads it into the store, renders `<BevyScene>` once it has
  * landed, and overlays the HUD, focus chip and error banner. Until the
  * first map's models and floor colliders have loaded, a loading screen
  * covers everything and the self player is held out of the world.
@@ -100,6 +102,7 @@ export function PlayView(props: PlayViewProps) {
   const [readiness, dispatch] = useReducer(worldReadiness, INITIAL_WORLD_READINESS);
   const ready = readiness.type === 'ready';
   const slow = useSlowNotice(readiness.type === 'loading');
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
     if (session.loaded) {
@@ -118,9 +121,9 @@ export function PlayView(props: PlayViewProps) {
 
   return (
     <>
-      {/* Not before the map lands: Scene broadcasts world state on mount. */}
+      {/* Not before the map lands: BevyScene broadcasts world state on mount. */}
       {session.loaded && (
-        <Scene
+        <BevyScene
           store={props.store}
           actions={props.actions}
           rules={props.rules}
@@ -130,7 +133,6 @@ export function PlayView(props: PlayViewProps) {
           bots={props.bots}
           selfId={props.selfId}
           cameraMode={cameraMode}
-          motionLook={props.motionLook}
           invertLook={props.invertLook}
           view={worldConstants}
           worldFocused={worldFocused}
@@ -142,13 +144,11 @@ export function PlayView(props: PlayViewProps) {
           onFrameStats={props.onFrameStats}
           viewYaw={viewYaw}
           selfReady={ready}
-          onPingPlayer={props.onPingPlayer}
           sim={props.sim}
+          onLoadProgress={setProgress}
           onModelsReady={() => dispatch({ type: 'modelsReady' })}
           onCollidersReady={(roomInstanceId) => dispatch({ type: 'collidersReady', roomInstanceId })}
-          onCollidersError={(err) =>
-            dispatch({ type: 'collidersFailed', message: `Could not load the world: ${err.message}` })
-          }
+          onError={(err) => dispatch({ type: 'collidersFailed', message: `Could not load the world: ${err.message}` })}
         />
       )}
       {props.hud !== 'player' && (
@@ -171,10 +171,11 @@ export function PlayView(props: PlayViewProps) {
         </ViewYawProvider>
       </NavGridProvider>
       {!ready && (
-        <LoadingScreenWithProgress
+        <WorldLoadingScreen
           title={props.title}
           step={session.loaded ? 'Loading world…' : 'Loading map…'}
           error={readiness.type === 'failed' ? readiness.message : undefined}
+          progress={readiness.type === 'failed' ? undefined : progress}
           slow={slow}
         />
       )}
@@ -182,8 +183,3 @@ export function PlayView(props: PlayViewProps) {
   );
 }
 
-/** Subscribes to drei's load progress only while mounted, so the world doesn't re-render on later loads. */
-function LoadingScreenWithProgress(props: WorldLoadingScreenProps) {
-  const { progress } = useProgress();
-  return <WorldLoadingScreen {...props} progress={props.error ? undefined : progress} />;
-}

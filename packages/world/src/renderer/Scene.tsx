@@ -1,15 +1,12 @@
-import React, { Suspense, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import * as THREE from 'three';
 import { Canvas, useFrame } from '@react-three/fiber';
-import RAPIER from '@dimforge/rapier3d-compat';
 import { SkyDome } from './SkyDome.tsx';
 import { LightingRig } from './LightingRig.tsx';
 import { lightBasis, snapToShadowTexel } from './shadow-snap.ts';
-import { excludeLayoutInstances } from '../scenes/compile-map.ts';
 import type {
   Actions,
   Bus,
-  PlayerId,
   RuleRegistry,
   Store,
   SyncEngine,
@@ -20,26 +17,13 @@ import type {
 import type { BotPool } from '../bot/BotPool.ts';
 import { Players } from './Players.tsx';
 import { CameraRig } from './CameraRig.tsx';
-import type { MotionLookState } from './motionLook.ts';
 import { SceneFrame } from './SceneFrame.tsx';
 import { ObjectInstances } from './ObjectInstances.tsx';
-import { BakedLayout } from './BakedLayout.tsx';
-import { useBakedColliders } from './useBakedColliders.ts';
 import { ProximityGlow } from './ProximityGlow.tsx';
-import { ModelsReady } from './ModelsReady.tsx';
-import { FrameStatsProbe, type FrameStatsSample } from './FrameStatsProbe.tsx';
-import { ViewYawProbe } from './ViewYawProbe.tsx';
-import type { ViewYaw } from '../react/viewYaw.tsx';
 import { GAMEPLAY_FOV, type CameraMode } from './config.ts';
-import { placementTransform } from './placement-transform.ts';
-import type { BakedLayoutPlacement } from '../app/map-loader.ts';
 import type { ViewConfig } from './viewConfig.ts';
 import type { ViewOffsets } from './lookControls.ts';
-import type { AutoWalkSource, MoveInput } from './moveIntent.ts';
-import type { SeatingSource } from './seated.ts';
-import type { SimBakedColliders, SimCore } from '../sim/SimCore.ts';
-import { TsSimCore } from '../sim/TsSimCore.ts';
-import { loadWasmSimCore } from '../sim/WasmSimCore.ts';
+import { useCreateSim } from '../react/useCreateSim.ts';
 
 /**
  * Each frame, anchor the sun (directional light + its target) to the
@@ -83,40 +67,6 @@ function SunFollower(props: {
   return null;
 }
 
-type CreateSim = (charRadius: number) => SimCore;
-
-const createTsSimCore: CreateSim = (charRadius) => new TsSimCore(charRadius);
-
-/** Which `SimCore` runs the local player; `'rust'` is the wasm build of `crates/officexr-sim`. */
-export type SimImplementation = 'ts' | 'rust';
-
-/** The factory for `sim`, or null while its Rapier build loads. */
-function useCreateSim(sim: SimImplementation, onError?: (error: Error) => void): CreateSim | null {
-  const [loaded, setLoaded] = useState<{ sim: SimImplementation; create: CreateSim } | null>(null);
-  const reportError = useEffectEvent((error: Error) => onError?.(error));
-  useEffect(() => {
-    let live = true;
-    const load = sim === 'rust' ? loadWasmSimCore() : RAPIER.init().then(() => createTsSimCore);
-    load.then(
-      (create) => {
-        if (live) {
-          setLoaded({ sim, create });
-        }
-      },
-      (error: Error) => reportError(error),
-    );
-    return () => {
-      live = false;
-    };
-  }, [sim]);
-  return loaded?.sim === sim ? loaded.create : null;
-}
-
-/** A layout placement with the URL of its baked GLB, e.g. `/api/baked-layouts/lobby`. */
-export interface SceneBakedLayout extends BakedLayoutPlacement {
-  gltfPath: string;
-}
-
 interface SceneProps {
   store: Store;
   actions: Actions;
@@ -127,9 +77,6 @@ interface SceneProps {
   bots?: BotPool;
   selfId: string;
   cameraMode: CameraMode;
-  /** Device-motion look; absent leaves the view to mouse and touch. */
-  motionLook?: MotionLookState;
-  invertLook?: boolean;
   /** Fully resolved lighting, background, camera and proximity values. */
   view: ViewConfig;
   /** When false, keyboard input is released from the in-world
@@ -139,22 +86,10 @@ interface SceneProps {
    * true preserves the historical behaviour for any caller that
    * doesn't wire a focus tracker. */
   worldFocused?: boolean;
-  /** Analog walking input from a touch joystick; absent where there is none. */
-  moveInputRef?: React.MutableRefObject<MoveInput>;
-  /** World-space steering used while there is no key or stick input; absent where nothing auto-walks. */
-  autoWalk?: AutoWalkSource;
-  /** Sitting and standing for the self player; absent where nobody sits. */
-  seating?: SeatingSource;
   /** Spawn points for the active map, in world coords. Forwarded
    * straight to `SceneFrame`'s fall-respawn rule. Empty/undefined
    * disables respawn (the player floats in the void instead). */
   spawnPoints?: readonly Vec3[];
-  /**
-   * Layout placements to draw from their baked GLBs, with their colliders.
-   * The store's instances compiled from these layouts are then left out
-   * of `ObjectInstances` and the sim colliders; bots still collide with them.
-   */
-  bakedLayouts?: readonly SceneBakedLayout[];
   /** When true, every character rendered in this scene is frozen at
    * its bind pose (no animation mixer activity). Used by the Mugshot
    * mode to produce deterministic snapshot tests. */
@@ -165,62 +100,12 @@ interface SceneProps {
    * exactly — capture baselines are deterministic regardless of
    * the user's display DPI. */
   dpr?: number;
-  /** When provided, mounts a `<FrameStatsProbe>` inside the canvas
-   * that reports FPS / frame-time / draw-call samples here (and a
-   * final `null` on unmount). The studio's perf footer is the
-   * intended consumer; omitting the prop adds zero per-frame work. */
-  onFrameStats?: (sample: FrameStatsSample | null) => void;
-  /** Receives the camera's yaw each frame; omitting it mounts no probe. */
-  viewYaw?: ViewYaw;
-  /** When false, the self player is not rendered, so it has no body and
-   * neither moves nor falls. Default true. */
-  selfReady?: boolean;
-  /** Called once per mount when every model in the scene, plus the self
-   * player's, has loaded. */
-  onModelsReady?: () => void;
-  /** Shows a ping bell when hovering another player's avatar; omitting it renders nothing extra. */
-  onPingPlayer?: (id: PlayerId) => void;
-  /** Called once each baked layout's colliders have mounted, with its room instance id. */
-  onCollidersReady?: (roomInstanceId: string) => void;
-  onCollidersError?: (error: Error) => void;
-  /** Default `'ts'`. */
-  sim?: SimImplementation;
 }
 
+// ponytail(OSO-7950): only the Mugshot mode mounts Scene now; it goes once Mugshot renders through Bevy.
 export function Scene(props: SceneProps) {
-  const { store, selfId, cameraMode, sync, bakedLayouts } = props;
-  const excludeBakedInstance = useMemo(() => excludeLayoutInstances(bakedLayouts), [bakedLayouts]);
-  const loadedBakedColliders = useBakedColliders(bakedLayouts, props.onCollidersError);
-  const notifiedColliders = useRef(new Set<string>());
-  const createSim = useCreateSim(props.sim ?? 'ts', props.onCollidersError);
-  const notifyCollidersReady = (ids: readonly string[]) => {
-    for (const id of ids) {
-      if (loadedBakedColliders.has(id) && !notifiedColliders.current.has(id)) {
-        notifiedColliders.current.add(id);
-        props.onCollidersReady?.(id);
-      }
-    }
-  };
-  const bakedColliders = useMemo(
-    (): SimBakedColliders[] =>
-      (bakedLayouts ?? []).flatMap((p) => {
-        const colliders = loadedBakedColliders.get(p.roomInstanceId);
-        if (colliders === null) {
-          // A stale bake embeds none: its compiled store instances collide instead.
-          return [];
-        }
-        const { position, rotation } = placementTransform(p);
-        return [
-          {
-            roomInstanceId: p.roomInstanceId,
-            position: { x: position[0], y: position[1], z: position[2] },
-            yawRad: rotation[1],
-            colliders: colliders ?? [],
-          },
-        ];
-      }),
-    [bakedLayouts, loadedBakedColliders],
-  );
+  const { store, selfId, cameraMode, sync } = props;
+  const createSim = useCreateSim('ts');
   const { proximity, lighting, background, fixedCamera } = props.view;
   const worldFocused = props.worldFocused ?? true;
 
@@ -314,18 +199,7 @@ export function Scene(props: SceneProps) {
       // consumers (Debug) don't use the export path.
       gl={{ preserveDrawingBuffer: true }}
     >
-      {props.onFrameStats && <FrameStatsProbe onSample={props.onFrameStats} />}
       <Suspense fallback={null}>
-        {bakedLayouts?.map((p) => {
-          const transform = placementTransform(p);
-          return (
-            <React.Fragment key={p.roomInstanceId}>
-              <group {...transform}>
-                <BakedLayout gltfPath={p.gltfPath} layoutName={p.layoutName} />
-              </group>
-            </React.Fragment>
-          );
-        })}
         {/* Lighting: shared LightingRig. SunFollower (mounted below,
             after Players) moves the sun to track the local player,
             keeping the orthographic shadow camera tight around the
@@ -356,7 +230,7 @@ export function Scene(props: SceneProps) {
           }
         />
 
-        <ObjectInstances store={store} exclude={excludeBakedInstance} />
+        <ObjectInstances store={store} />
 
         <Players
           store={store}
@@ -366,8 +240,6 @@ export function Scene(props: SceneProps) {
           selfPosRef={selfPosRef}
           paused={props.paused}
           isAirborneRef={isAirborneRef}
-          selfReady={props.selfReady}
-          onPingPlayer={props.onPingPlayer}
         />
 
         {/* Mounted after Players: same-priority useFrames run in
@@ -389,16 +261,12 @@ export function Scene(props: SceneProps) {
           yawRef={yawRef}
           pitchRef={pitchRef}
           viewOffsetsRef={viewOffsetsRef}
-          motionLook={props.motionLook}
-          invertLook={props.invertLook}
           conversationFocusRef={conversationFocusRef}
           conversationDistance={proximity.conversationDistance}
           conversationHeight={proximity.conversationHeight}
           fixed={fixedCam}
           paused={props.paused}
         />
-        {/* After CameraRig, so the probe reads this frame's pose, not last frame's. */}
-        {props.viewYaw && <ViewYawProbe viewYaw={props.viewYaw} />}
 
         <SceneFrame
           proximityOutputRef={proximityOutputRef}
@@ -415,13 +283,7 @@ export function Scene(props: SceneProps) {
           fixedMovementYawOffsetDeg={fixedCamera.movementYawOffsetDeg}
           yawRef={yawRef}
           viewOffsetsRef={viewOffsetsRef}
-          moveInputRef={props.moveInputRef}
-          autoWalk={props.autoWalk}
-          seating={props.seating}
-          selfReady={props.selfReady}
           createSim={createSim}
-          bakedColliders={bakedColliders}
-          onBakedCollidersApplied={notifyCollidersReady}
           worldFocused={worldFocused}
           spawnPoints={props.spawnPoints}
           isAirborneRef={isAirborneRef}
@@ -445,9 +307,6 @@ export function Scene(props: SceneProps) {
           cameraMode={cameraMode}
           conversationFocusRef={conversationFocusRef}
         />
-        {props.onModelsReady && (
-          <ModelsReady store={store} selfId={selfId} onReady={props.onModelsReady} />
-        )}
       </Suspense>
     </Canvas>
   );

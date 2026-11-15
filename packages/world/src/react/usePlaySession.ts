@@ -2,7 +2,7 @@ import { useEffect, useEffectEvent, useMemo, useState } from 'react';
 import type { Actions, FootprintRect, Vec3 } from '@officexr/sdk';
 import { bakedLayoutAssetUrl } from '../app/asset-url.ts';
 import { loadMap, type LoadedMap, type MapLoaderDeps } from '../app/map-loader.ts';
-import type { SceneBakedLayout } from '../renderer/Scene.tsx';
+import type { SceneBakedLayout } from '../renderer/useBakedColliders.ts';
 import { useApplication } from './application-context.tsx';
 
 /** Clearance above the spawn point the local player appears at; the floor is loaded by then. */

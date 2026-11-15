@@ -180,9 +180,13 @@ The studio backend is a separate process, `pnpm --filter @officexr/studio-server
 
 ```bash
 pnpm --filter @officexr/sim-wasm build      # the wasm simulation, needed first; see crates/README.md
-pnpm --filter @officexr/render-wasm build   # the Bevy renderer for the studio's ?op=bevy (slow LTO build)
+pnpm --filter @officexr/render-wasm build   # the Bevy renderer (slow LTO build): the 3D room view, studio debug mode and ?op=bevy
 pnpm build                  # outputs the SPA to packages/web/dist/
 ```
+
+The web app's 3D view and the studio's debug mode draw through the Bevy renderer, so `pnpm dev`, `pnpm build` and
+`pnpm dev:studio` need the render-wasm build, unless `VITE_RENDER_WASM_BASE_URL` points at hosted builds
+(`<base>/<content-hash>/{webgpu,webgl2}/`, as the Pages deploy uploads them). Unit tests and the 2D view don't load it.
 
 ### Cloudflare Pages
 

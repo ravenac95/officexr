@@ -1,17 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPersistentLocalState } from '@officexr/core-refactor';
-import {
-  loadRenderer,
-  type CameraPose,
-  type PickEvent,
-  type RendererModule,
-  type ViewId,
-  type ViewKind,
-} from '@officexr/render-wasm';
+import type { CameraPose, PickEvent, RendererModule, ViewId, ViewKind } from '@officexr/render-wasm';
 import type { OfficeState } from '@officexr/sdk';
-import { modelUrl } from '@officexr/world/app';
 import { pickCharacterForPlayer } from '@officexr/world/characters';
-import { useApplication, usePlaySession } from '@officexr/world/react';
+import { bootBevy, useApplication, usePlaySession } from '@officexr/world/react';
 import { createStorages } from '../debug/DebugApp.tsx';
 import { useMapPicker } from '../debug/useMapPicker.ts';
 import { DEFAULT_MUGSHOT_BACKGROUND, DEFAULT_MUGSHOT_LIGHTING, cubesForMode } from '../mugshot/MugshotApp.tsx';
@@ -41,21 +33,6 @@ const MUGSHOT_SIZE_PX = 510;
 const PREVIEW_CHARACTER = 'Barbarian';
 const NEAR = 0.1;
 const FAR = 2000;
-
-let booted: Promise<RendererModule> | null = null;
-
-/**
- * Bevy owns its event loop for the page's lifetime, so it boots once, with the first caller's
- * `primary` canvas, if any, as its primary window.
- */
-function bootBevy(primary?: HTMLCanvasElement): Promise<RendererModule> {
-  booted ??= loadRenderer().then((wasm) => {
-    const origin = modelUrl('/models/').replace(/\/models\/$/, '') || window.location.origin;
-    wasm.init(origin, primary);
-    return wasm;
-  });
-  return booted;
-}
 
 const canvasStyle: React.CSSProperties = { display: 'block', width: '100%', height: '100%' };
 

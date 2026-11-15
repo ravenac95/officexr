@@ -34,10 +34,10 @@ export interface FrameStatsSample {
   drawCalls: number;
   /** Triangles rasterised in the last rendered frame. */
   triangles: number;
-  /** Live geometry count (`gl.info.memory.geometries`). */
-  geometries: number;
-  /** Live texture count (`gl.info.memory.textures`). */
-  textures: number;
+  /** Live geometry count (`gl.info.memory.geometries`); absent where the renderer doesn't report it. */
+  geometries?: number;
+  /** Live texture count (`gl.info.memory.textures`); absent where the renderer doesn't report it. */
+  textures?: number;
 }
 
 export interface FrameStatsProbeProps {

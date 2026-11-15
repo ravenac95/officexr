@@ -2,7 +2,8 @@
 // future shells) goes here; renderer-internal helpers are only exported
 // when a sibling sub-package needs them.
 
-export { Scene, type SimImplementation } from './Scene.tsx';
+export { Scene } from './Scene.tsx';
+export type { SimImplementation } from '../react/useCreateSim.ts';
 export {
   Adventurer,
   STATE_CLIPS,
@@ -10,7 +11,6 @@ export {
   type AnimationState,
 } from './Adventurer.tsx';
 export { Players } from './Players.tsx';
-export { PlayerNameTag } from './PlayerNameTag.tsx';
 export { CharacterPreviewCanvas } from './CharacterPreviewCanvas.tsx';
 export { BakedLayout, BakedLayoutErrorBoundary, type BakedLayoutProps } from './BakedLayout.tsx';
 export { SkyDome, resolveHorizonColor, type SkySun } from './SkyDome.tsx';

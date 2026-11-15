@@ -5,11 +5,14 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
-import { goToModeHermetic, waitForCanvasReady } from './helpers.ts';
+import { forceWebgl2, goToModeHermetic, waitForBevyReady } from './helpers.ts';
 import { DEFAULT_WORLD_CONSTANTS, type WorldConstants } from '../../packages/sdk/src/index.ts';
 import { SAVE_DEBOUNCE_MS } from '../../packages/studio/src/panels/world/saveDebounce.ts';
 
 const RED = '#ff0000';
+
+// SwiftShader draws the Bevy page a frame or two a second, and each input waits on one.
+test.use({ actionTimeout: 30_000 });
 
 const SEEDED: WorldConstants = {
   ...DEFAULT_WORLD_CONSTANTS,
@@ -60,13 +63,14 @@ async function redFraction(page: Page): Promise<number> {
 test('seeded world constants show in the panels, drive the scene and save once per edit', async ({
   page,
 }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(240_000);
 
+  await forceWebgl2(page);
   await goToModeHermetic(page, 'debug', { worldConstants: SEEDED });
-  await waitForCanvasReady(page, 3000, 30_000);
+  await waitForBevyReady(page);
 
   await expect.poll(async () => (await storeConstants(page))?.animation.walkSpeed).toBe(4.25);
-  await expect.poll(() => redFraction(page), { timeout: 15_000 }).toBeGreaterThan(0.05);
+  await expect.poll(() => redFraction(page), { timeout: 60_000 }).toBeGreaterThan(0.05);
 
   await page.getByRole('button', { name: 'Animation' }).click();
   const walkSpeed = page.locator('label', { hasText: 'walk anim ×' }).locator('..').getByRole('button');

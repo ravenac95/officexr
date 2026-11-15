@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   PairTracker,
   tickProximity,
-  tickSession,
   type Actions,
   type Bus,
   type FootprintRect,
@@ -18,6 +17,7 @@ import {
 import { GhostController, NO_KEYS, type GhostKeys } from '../app/ghost-controller.ts';
 import { resolveCharacterTunables } from '../characters/resolve.ts';
 import { useApplication, useCatalog } from '../react/application-context.tsx';
+import { FrameLoop } from '../react/frameLoop.ts';
 import { ErrorBanner } from '../react/hud.tsx';
 import { WorldLoadingScreen } from '../react/LoadingScreen.tsx';
 import { PlayControlsProvider } from '../react/playControls.tsx';
@@ -63,8 +63,6 @@ const KEY_BINDINGS: Record<string, keyof GhostKeys> = {
   KeyD: 'right',
   ArrowRight: 'right',
 };
-/** Caps the step after a backgrounded tab resumes. */
-const MAX_DT_SEC = 0.1;
 /** Half-size of the area shown around players when the map has nothing to fit to. */
 const EMPTY_MAP_MARGIN_M = 5;
 /** The bell starts where the hover area ends, so the pointer can travel from the marker to it. */
@@ -155,7 +153,6 @@ export function TopDownPlayView(props: TopDownPlayViewProps) {
       }),
   );
   const [controls] = useState(() => createGhostPlayControls(controller));
-  const prevStateRef = useRef<OfficeState | null>(null);
   const drawInputsRef = useRef<{ boxes: readonly MapBox[]; footprint: readonly FootprintRect[]; bounds: XZBounds | null }>({
     boxes: [],
     footprint: [],
@@ -222,23 +219,9 @@ export function TopDownPlayView(props: TopDownPlayViewProps) {
     if (!session.loaded) {
       return;
     }
-    let last = performance.now();
-    let frame = requestAnimationFrame(function loop(now) {
-      frame = requestAnimationFrame(loop);
-      const dtSec = Math.min(Math.max((now - last) / 1000, 0), MAX_DT_SEC);
-      last = now;
+    const loop = new FrameLoop({ actions, store, rules, bus, sync, handshake }, (dtSec, now) => {
       controller.step(dtSec);
       controls.refresh();
-      prevStateRef.current = tickSession({
-        actions,
-        store,
-        rules,
-        bus,
-        sync,
-        handshake,
-        prevState: prevStateRef.current ?? store.getState(),
-        nowMs: now,
-      });
       const state = store.getState();
       const proximity = tickProximity(tracker, { players: state.players, voiceZones: state.voiceZones, selfId, settings: state.worldSettings, nowMs: now, dtSec });
       for (const e of proximity.events) {
@@ -266,7 +249,8 @@ export function TopDownPlayView(props: TopDownPlayViewProps) {
         outer: state.worldSettings.proximityOuterRadius,
       });
     });
-    return () => cancelAnimationFrame(frame);
+    loop.start();
+    return () => loop.stop();
   }, [session.loaded, store, actions, rules, bus, sync, handshake, selfId, controller, controls, tracker]);
 
   const onClick = (e: React.MouseEvent<HTMLCanvasElement>) => {

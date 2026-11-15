@@ -128,7 +128,7 @@ describe('ChatPanel', () => {
     setup();
     pressEnter();
     fireEvent.change(input()!, { target: { value: 'draft' } });
-    act(() => void fireEvent.mouseDown(document.body));
+    act(() => void fireEvent(document.body, new MouseEvent('pointerdown', { bubbles: true, button: 0 })));
     act(() => void vi.advanceTimersByTime(AUTO_HIDE_MS));
     expect(input()).toBeNull();
     pressEnter();

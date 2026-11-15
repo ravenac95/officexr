@@ -11,6 +11,10 @@
     "./load": {
       "types": "./load.d.ts",
       "default": "./load.js"
+    },
+    "./vite-plugin": {
+      "types": "./vite-plugin.d.ts",
+      "default": "./vite-plugin.js"
     }
   },
   "scripts": {

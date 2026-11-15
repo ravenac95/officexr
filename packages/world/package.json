@@ -43,6 +43,7 @@
     "@gltf-transform/extensions": "^4.1.2",
     "@gltf-transform/functions": "^4.1.2",
     "@officexr/realtime-server": "workspace:*",
+    "@officexr/render-wasm": "workspace:*",
     "@officexr/sdk": "workspace:*",
     "@officexr/sim-wasm": "workspace:*",
     "@react-three/drei": "^10.7.7",
