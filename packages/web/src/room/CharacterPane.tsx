@@ -2,8 +2,7 @@ import { useEffect, useState, type ComponentType } from 'react';
 import type { PersistentLocalState } from '@officexr/core-refactor';
 import type { OfficeState } from '@officexr/sdk';
 import { baseCharacterOptions, catalogCharacterOptions, resolveCharacter, type CatalogCharacters, type CharacterOption } from '@officexr/world/characters';
-import { useCatalogCharacters } from '@officexr/world/react';
-import { CharacterPreviewCanvas } from '@officexr/world/renderer';
+import { BevyPreview, useCatalogCharacters, type PreviewSubject } from '@officexr/world/react';
 import type { apiFetch } from '../apiOrigin';
 import { FIELD } from '../hud/ui/fieldStyles';
 import { chooseCharacter } from './character';
@@ -18,6 +17,16 @@ function useSelfCharacter({ store, selfId }: PersistentLocalState, catalog: Cata
   return resolveCharacter(selfId, model, catalog);
 }
 
+const IDLE = { state: 'idle', speed: 1 } as const;
+/** Turned to face the camera. */
+const FACING = { pos: [0, 0, 0] as [number, number, number], yaw: Math.PI };
+
+/** The chosen character idling, from a fixed camera. */
+function CharacterPreview({ url }: { url: string }) {
+  const subject: PreviewSubject = { type: 'character', character: url, animation: IDLE, placement: FACING };
+  return <BevyPreview subject={subject} orbit={false} />;
+}
+
 export function CharacterAction() {
   const { openPane } = useSettings();
   return <SettingsActionButton onClick={() => openPane('character')}>Character</SettingsActionButton>;
@@ -29,7 +38,7 @@ type SaveResult = (error: string | null) => void;
 export function CharacterPane({
   local,
   onSaveResult,
-  Preview = CharacterPreviewCanvas,
+  Preview = CharacterPreview,
   fetchFn,
 }: {
   local: PersistentLocalState;

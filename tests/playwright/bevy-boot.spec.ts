@@ -1,8 +1,7 @@
 /** `?op=bevy`: the studio boots `crates/officexr-render-web` on the current map. */
 
 import { test, expect, type Page } from '@playwright/test';
-import { PNG } from 'pngjs';
-import { forceWebgl2 } from './helpers.ts';
+import { canvasPixels, forceWebgl2 } from './helpers.ts';
 
 test('op=bevy boots the Bevy renderer', async ({ page }) => {
   test.setTimeout(180_000);
@@ -73,28 +72,6 @@ test('op=bevy&pick=1 reports a click on the canvas centre', async ({ page }) => 
     );
   await expect.poll(clicks, { timeout: 60_000 }).toBe(1);
 });
-
-/**
- * Each canvas's pixels from one page screenshot, which sees WebGL and read-back canvases alike as
- * composited. Element screenshots wait on a compositor frame, too slow under SwiftShader. `fromTop`
- * skips that fraction of each canvas's height.
- */
-async function canvasPixels(page: Page, selectors: string[], fromTop = 0) {
-  const boxes = await page.evaluate(
-    (all) => all.map((s) => document.querySelector(s)!.getBoundingClientRect().toJSON() as DOMRect),
-    selectors,
-  );
-  const shot = PNG.sync.read(await page.screenshot({ timeout: 120_000 }));
-  return boxes.map((box) => {
-    const out: number[] = [];
-    for (let y = Math.ceil(box.y + box.height * fromTop); y < Math.floor(box.y + box.height); y++) {
-      for (let x = Math.ceil(box.x); x < Math.floor(box.x + box.width); x++) {
-        out.push(shot.data.readUInt32BE((y * shot.width + x) * 4));
-      }
-    }
-    return out;
-  });
-}
 
 test('op=bevy draws the sky, not a blank canvas, when the map fails to load', async ({ page }) => {
   test.setTimeout(240_000);

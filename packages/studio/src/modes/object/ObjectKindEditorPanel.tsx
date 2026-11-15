@@ -1,6 +1,4 @@
-import React, { Suspense, useMemo } from 'react';
-import { useGLTF } from '@react-three/drei';
-import { modelUrl } from '@officexr/world/app';
+import React from 'react';
 import {
   CUBE_KIND_CATEGORIES,
   type CubeKindCategory,
@@ -8,9 +6,9 @@ import {
   type SeatSpec,
   type WorldObjectKind,
 } from '@officexr/world';
-import { getKindBoundingDimensions } from '@officexr/world/renderer';
 
 import { Button } from '../../components/ui/button.tsx';
+import { bakedSize, type KindSize } from './bakedSize.ts';
 import {
   ColorInput,
   NullableField,
@@ -88,14 +86,7 @@ export function ObjectKindEditorPanel({ kind, applyPatch }: ObjectKindEditorPane
       </Section>
 
       <Section title="Dimensions">
-        <Suspense fallback={<DimensionsFallback />}>
-          <KindDimensionsEditor
-            gltfPath={kind.gltfPath}
-            scale={kind.scale}
-            dimensions={kind.dimensions}
-            applyPatch={applyPatch}
-          />
-        </Suspense>
+        <KindDimensionsEditor kind={kind} applyPatch={applyPatch} />
       </Section>
 
       <Section title="Material overrides">
@@ -270,102 +261,65 @@ interface LabelInputProps {
 }
 
 interface KindDimensionsEditorProps {
-  gltfPath: string;
-  scale: number;
-  dimensions: { width: number; height: number; depth: number } | undefined;
+  kind: WorldObjectKind;
   applyPatch: (partial: Partial<WorldObjectKind>) => void;
 }
 
 /**
- * Width / height / depth editor backed by the kind's `dimensions`
- * field in the catalog.
- *
- * Hybrid bake strategy (see schema docstring):
- *   - If `dimensions` is set in the catalog, those values populate the
- *     fields and drive compile-time stride. Authors can hand-edit.
- *   - If unset, the GLTF-derived measurement is shown as the field
- *     value but is NOT persisted automatically — the author clicks
- *     "Recompute from GLTF" to commit it to the catalog. This avoids
- *     surprising writes when a user is just browsing the kind list.
- *
- * The GLTF is loaded via drei's `useGLTF` (cached by URL), so opening
- * a kind in this editor does not trigger a duplicate download even
- * when the preview canvas already has it loaded.
+ * Width / height / depth editor backed by the kind's `dimensions` in the catalog. Unset, it shows the
+ * size of the bounds `pnpm --filter @officexr/world bake:dimensions` measured without writing it;
+ * "Reset to baked bounds" commits that size. A kind with neither has nothing to edit from.
  */
-function KindDimensionsEditor({
-  gltfPath,
-  scale,
-  dimensions,
-  applyPatch,
-}: KindDimensionsEditorProps) {
-  const gltf = useGLTF(modelUrl(gltfPath));
-  const measuredDims = useMemo(
-    () => getKindBoundingDimensions(gltf.scene, scale),
-    [gltf.scene, scale],
-  );
-  const effective = dimensions ?? measuredDims;
-  const isBaked = dimensions !== undefined;
+function KindDimensionsEditor({ kind, applyPatch }: KindDimensionsEditorProps) {
+  const baked = bakedSize(kind);
+  const effective = kind.dimensions ?? baked;
+  const axes = ['width', 'height', 'depth'] as const;
+  if (!effective) {
+    return (
+      <div>
+        {axes.map((axis) => (
+          <Readonly key={axis} label={axis} value="—" />
+        ))}
+        <p className="px-3 py-1 text-xs text-muted-foreground">
+          Not baked: run <code>pnpm --filter @officexr/world bake:dimensions</code>.
+        </p>
+      </div>
+    );
+  }
 
-  const update = (axis: 'width' | 'height' | 'depth', value: number) => {
+  const update = (axis: keyof KindSize, value: number) => {
     if (value <= 0) return;
     applyPatch({ dimensions: { ...effective, [axis]: value } });
   };
 
-  // The bake script reads `data-measured-dims` to harvest the GLTF
-  // AABB for every kind in a single Playwright pass without scraping
-  // individual input values.
-  const measuredAttr = `${measuredDims.width},${measuredDims.height},${measuredDims.depth}`;
-
   return (
-    <div data-measured-dims={measuredAttr}>
-      <NumberInput
-        label="width"
-        value={effective.width}
-        min={0.05}
-        max={64}
-        step={0.05}
-        onChange={(v) => update('width', v)}
-      />
-      <NumberInput
-        label="height"
-        value={effective.height}
-        min={0.05}
-        max={64}
-        step={0.05}
-        onChange={(v) => update('height', v)}
-      />
-      <NumberInput
-        label="depth"
-        value={effective.depth}
-        min={0.05}
-        max={64}
-        step={0.05}
-        onChange={(v) => update('depth', v)}
-      />
+    <div>
+      {axes.map((axis) => (
+        <NumberInput
+          key={axis}
+          label={axis}
+          value={effective[axis]}
+          min={0.05}
+          max={64}
+          step={0.05}
+          onChange={(v) => update(axis, v)}
+        />
+      ))}
       <div className="flex items-center justify-between gap-2 px-3 py-1">
         <span className="text-xs text-muted-foreground">
-          {isBaked ? 'baked' : 'unbaked (using GLTF measurement)'}
+          {kind.dimensions ? 'set' : 'unset (showing the baked bounds)'}
         </span>
         <Button
           variant="secondary"
           size="sm"
-          onClick={() => applyPatch({ dimensions: measuredDims })}
-          title="Overwrite width/height/depth with the GLTF's current AABB extents."
+          disabled={!baked}
+          onClick={() => baked && applyPatch({ dimensions: baked })}
+          title="Overwrite width/height/depth with the size of the baked bounds, at the current scale."
         >
-          Recompute from GLTF
+          Reset to baked bounds
         </Button>
       </div>
     </div>
-  );
-}
-
-function DimensionsFallback() {
-  return (
-    <>
-      <Readonly label="width" value="…" />
-      <Readonly label="height" value="…" />
-      <Readonly label="depth" value="…" />
-    </>
   );
 }
 

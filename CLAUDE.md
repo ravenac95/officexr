@@ -99,8 +99,8 @@ escape hatch is for genuine constraints, not for skipping refactors.
 - **Editor canvases compose renderer primitives; they don't
   re-implement them.** World objects render via
   `<ObjectInstances worldObjects={…} />`; lighting via
-  `<LightingRig lighting={…} />`; preview cameras via
-  `<EditorCamera />`. Editor-specific overlays (selection
+  `<LightingRig lighting={…} />`; character and kind previews
+  via `<BevyPreview />`. Editor-specific overlays (selection
   outlines, tool ghosts, hover tooltips, command-tree picking)
   layer ON TOP of those primitives — they don't replace them.
   The `lint:no-bespoke-renderer` script enforces the headline

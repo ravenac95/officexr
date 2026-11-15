@@ -117,6 +117,8 @@ export interface WorldObjectKind {
     min: { x: number; y: number; z: number };
     max: { x: number; y: number; z: number };
   };
+  /** The `scale` the bake measured `dimensions` and `localAABB` at. */
+  bakedScale?: number;
   /** Marks `dimensions` and `localAABB` as hand-set: the bake skips this kind
    * and only reports when the model's measured size differs. */
   dimensionsPinned?: boolean;
@@ -425,6 +427,7 @@ export function normalizeKind(raw: unknown, idx: number): WorldObjectKind {
       : WORLD_OBJECT_KIND_DEFAULTS.optimization,
     dimensions: normalizeDimensions(k.dimensions),
     localAABB: normalizeLocalAABB(k.localAABB),
+    bakedScale: normalizeOptionalPositive(k.bakedScale, idx, 'bakedScale'),
     dimensionsPinned: normalizeOptionalBoolean(k.dimensionsPinned, idx, 'dimensionsPinned'),
     colliderShape: normalizeColliderShape(k.colliderShape),
     colliderComplexity: normalizeColliderComplexity(k.colliderComplexity, idx),
@@ -466,6 +469,16 @@ function normalizeSeat(raw: unknown, idx: number): SeatSpec | undefined {
     );
   }
   return { offset: { x: offset.x, y: offset.y, z: offset.z }, yawDeg: seat.yawDeg };
+}
+
+function normalizeOptionalPositive(raw: unknown, idx: number, field: string): number | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) {
+    throw new Error(`world-object-kind-catalog: kinds[${idx}].${field} must be a positive number, got ${String(raw)}`);
+  }
+  return raw;
 }
 
 function normalizeOptionalBoolean(raw: unknown, idx: number, field: string): boolean | undefined {

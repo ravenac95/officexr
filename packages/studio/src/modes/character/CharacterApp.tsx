@@ -1,17 +1,14 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { SidePanel } from '../../ui/SidePanel.tsx';
-import {
-  CharacterEditorCanvas,
-  type CharacterPartHover,
-} from './CharacterEditorCanvas.tsx';
+import { CharacterEditorCanvas } from './CharacterEditorCanvas.tsx';
 import { CharacterPanel } from './CharacterPanel.tsx';
 import { useCharacterControls } from './useCharacterControls.ts';
 import { resolveCharacter } from '@officexr/world';
 import { useCatalogCharacters } from '@officexr/world/react';
 
 /**
- * Standalone Characters editor application. Mounts its own canvas
- * with one Adventurer + endless grid + an orbit/follow camera.
+ * Standalone Characters editor application: one character on the
+ * reference grid in a Bevy preview, under an orbit/follow camera.
  *
  * The right panel hosts the shadcn-based `CharacterPanel` with three
  * sections: Character (model + take-control toggle), Animation
@@ -25,7 +22,6 @@ import { useCatalogCharacters } from '@officexr/world/react';
 export function CharacterApp() {
   const ctrl = useCharacterControls();
   const catalog = useCatalogCharacters();
-  const [hover, setHover] = useState<CharacterPartHover | null>(null);
 
   return (
     <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>
@@ -46,48 +42,16 @@ export function CharacterApp() {
           idleSpeed={ctrl.idleAnimSpeed}
           walkSpeed={ctrl.walkAnimSpeed}
           runSpeed={ctrl.runAnimSpeed}
-          onPartHover={setHover}
         />
         <CharacterHud
           character={ctrl.character}
           previewState={ctrl.previewState}
           inControl={ctrl.inControl}
         />
-        {hover && <PartHoverTooltip hover={hover} />}
       </main>
       <SidePanel>
         <CharacterPanel ctrl={ctrl} />
       </SidePanel>
-    </div>
-  );
-}
-
-/**
- * Floating debug tooltip placed near the cursor showing which mesh
- * / bone the raycast under the cursor hit. Anchored in viewport
- * coords (the canvas raycaster reports clientX/clientY) and offset
- * so the cursor doesn't immediately re-hover the tooltip itself.
- * `pointer-events: none` keeps it from intercepting the raycast.
- */
-function PartHoverTooltip({ hover }: { hover: CharacterPartHover }) {
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        top: hover.clientY + 14,
-        left: hover.clientX + 14,
-        padding: '4px 8px',
-        background: 'rgba(0, 0, 0, 0.85)',
-        color: '#fafafa',
-        font: '11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace',
-        borderRadius: 4,
-        border: '1px solid rgba(255, 255, 255, 0.12)',
-        pointerEvents: 'none',
-        whiteSpace: 'pre',
-        zIndex: 50,
-      }}
-    >
-      {`mesh: ${hover.meshName}${hover.boneName ? `\nbone: ${hover.boneName}` : ''}`}
     </div>
   );
 }

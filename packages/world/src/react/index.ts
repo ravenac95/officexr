@@ -15,6 +15,14 @@ export { GAMEPLAY_CAMERA_MODES, useCameraMode, type GameplayCameraMode } from '.
 export { ErrorBanner, type HudRealtime } from './hud.tsx';
 export { PlayView, simFromSearch, type PlayViewProps } from './PlayView.tsx';
 export { bootBevy } from './bevyRenderer.ts';
+export {
+  BevyPreview,
+  type BevyPreviewProps,
+  type PreviewAnimation,
+  type PreviewPlacement,
+  type PreviewSubject,
+  type PreviewView,
+} from './BevyPreview.tsx';
 export { WorldLoadingScreen, type WorldLoadingScreenProps } from './LoadingScreen.tsx';
 export {
   usePlaySession,

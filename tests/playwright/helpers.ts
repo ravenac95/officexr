@@ -3,6 +3,7 @@
  */
 
 import { expect, type Locator, type Page } from '@playwright/test';
+import { PNG } from 'pngjs';
 
 /** Navigate to a mode by hash. The studio mirrors `#<mode>` ↔ state.
  *
@@ -213,4 +214,26 @@ export function pixelDiffCount(
     if (dr + dg + db > threshold) diffs += 1;
   }
   return diffs;
+}
+
+/**
+ * Each canvas's pixels from one page screenshot, which sees WebGL and read-back canvases alike as
+ * composited. Element screenshots wait on a compositor frame, too slow under SwiftShader. `fromTop`
+ * skips that fraction of each canvas's height.
+ */
+export async function canvasPixels(page: Page, selectors: string[], fromTop = 0) {
+  const boxes = await page.evaluate(
+    (all) => all.map((s) => document.querySelector(s)!.getBoundingClientRect().toJSON() as DOMRect),
+    selectors,
+  );
+  const shot = PNG.sync.read(await page.screenshot({ timeout: 120_000 }));
+  return boxes.map((box) => {
+    const out: number[] = [];
+    for (let y = Math.ceil(box.y + box.height * fromTop); y < Math.floor(box.y + box.height); y++) {
+      for (let x = Math.ceil(box.x); x < Math.floor(box.x + box.width); x++) {
+        out.push(shot.data.readUInt32BE((y * shot.width + x) * 4));
+      }
+    }
+    return out;
+  });
 }
