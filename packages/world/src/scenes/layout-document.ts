@@ -10,7 +10,7 @@
  * - `groups` is an optional additive field — older on-disk layouts
  *   without it deserialize as if they had `{}` (empty groups). Layouts
  *   share the `CommandGroup` shape with rooms so the shared
- *   SceneEditorCanvas works for both.
+ *   SceneEditorView works for both.
  * - Referenced kind IDs are NOT validated at deserialize time against
  *   `isLayoutObject`; that check belongs in the layout editor UI and
  *   the bake service, not here.

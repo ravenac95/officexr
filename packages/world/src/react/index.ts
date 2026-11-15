@@ -14,7 +14,10 @@ export { useWorldConstants } from './useWorldConstants.ts';
 export { GAMEPLAY_CAMERA_MODES, useCameraMode, type GameplayCameraMode } from './useCameraMode.ts';
 export { ErrorBanner, type HudRealtime } from './hud.tsx';
 export { PlayView, simFromSearch, type PlayViewProps } from './PlayView.tsx';
-export { bootBevy } from './bevyRenderer.ts';
+export { bakedLayoutGlbUrl, blobAssetPath, bootBevy, playCanvas } from './bevyRenderer.ts';
+export { setBevyReady, usePrimaryBevyView, type BevyView } from './usePrimaryBevyView.ts';
+export { frameStatsMeter } from './frameStatsMeter.ts';
+export { diffWorld, type SentWorld } from './worldDiff.ts';
 export { WorldLoadingScreen, type WorldLoadingScreenProps } from './LoadingScreen.tsx';
 export {
   usePlaySession,
