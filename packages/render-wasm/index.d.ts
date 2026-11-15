@@ -219,8 +219,9 @@ export interface RendererModule {
    */
   setWorld(id: ViewId, diffJson: string, mugshot?: string | null): number | undefined;
   /**
-   * `players`: `{ players, charRadius, playerSpeed, runSpeed }`. A player's `animation`, when set, plays
-   * that state's clip at that time scale instead of the one its velocity implies.
+   * `players`: `{ players, charRadius, playerSpeed, runSpeed, paused? }`. A player's `animation`, when set,
+   * plays that state's clip at that time scale instead of the one its velocity implies. `paused` draws
+   * every player in its bind pose without name tags, as a `setWorld` mugshot does.
    */
   setPlayers(id: ViewId, players: unknown): void;
   setCamera(id: ViewId, pose: CameraPose): void;
