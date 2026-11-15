@@ -37,7 +37,6 @@ export {
 } from './cube-material.ts';
 export { EndlessGrid } from './EndlessGrid.tsx';
 export { placementTransform } from './placement-transform.ts';
-export { DirectionGizmo } from './DirectionGizmo.tsx';
 export {
   FrameStatsProbe,
   type FrameStatsSample,
