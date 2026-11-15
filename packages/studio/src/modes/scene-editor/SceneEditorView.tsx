@@ -13,7 +13,7 @@ import {
   type BevyView,
   type SentWorld,
 } from '@officexr/world/react';
-import { DEFAULT_EDITOR_LIGHTING } from '@officexr/world/renderer';
+import { DEFAULT_EDITOR_LIGHTING } from '@officexr/world/app';
 import { useBakedLayoutBlobs } from '../useBakedLayoutBlobs.ts';
 import { publishFrameStats } from '../../perf/frame-stats.ts';
 import type { SceneEditorBackend } from './SceneEditorBackend.ts';

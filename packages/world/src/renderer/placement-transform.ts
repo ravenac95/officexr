@@ -7,8 +7,7 @@ export interface PlacementTransform {
 }
 
 /**
- * A map placement (voxels, quarter turns) as a three.js group's position
- * and Euler rotation about the room origin, in the same sense as
+ * A map placement (voxels, quarter turns) as a position and Euler rotation about the room origin, in the same sense as
  * `compileMap`'s rigid rotation. No placement is the identity.
  */
 export function placementTransform(placement?: Pick<RoomInstance, 'position' | 'rotationY'>): PlacementTransform {

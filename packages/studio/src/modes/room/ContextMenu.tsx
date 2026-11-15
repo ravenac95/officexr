@@ -26,7 +26,7 @@ interface ContextMenuProps {
 
 /**
  * Floating context menu rendered as a `document.body` portal so it
- * can position absolutely without being clipped by the R3F canvas.
+ * can position absolutely without being clipped by the canvas.
  *
  * Auto-closes on:
  *   - Outside click (capture-phase mousedown listener on document)

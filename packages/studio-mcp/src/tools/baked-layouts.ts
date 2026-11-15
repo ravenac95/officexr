@@ -21,7 +21,7 @@ export interface BakeDeps {
   bake: BakeLayout;
 }
 
-// Lazy so vite.config.ts doesn't load the bake pipeline (three, gltf-transform) at startup.
+// Lazy so vite.config.ts doesn't load the bake pipeline (gltf-transform) at startup.
 export const bakeLayoutLazily: BakeLayout = async (input) => {
   const { bakeLayoutGlb } = await import('@officexr/world/bake-layout-glb');
   return bakeLayoutGlb(input);

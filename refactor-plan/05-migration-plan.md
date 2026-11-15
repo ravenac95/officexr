@@ -46,6 +46,12 @@ legacy client, which was later deleted instead of migrated: `web` was
 rebuilt on `@officexr/world` and the mobile app was dropped. Those
 steps are kept below as historical context only.
 
+Step 4's end state was later overtaken rather than reached: every
+surface moved from three.js to the Bevy renderer (`crates/officexr-render`,
+`@officexr/render-wasm`), and three.js, react-three-fiber and Leva were
+removed. Its exit criterion now reads "nothing imports `three`", which
+`pnpm lint:no-three` checks in CI in place of the planned ESLint rule.
+
 ## The eleven steps
 
 ```mermaid

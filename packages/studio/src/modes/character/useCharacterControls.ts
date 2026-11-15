@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CHARACTERS } from '@officexr/world';
-import type { AnimationState } from '@officexr/world/renderer';
+import type { AnimationState } from '@officexr/world/react';
 import type { CharacterConfig, CharacterConfigs } from '@officexr/sdk';
 import { CharacterStorage } from './character-storage.ts';
 

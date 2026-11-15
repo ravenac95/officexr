@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { requestMotionPermission, type MotionPermission } from '@officexr/world/renderer';
+import { requestMotionPermission, type MotionPermission } from '@officexr/world/react';
 import { Switch } from '../hud/ui/Switch';
 
 const DENIED_MESSAGE = 'Motion access denied — enable it in Safari settings';

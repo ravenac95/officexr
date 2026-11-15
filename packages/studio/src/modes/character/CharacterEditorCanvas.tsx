@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { BevyPreview, isTypingTarget, type PreviewPlacement, type PreviewView } from '@officexr/world/react';
-import type { AnimationState } from '@officexr/world/renderer';
+import type { AnimationState } from '@officexr/world/react';
 import { publishFrameStats } from '../../perf/frame-stats.ts';
 
 type Motion = Extract<AnimationState, 'idle' | 'walking' | 'running'>;

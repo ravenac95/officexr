@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { MotionPermission } from '@officexr/world/renderer';
+import type { MotionPermission } from '@officexr/world/react';
 import { MotionLookControl } from './MotionLookControl';
 import { openSettings, SettingsHarness } from './settingsHarness';
 

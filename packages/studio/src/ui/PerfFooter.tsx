@@ -3,8 +3,7 @@
  * the studio. The bottom counterpart of `<BakeStatusBar>`: where the
  * top bar reports bake activity, this one reports live render
  * performance for whichever mode's canvas is currently mounted —
- * FPS, frame time, WebGL draw calls, triangles, and live
- * geometry/texture counts.
+ * FPS, frame time, draw calls and triangles.
  *
  * Draw calls + triangles are the headline numbers for judging whether
  * a baked layout actually beats the instanced per-object path: the
@@ -12,8 +11,8 @@
  * costs one draw call per mesh node it ships.
  *
  * SRP: this file does NOT measure anything. It renders the samples
- * the frame-stats bus already publishes; measurement happens inside
- * the canvases (`<FrameStatsProbe>` / Scene's `onFrameStats`).
+ * the frame-stats bus already publishes; measurement happens in the
+ * Bevy views' `onFrameStats` (`frameStatsMeter`).
  */
 
 import React from 'react';
@@ -53,8 +52,6 @@ export function PerfFooter() {
           <Metric label="frame" value={`${stats.frameMs.toFixed(1)} ms`} />
           <Metric label="draws" value={fmt(stats.drawCalls)} />
           <Metric label="tris" value={fmt(stats.triangles)} />
-          {stats.geometries !== undefined && <Metric label="geom" value={fmt(stats.geometries)} />}
-          {stats.textures !== undefined && <Metric label="tex" value={fmt(stats.textures)} />}
         </>
       )}
     </footer>

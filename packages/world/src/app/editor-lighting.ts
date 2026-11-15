@@ -1,16 +1,15 @@
 import type { LightingViewConfig } from '../renderer/viewConfig.ts';
 
 /**
- * Editor-friendly lighting defaults. Mounts the shared LightingRig
- * with shadows off (editors set `shadows={false}` on their Canvas
- * anyway), no sun disc (the editors that use these defaults draw no `SkyDome`), no aux light. Hemisphere is at 0 so the
- * `ambientFillIntensity` term acts as a flat ambient — matching the
- * look editors had before unification.
+ * Editor-friendly lighting defaults: shadows off, no sun disc (the
+ * editors that use these defaults draw no sky), no aux light.
+ * Hemisphere is at 0 so the `ambientFillIntensity` term acts as a
+ * flat ambient.
  *
  * Editors spread this and override the fields they care about
- * (sun position, intensities). The renderer's gameplay Scene gets
- * its lighting from the store's world constants — those defaults are
- * tuned for the lit world rather than an editor preview.
+ * (sun position, intensities). The gameplay view gets its lighting
+ * from the store's world constants — those defaults are tuned for
+ * the lit world rather than an editor preview.
  */
 export const DEFAULT_EDITOR_LIGHTING: LightingViewConfig = {
   sunPosition: [20, 40, 20],

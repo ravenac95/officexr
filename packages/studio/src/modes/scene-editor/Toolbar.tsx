@@ -25,7 +25,7 @@ interface ToolbarProps {
  * tool; the Add tool's button shows the currently-staged kind as a
  * chip so the user knows what they'd be placing.
  *
- * Lives outside the R3F Canvas (DOM overlay) so it doesn't compete
+ * Lives outside the canvas (DOM overlay) so it doesn't compete
  * with the scene's pointer events.
  */
 export function Toolbar({ active, stagedKindId, onChange }: ToolbarProps) {

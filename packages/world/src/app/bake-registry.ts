@@ -38,9 +38,8 @@ export interface BakeDeps {
    */
   publish: (layoutName: string, glb: Uint8Array) => Promise<void>;
   /**
-   * Canonical voxel→world transform service. Shared with the runtime
-   * renderer (`<ObjectInstances>` consumes the same instance) so the
-   * bake produces meshes at exactly the positions the renderer expects.
+   * Canonical voxel→world transform service, so the bake produces
+   * meshes at exactly the positions the renderer expects.
    */
   geometry: InstanceGeometryService;
 }

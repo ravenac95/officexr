@@ -705,7 +705,7 @@ export function useRoomDocument(options?: UseRoomDocumentOptions): {
     setDoc((prev) => ({ ...prev, layoutName: trimmed, updatedAt: Date.now() }));
     // SRP: baking is the Layout editor's job (it schedules a bake on
     // every save via `afterSave`). The Room editor only CONSUMES the
-    // baked GLB — `<BakedLayout>` lazily loads it from disk. No
+    // baked GLB — the renderer lazily loads it from disk. No
     // bake-trigger here; an earlier version called `awaitFresh` to
     // "warm the cache," but that actually kicked off a fresh bake on
     // every room load and any transient failure left the inspector's

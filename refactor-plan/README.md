@@ -10,6 +10,12 @@
 > mobile and desktop shells, and the Supabase Realtime channel have been
 > removed rather than migrated, so steps that target them (and mentions
 > of Supabase as the realtime/auth substrate) are historical.
+>
+> The renderer has been switched too: every surface now renders through
+> Bevy (`crates/officexr-render`, loaded as `@officexr/render-wasm`), and
+> three.js and react-three-fiber are gone. Read the Three.js `WorldRenderer`
+> below as "the Bevy renderer"; the boundary it draws (rendering reads a
+> headless store and owns nothing else) is the one Bevy keeps.
 
 ## Why refactor
 
@@ -50,8 +56,10 @@ The refactor reframes the system around three priorities, in order:
 
 - Not introducing a custom backend service. Supabase + JaaS remains
   the substrate.
-- Not switching renderers. Three.js stays; only its boundaries move.
-- Not adopting a heavy game engine (PlayCanvas, Babylon, Bevy-on-WASM).
+- ~~Not switching renderers. Three.js stays; only its boundaries move.~~
+- ~~Not adopting a heavy game engine (PlayCanvas, Babylon, Bevy-on-WASM).~~
+  Both since reversed: once the boundaries had moved, the renderer moved to
+  Bevy on WASM (see the status note above).
 - Not redesigning the database schema beyond moving inventory/economy
   data out of `localStorage`.
 - Not building anti-cheat. Authority is documented and enforceable

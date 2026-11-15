@@ -48,8 +48,8 @@ editor.pick({ target: { type: 'empty' }, point: { x: 0, z: 0 } });
 
 Use primitive kinds (`__primitive_blue` / `__primitive_stone`) in
 fixtures; real catalog kinds load a GLTF over HTTP, which fails
-hermetically. The map editor test (`MapApp.scenarios.test.tsx`) still has
-its own r3f harness next to it.
+hermetically. The map editor test (`MapApp.scenarios.test.tsx`) drives
+`useMapDocument` and `resolveMapPick` the same way, with picks as data.
 
 ## Coverage map (what tests what)
 
@@ -65,7 +65,7 @@ its own r3f harness next to it.
 Tier-3 scenarios: `scene-editor/__tests__/editorStore.test.tsx` covers
 placement, selection, move, delete and undo through `renderEditorStore`;
 `MapApp.scenarios` covers the Map editor (the c606f10 class). Room
-tile-grouping is covered at Tier 2; the Object-editor Leva kind-switch (a DOM concern, not a scene-graph one) is covered by the
+tile-grouping is covered at Tier 2; the Object-editor kind-switch (a DOM concern, not a scene-graph one) is covered by the
 existing `object-editor.spec.ts` at Tier 4.
 
 ## Tier 4 — Playwright hermetic mode (`?test=1`)

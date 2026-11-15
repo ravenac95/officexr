@@ -297,8 +297,7 @@ export function LayoutApp() {
       groupMembers: layoutDoc.lookup.groupMembers,
       doc: layoutDoc.doc,
       // Layouts have no nested base layout — they ARE the base. The
-      // canvas leaves the BakedLayout slot empty when these are
-      // undefined.
+      // view draws no baked layout when these are undefined.
       bakedLayoutPath: undefined,
       bakedLayoutName: undefined,
       onPlaceAt: handlePlace,

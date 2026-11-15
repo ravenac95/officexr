@@ -12,14 +12,17 @@ export { focusWorld, isTypingTarget, useWorldFocus } from './useWorldFocus.ts';
 export { useStoreSelector } from './useStoreSelector.ts';
 export { useWorldConstants } from './useWorldConstants.ts';
 export { GAMEPLAY_CAMERA_MODES, useCameraMode, type GameplayCameraMode } from './useCameraMode.ts';
+export type { CameraMode } from '../renderer/config.ts';
+export { requestMotionPermission, type MotionPermission } from '../renderer/motionLook.ts';
 export { ErrorBanner, type HudRealtime } from './hud.tsx';
 export { PlayView, simFromSearch, type PlayViewProps } from './PlayView.tsx';
 export { bakedLayoutGlbUrl, blobAssetPath, bootBevy, playCanvas } from './bevyRenderer.ts';
 export { setBevyReady, usePrimaryBevyView, type BevyView } from './usePrimaryBevyView.ts';
-export { frameStatsMeter } from './frameStatsMeter.ts';
+export { frameStatsMeter, type FrameStatsSample } from './frameStatsMeter.ts';
 export { diffWorld, type SentWorld } from './worldDiff.ts';
 export {
   BevyPreview,
+  type AnimationState,
   type BevyPreviewProps,
   type PreviewAnimation,
   type PreviewPlacement,
