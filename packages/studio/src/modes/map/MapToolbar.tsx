@@ -13,7 +13,7 @@ interface MapToolbarProps {
  * a narrower set than the Room editor's, so this is its own component
  * rather than a shared one — see `mapTools.ts` for rationale.
  *
- * Lives outside the R3F Canvas so it doesn't compete with the scene's
+ * Lives outside the canvas so it doesn't compete with the scene's
  * pointer events.
  */
 export function MapToolbar({ tool, onChange }: MapToolbarProps) {

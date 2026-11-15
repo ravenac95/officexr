@@ -23,7 +23,6 @@ interface RenderSentinels {
 
 const sentinels = () => window as unknown as RenderSentinels;
 const BACKDROP = '#1b1d22';
-/** `EndlessGrid fadeDistance={400}`. */
 const GRID: Overlay = { tag: 'grid', kind: 'grid', y: 0, cellSize: 1, fade: 400 };
 const READY_POLL_MS = 50;
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));

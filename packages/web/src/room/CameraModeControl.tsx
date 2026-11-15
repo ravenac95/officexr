@@ -1,5 +1,5 @@
 import { GAMEPLAY_CAMERA_MODES, type GameplayCameraMode } from '@officexr/world/react';
-import type { CameraMode } from '@officexr/world/renderer';
+import type { CameraMode } from '@officexr/world/react';
 import { SegmentedControl } from '../hud/ui/SegmentedControl';
 
 const LABELS: Record<GameplayCameraMode, string> = {

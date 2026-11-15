@@ -7,10 +7,10 @@ import {
 } from '@officexr/sdk';
 import type { BotMode } from '@officexr/world/bot';
 import { GHOST_MODELS } from '@officexr/world/characters';
-import { resolveHorizonColor } from '@officexr/world/renderer';
 
 import { Button } from '../../components/ui/button.tsx';
 import { downloadBlob } from '../../lib/utils.ts';
+import { twoStopHorizonColor } from './horizonColor.ts';
 import {
   ColorInput,
   NumberInput,
@@ -383,10 +383,7 @@ function BackgroundPanel({
       <ColorInput label="top" value={background.topColor} onChange={set('topColor')} />
       <ColorInput
         label="horizon"
-        value={
-          background.horizonColor ??
-          `#${resolveHorizonColor(background.topColor, background.bottomColor).getHexString()}`
-        }
+        value={background.horizonColor ?? twoStopHorizonColor(background.topColor, background.bottomColor)}
         onChange={set('horizonColor')}
       />
       <ColorInput label="bottom" value={background.bottomColor} onChange={set('bottomColor')} />

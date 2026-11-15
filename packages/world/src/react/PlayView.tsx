@@ -3,7 +3,7 @@ import { BevyScene } from './BevyScene.tsx';
 import type { Actions, Bus, PlayerId, RuleRegistry, Store, SyncEngine, SnapshotHandshake, Vec3 } from '@officexr/sdk';
 import type { JoystickKind } from '@officexr/render-wasm';
 import type { BotPool } from '../bot/BotPool.ts';
-import type { FrameStatsSample } from '../renderer/FrameStatsProbe.tsx';
+import type { FrameStatsSample } from './frameStatsMeter.ts';
 import type { CameraMode } from '../renderer/config.ts';
 import type { MotionLookState } from '../renderer/motionLook.ts';
 import {

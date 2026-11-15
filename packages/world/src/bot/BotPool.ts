@@ -20,7 +20,7 @@ interface BotPoolOptions {
   /** When a bot's character controller detects a body-vs-body contact
    * inside its own Rapier world (e.g. bot walked into the local player),
    * the resulting `collision:char-bump` event only fires on the bot's
-   * private bus — the local renderer's `Players.tsx` subscribes to a
+   * private bus — the local renderer's avatars subscribe to a
    * *different* bus and would never see it, so the visual bump
    * animation wouldn't play. If a `localBus` is provided, each bot
    * will forward bump events involving the local player onto it,

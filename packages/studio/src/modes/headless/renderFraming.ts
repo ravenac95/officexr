@@ -17,7 +17,7 @@ export type CameraSetup =
       position: Vec3;
       target: Vec3;
       up: Vec3;
-      /** Pixels per metre (R3F sizes the ortho frustum as pixels / zoom). */
+      /** Pixels per metre: the ortho frustum is the viewport in pixels / zoom. */
       zoom: number;
       near: number;
       far: number;

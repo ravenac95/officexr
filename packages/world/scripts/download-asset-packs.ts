@@ -8,7 +8,7 @@
  * The catalog entries that reference these files live in
  * `packages/world/cube-kinds.json`, which IS committed. So a fresh
  * clone has the catalog metadata (label / swatch / category / etc.)
- * but no binaries until this script runs; the renderer's `useGLTF`
+ * but no binaries until this script runs; the renderer
  * will 404 on any kind whose binaries are missing.
  *
  * Idempotent: if a pack's target directory already contains files,

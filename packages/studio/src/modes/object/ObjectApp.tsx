@@ -17,7 +17,7 @@ import { ModelUploadPanel } from './upload/ModelUploadPanel.tsx';
  *   - SidePanel:  ObjectKindEditorPanel (label, category, swatch, walkable,
  *                 scale, and material overrides). Edits hit the
  *                 in-memory catalog synchronously (so the preview +
- *                 Room editor's palette + ObjectInstances renderer
+ *                 Room editor's palette and views
  *                 update live) and round-trip to /api/world-object-kinds with
  *                 a 500ms debounce.
  */

@@ -58,6 +58,7 @@ export type { CreateDefaultApiOptions } from './create-default-api.ts';
 
 export { bakedLayoutUrl } from './baked-layout-url.ts';
 export { DEFAULT_EDITOR_LIGHTING } from './editor-lighting.ts';
+export type { BackgroundViewConfig, LightingViewConfig } from '../renderer/viewConfig.ts';
 export {
   bakedLayoutAssetUrl,
   fetchSoundCatalog,

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import type { PersistentLocalState } from '@officexr/core-refactor';
 import { PlayView, simFromSearch } from '@officexr/world/react';
-import type { CameraMode } from '@officexr/world/renderer';
+import type { CameraMode } from '@officexr/world/react';
 import type { TopDownPlayViewProps } from '@officexr/world/top-down';
 import { Switch } from '../hud/ui/Switch';
 import { CameraModeControl } from './CameraModeControl';
@@ -13,7 +13,7 @@ import { MotionLookControl } from './MotionLookControl';
 import type { SettingsAction, SettingsTab } from './Settings';
 import { SettingRow, SettingsModal } from './SettingsModal';
 
-/** Everything that reaches three/R3F, so `OfficeWorld` can load it only in 3D. */
+/** Everything that reaches the Bevy renderer, so `OfficeWorld` can load it only in 3D. */
 export default function PlayView3d({
   viewProps,
   local,

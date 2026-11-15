@@ -3,7 +3,6 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const FORBIDDEN = /^(three($|\/)|@react-three\/)/;
 // Type-only imports and re-exports are erased at build time, so they can't pull code in.
 const VALUE_IMPORT = /^\s*(?:import|export)\s+(?!type\b)(?:[^'";]*?\sfrom\s+)?['"]([^'"]+)['"]/gm;
 
@@ -36,12 +35,7 @@ function walk(entry: string): { files: Set<string>; bare: Set<string> } {
 describe('@officexr/world/top-down import graph', () => {
   const { files, bare } = walk(resolve(dirname(fileURLToPath(import.meta.url)), 'index.ts'));
 
-  it('reaches neither three nor @react-three/*', () => {
-    expect([...bare].filter((s) => FORBIDDEN.test(s))).toEqual([]);
-  });
-
-  it('reaches neither Scene.tsx nor the Bevy renderer', () => {
-    expect([...files].filter((f) => f.endsWith('/Scene.tsx'))).toEqual([]);
+  it('does not reach the Bevy renderer', () => {
     expect([...bare].filter((s) => s.startsWith('@officexr/render-wasm'))).toEqual([]);
   });
 

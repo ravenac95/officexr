@@ -103,8 +103,7 @@ export interface BakeResultBytes {
  * @param geometry    Canonical voxel→world transform service. The bake
  *                    uses `geometry.meshTransform(position, kindId, yawDeg)` so the
  *                    baked GLB matches the runtime renderer's positioning
- *                    exactly. This is the SAME service the runtime
- *                    `<ObjectInstances>` consumes — no bespoke math here.
+ *                    exactly — no bespoke math here.
  * @param options     Optional bake options (IO instance, optimizer).
  */
 /**
@@ -201,8 +200,8 @@ export async function bakeLayout(
     // Apply the canonical voxel→world transform via the geometry service.
     // Instance positions are in VOXEL coordinates (whole or
     // sub-grid voxel anchors); the geometry service converts these (and the yaw about the
-    // footprint centre) to the mesh-root transform that matches the runtime
-    // renderer's <ObjectInstances>, so bake and runtime stay in lockstep.
+    // footprint centre) to the mesh-root transform the runtime renderer
+    // uses, so bake and runtime stay in lockstep.
     const { position, rotationY } = geometry.meshTransform(
       inst.position,
       inst.kindId,

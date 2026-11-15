@@ -5,13 +5,14 @@
  * Three layers in this codebase:
  *   1. Application Layer (THIS FILE + ./catalog-service, ./geometry-service,
  *      ./room-service). Pure TypeScript.
- *      No React, no THREE, no DOM globals. Dependencies are injected via
+ *      No React, no DOM globals. Dependencies are injected via
  *      constructors / factory functions.
- *   2. UI Layer (React components in studio/ + renderer/). Reads from
- *      the application layer via the `ApplicationProvider` /
+ *   2. UI Layer (React components in studio/ and world/react/). Reads
+ *      from the application layer via the `ApplicationProvider` /
  *      `useApplication` React context.
- *   3. World Rendering Layer (renderer/ + R3F components). Receives data
- *      via props or hooks; never imports module-globals.
+ *   3. World Rendering Layer (the Bevy renderer, `@officexr/render-wasm`).
+ *      Receives data from the Bevy views (`BevyScene`, `BevyPreview`);
+ *      never imports module-globals.
  *
  * SOLID note (DIP): every dependency in this file is an interface, not a
  * concrete class or module-global. Tests construct mocks by implementing

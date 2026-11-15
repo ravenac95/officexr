@@ -6,7 +6,7 @@ A 3D virtual office with real-time presence, proximity voice chat, and per-offic
 
 - **Google sign-in** — users sign in with Google; sessions live in Postgres and only emails or domains in the `login_allowlist` table may sign in
 - **Real-time presence** — players see each other move via a WebSocket realtime server (`@officexr/realtime-server`)
-- **World renderer** — offices render the studio map through `@officexr/world` (react-three-fiber + Rapier physics)
+- **World renderer** — offices render the studio map through `@officexr/world` (the Bevy renderer + Rapier physics)
 - **Characters** — each user picks a world character per office; the choice is stored server-side
 - **Office chat** — text chat synced over the realtime channel
 - **Proximity voice chat** — Jitsi as a Service (JaaS) rooms that form when players are near each other
@@ -17,7 +17,7 @@ A 3D virtual office with real-time presence, proximity voice chat, and per-offic
 | Layer | Technology |
 |-------|-----------|
 | Web framework | Vite + React 19 |
-| 3D rendering | Three.js via react-three-fiber, Rapier physics |
+| 3D rendering | Bevy (Rust, compiled to wasm as `@officexr/render-wasm`), Rapier physics |
 | Realtime | WebSocket server (`ws`) |
 | Database | Postgres (schema in `supabase/migrations`), read server-side via `pg` |
 | Identity | Google sign-in, Postgres-backed sessions |
@@ -31,7 +31,7 @@ officexr/
 ├── packages/
 │   ├── web/              # @officexr/web — office app (React SPA)
 │   ├── server/           # @officexr/server — web backend: /api, Google sign-in, realtime
-│   ├── world/            # @officexr/world — renderer, physics, bots, maps/rooms
+│   ├── world/            # @officexr/world — Bevy views, physics, bots, maps/rooms
 │   ├── studio/           # @officexr/studio — authoring editors
 │   ├── studio-server/    # @officexr/studio-server — studio backend: /api, /models, /mcp, SPA
 │   ├── sdk/              # @officexr/sdk — headless game state + realtime protocol
@@ -180,11 +180,11 @@ The studio backend is a separate process, `pnpm --filter @officexr/studio-server
 
 ```bash
 pnpm --filter @officexr/sim-wasm build      # the wasm simulation, needed first; see crates/README.md
-pnpm --filter @officexr/render-wasm build   # the Bevy renderer (slow LTO build): the 3D room view, studio debug mode and ?op=bevy
+pnpm --filter @officexr/render-wasm build   # the Bevy renderer (slow LTO build): the 3D room view and every studio view
 pnpm build                  # outputs the SPA to packages/web/dist/
 ```
 
-The web app's 3D view and the studio's debug mode draw through the Bevy renderer, so `pnpm dev`, `pnpm build` and
+The web app's 3D view and every studio view draw through the Bevy renderer, so `pnpm dev`, `pnpm build` and
 `pnpm dev:studio` need the render-wasm build, unless `VITE_RENDER_WASM_BASE_URL` points at hosted builds
 (`<base>/<content-hash>/{webgpu,webgl2}/`, as the Pages deploy uploads them). Unit tests and the 2D view don't load it.
 

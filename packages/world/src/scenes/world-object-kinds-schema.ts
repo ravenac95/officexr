@@ -54,7 +54,7 @@ export interface WorldObjectKind {
   /** Stable id; do NOT rename — every room doc references kinds by id. */
   id: string;
   label: string;
-  /** Public URL the renderer loads via `useGLTF`. */
+  /** Public URL the renderer loads the model from. */
   gltfPath: string;
   /** Private raw source key (`packs/<pack>/...`); layout bakes read it instead of `gltfPath`. */
   sourceObject?: string;

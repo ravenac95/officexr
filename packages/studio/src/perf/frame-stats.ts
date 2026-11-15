@@ -1,20 +1,20 @@
 /**
- * Studio-side frame-stats bus. The single bridge between R3F canvases
- * (which publish `FrameStatsSample`s from inside the frame loop via
- * `<FrameStatsProbe>` / Scene's `onFrameStats`) and DOM UI outside the
- * canvas (the `<PerfFooter>` at the bottom of `StudioPage`).
+ * Studio-side frame-stats bus. The single bridge between Bevy views
+ * (which publish `FrameStatsSample`s through their `onFrameStats` prop)
+ * and DOM UI outside the canvas (the `<PerfFooter>` at the bottom of
+ * `StudioPage`).
  *
  * Same module-level pub/sub shape as the `BakeRegistry` the
  * `BakeStatusBar` consumes: one mutable current value, a Set of
  * listeners, and a `useSyncExternalStore` hook for React consumers.
  * Only one canvas is ever mounted at a time (switching studio modes
  * unmounts the previous app), so a single current-sample slot is
- * sufficient — the unmounting probe publishes `null`, clearing the
+ * sufficient — the unmounting view publishes `null`, clearing the
  * readout until the next canvas's first sample lands.
  */
 
 import { useSyncExternalStore } from 'react';
-import type { FrameStatsSample } from '@officexr/world/renderer';
+import type { FrameStatsSample } from '@officexr/world/react';
 
 let current: FrameStatsSample | null = null;
 const listeners = new Set<() => void>();

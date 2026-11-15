@@ -1,7 +1,7 @@
 import React from 'react';
 import { characterOptions } from '@officexr/world';
 import { useCatalogCharacters } from '@officexr/world/react';
-import type { AnimationState } from '@officexr/world/renderer';
+import type { AnimationState } from '@officexr/world/react';
 
 import { Button } from '../../components/ui/button.tsx';
 import {

@@ -14,15 +14,16 @@
 
 import { expect, test, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
-import { forceWebgl2, goToModeHermetic, waitForBevyReady } from './helpers.ts';
+import { forceWebgl2, goToModeHermetic, pageErrors, waitForBevyReady } from './helpers.ts';
 
 // SwiftShader draws the Bevy page a frame or two a second, and each real input waits on one.
 test.use({ actionTimeout: 30_000 });
 
 async function openRoom(page: Page) {
   await forceWebgl2(page);
+  const errors = pageErrors(page);
   await goToModeHermetic(page, 'room', SEED);
-  await waitForBevyReady(page);
+  await waitForBevyReady(page, errors);
   return page.locator('canvas').first();
 }
 

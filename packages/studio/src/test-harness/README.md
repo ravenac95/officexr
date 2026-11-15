@@ -48,8 +48,8 @@ editor.pick({ target: { type: 'empty' }, point: { x: 0, z: 0 } });
 
 Use primitive kinds (`__primitive_blue` / `__primitive_stone`) in
 fixtures; real catalog kinds load a GLTF over HTTP, which fails
-hermetically. The map editor test (`MapApp.scenarios.test.tsx`) still has
-its own r3f harness next to it.
+hermetically. The map editor test (`MapApp.scenarios.test.tsx`) drives
+`useMapDocument` and `resolveMapPick` the same way, with picks as data.
 
 ## Coverage map (what tests what)
 
@@ -65,7 +65,7 @@ its own r3f harness next to it.
 Tier-3 scenarios: `scene-editor/__tests__/editorStore.test.tsx` covers
 placement, selection, move, delete and undo through `renderEditorStore`;
 `MapApp.scenarios` covers the Map editor (the c606f10 class). Room
-tile-grouping is covered at Tier 2; the Object-editor Leva kind-switch (a DOM concern, not a scene-graph one) is covered by the
+tile-grouping is covered at Tier 2; the Object-editor kind-switch (a DOM concern, not a scene-graph one) is covered by the
 existing `object-editor.spec.ts` at Tier 4.
 
 ## Tier 4 — Playwright hermetic mode (`?test=1`)
@@ -88,10 +88,7 @@ Non-hermetic Debug specs get the defaults: the dev server does not seed
 `world-settings.json` into its scratch data dir (`seed: false`), so a developer's
 gitignored `packages/world/world-settings.json` is never loaded.
 
-**CI** runs `pnpm test:e2e:ci`, now scoped to: `map-editor`,
-`map-editor-hermetic`, `object-editor`, `routing`, `room-editor`,
-`debug-mode`, `character-on-surface`, `debug-world-constants-hermetic`,
-`render-page`, `render-view-mcp`, `sounds-editor`, and `model-upload-hermetic`.
+**CI** runs `pnpm test:e2e:ci`: every spec under `tests/playwright/`, in the chromium project.
 
 The previously-rotted specs are repaired:
 
@@ -102,12 +99,9 @@ The previously-rotted specs are repaired:
   headlessly through `useSceneEditorTools` with `renderEditorStore`
   (`scene-editor/__tests__/editorStore.test.tsx`).
 - `debug-mode.spec.ts` was realigned to the baked-geometry model: the
-  map-switch test asserts a new `/api/baked-layouts/<layout>` fetch +
-  pixel-hash change (maps carry no inline store cubes anymore), and the
-  cube-field regression grid is sized to the global `VOXEL_SIZE=0.5`
-  (the geometry service ignores a snapshot's `cubeSize`).
+  map-switch test asserts a new `/api/baked-layouts/<layout>` fetch
+  (maps carry no inline store cubes anymore).
 
-`character-on-surface.spec.ts` is a smoke test of the Bevy mugshot: each
-character loads, the ready flag is set and its feet settle on the cube tops.
-The native harness (`crates/officexr-render/tests/visual/`) owns placement
-and pixels.
+`rendering-smoke.spec.ts` checks each surface boots Bevy and draws a
+non-blank canvas. The native harness (`crates/officexr-render/tests/visual/`)
+owns placement and pixels.

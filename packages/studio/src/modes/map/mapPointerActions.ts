@@ -13,13 +13,11 @@ import type { MapSelection } from './useMapDocument.ts';
  *   - `ignore`       — Desk-area tool: the drawing layer owns the gesture.
  *
  * IMPORTANT (taxonomy F regression guard): this decision depends ONLY
- * on the active tool. It deliberately does NOT branch on the hit mesh's
- * `userData` (e.g. `isObjectInstanceMesh`). That gate was the c606f10
- * regression — once rooms started rendering a `BakedLayout` mesh in
- * front of the raw cubes, the flag-gated handler early-returned on the
- * baked-layout hit and silently broke drag + spawn. Routing purely off
- * the tool means any descendant of the room group (cube OR baked
- * layout) behaves identically.
+ * on the active tool, not on what kind of mesh the pick hit. Gating on
+ * the hit's kind once silently broke drag + spawn when rooms started
+ * drawing a baked layout in front of their raw cubes. Routing purely
+ * off the tool means any part of a room (cube OR baked layout)
+ * behaves identically.
  */
 export type RoomPointerAction = 'place-spawn' | 'select' | 'select-drag' | 'ignore';
 

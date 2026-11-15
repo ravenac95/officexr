@@ -16,7 +16,8 @@ each user's JaaS JWT (`/api/offices/:id/voice-token`), so the private key never 
 flowchart LR
     subgraph Browser["Browser"]
         WebApp["@officexr/web<br/>React 19 shell + HUD"]
-        World["@officexr/world<br/>renderer · physics · characters"]
+        World["@officexr/world<br/>Bevy views · physics · characters"]
+        Render["@officexr/render-wasm<br/>Bevy renderer (wasm)"]
         Session["@officexr/core-refactor<br/>createStack · office session"]
         SDK["@officexr/sdk<br/>store · protocol · SyncEngine"]
     end
@@ -30,6 +31,7 @@ flowchart LR
     end
 
     WebApp --> World
+    World --> Render
     WebApp --> Session
     Session --> SDK
     World --> SDK
@@ -43,7 +45,7 @@ flowchart LR
 
     classDef client fill:#1e293b,stroke:#38bdf8,color:#e2e8f0
     classDef svc fill:#064e3b,stroke:#34d399,color:#d1fae5
-    class WebApp,World,Session,SDK client
+    class WebApp,World,Render,Session,SDK client
     class Google,WebServer,Realtime,PG,JaaS svc
 ```
 
@@ -51,13 +53,21 @@ flowchart LR
 
 | Package | Role | Depends on |
 |---------|------|-----------|
-| `@officexr/sdk` | Headless game state (store, actions, rules), realtime protocol, `Channel` + `InMemoryChannel`, `SyncEngine` | — (no `three`, no `react`) |
+| `@officexr/sdk` | Headless game state (store, actions, rules), realtime protocol, `Channel` + `InMemoryChannel`, `SyncEngine` | — (no renderer, no `react`) |
 | `@officexr/realtime-server` | WebSocket relay server and the `WsChannel` client | sdk |
 | `@officexr/core-refactor` | `createStack` (local / ws), office session, voice adapter contract | sdk, realtime-server |
-| `@officexr/world` | Renderer primitives, physics, characters, bots, map/room/cube-kind data | sdk, realtime-server |
+| `@officexr/render-wasm` | The Bevy renderer (`crates/officexr-render` via `crates/officexr-render-web`), built to WebGPU and WebGL2 wasm | — |
+| `@officexr/world` | Bevy views (`react/`: `BevyScene`, `BevyPreview`), physics, characters, bots, map/room/cube-kind data | sdk, realtime-server, render-wasm |
 | `@officexr/studio` | Authoring editors and the debug playtest mode | world, core-refactor, sdk, realtime-server |
 | `@officexr/server` | Web backend process: `/api`, Google auth, read-only studio data, `/models`, `/config.js`, attached realtime; `./shared` is the browser-safe subset | world, realtime-server |
 | `@officexr/web` | Office list, room (`OfficeWorld`), chat HUD, JaaS voice; its Vite dev server mounts `@officexr/server` | world, core-refactor, sdk, server (`./shared`) |
+
+Everything 3D renders through Bevy. A view (`createView`) draws into one
+canvas; TypeScript feeds it the world (`setWorld`), players, proximity and
+editor overlays (`setOverlays`), and reads back picks, move intent and frame
+stats. Rendering, cameras and input live in Rust (`officexr-render`,
+`officexr-controls`); `pnpm lint:no-three` keeps three.js,
+react-three-fiber and Leva out of the TypeScript packages.
 
 ## 3. Realtime and Voice
 

@@ -375,7 +375,7 @@ function proximityInput(
 ): ProximityInput {
   const { discRadius, pulseSpeed, intensity, enteringColor, enteredColor, exitingColor } = style;
   const { meetingBorderInset, meetingBorderOutset, sparkleSpeed, sparkleFloatHeight, sparkleSize } = style;
-  // Bubbles rise around both ends of the local player's approaches, as ProximityGlow's.
+  // Bubbles rise around both ends of the local player's approaches.
   const bubbles = new Set<string>();
   for (const [key, pair] of output.pairStates) {
     const [a, b] = key.split('|');

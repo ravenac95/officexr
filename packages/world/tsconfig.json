@@ -14,7 +14,7 @@
     "noFallthroughCasesInSwitch": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
-    "types": ["@react-three/fiber", "node"]
+    "types": ["node"]
   },
   "include": [
     "src",

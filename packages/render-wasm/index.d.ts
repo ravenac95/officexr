@@ -127,7 +127,7 @@ export interface ProximityInput {
     meetingBorderOutset?: number;
     sparkleSpeed?: number;
     sparkleFloatHeight?: number;
-    /** With the camera mode's multiplier already applied: `ProximityGlow` uses 5 in the fixed camera. */
+    /** With the camera mode's multiplier already applied: the room view uses 5 in the fixed camera. */
     sparkleSize?: number;
   };
 }
@@ -157,7 +157,7 @@ export type Overlay = { tag: string; pickable?: boolean } & (
    * it comes back.
    */
   | { kind: 'ghost'; objects: OverlayObject[]; opacity: number; pulse?: boolean; tint?: HexColor }
-  /** `EndlessGrid`: lines every `cellSize`, a major one every 10, faded out by `fade` metres from the origin. */
+  /** An endless grid: lines every `cellSize`, a major one every 10, faded out by `fade` metres from the origin. */
   | { kind: 'grid'; y: number; cellSize: number; fade: number }
   /** `DirectionGizmo`: a 1.5 m arrow from `at`, drawn through other geometry. */
   | { kind: 'directionGizmo'; at: Vec3; direction: Vec3; color: HexColor }
@@ -169,7 +169,7 @@ export type Overlay = { tag: string; pickable?: boolean } & (
   | { kind: 'label'; at: Vec3; text: string }
 );
 
-/** `normal · p + constant = 0`, as three.js's `Plane`. */
+/** The plane `normal · p + constant = 0`. */
 export interface Plane {
   normal: Vec3;
   constant: number;
@@ -203,12 +203,12 @@ export interface CameraConfig {
     maxElevationDeg?: number;
     /**
      * `right`, the scene editor's: right-drags rotate, shift+right- and middle-drags pan, and left is
-     * the editor's. `left`, drei `OrbitControls`': left-drags rotate, right-drags pan, ctrl, cmd or shift
+     * the editor's. `left`: left-drags rotate, right-drags pan, ctrl, cmd or shift
      * swaps the two, and middle-drags zoom.
      */
     rotateButton?: 'left' | 'right';
     pan?: boolean;
-    /** Time constant (s) the camera eases toward where input puts it; 0 snaps. Zoom never eases, as in drei. */
+    /** Time constant (s) the camera eases toward where input puts it; 0 snaps. Zoom never eases. */
     dampingSecs?: number;
     /** WASD moves the target across the ground and Q/E up and down; `takeIntent` then stays still. */
     moveKeys?: boolean;
@@ -283,7 +283,7 @@ export interface RendererModule {
    */
   setOverlays(id: ViewId, overlays: Overlay[]): void;
   /**
-   * Replaces the view's proximity output, drawn as `ProximityGlow`'s ground discs under the view's
+   * Replaces the view's proximity output, drawn as ground discs under the view's
    * players and its meeting-area glow. The glow eases toward it, so send it every frame.
    */
   setProximity(id: ViewId, proximity: ProximityInput): void;

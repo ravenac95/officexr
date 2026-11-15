@@ -1,4 +1,14 @@
-import type { FrameStatsSample } from '../renderer/FrameStatsProbe.tsx';
+/** One aggregated sample of a view's render performance. */
+export interface FrameStatsSample {
+  /** Frames completed per second, averaged over the sample window. */
+  fps: number;
+  /** Mean frame-to-frame delta over the window, in milliseconds. */
+  frameMs: number;
+  /** Draw calls in the last rendered frame. */
+  drawCalls: number;
+  /** Triangles drawn in the last rendered frame. */
+  triangles: number;
+}
 
 const STATS_INTERVAL_MS = 500;
 
