@@ -14,7 +14,17 @@
 
 import { expect, test, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
-import { goToModeHermetic, waitForCanvasReady } from './helpers.ts';
+import { forceWebgl2, goToModeHermetic, waitForBevyReady } from './helpers.ts';
+
+// SwiftShader draws the Bevy page a frame or two a second, and each real input waits on one.
+test.use({ actionTimeout: 30_000 });
+
+async function openRoom(page: Page) {
+  await forceWebgl2(page);
+  await goToModeHermetic(page, 'room', SEED);
+  await waitForBevyReady(page);
+  return page.locator('canvas').first();
+}
 
 const SEED = {
   rooms: [
@@ -37,8 +47,8 @@ const SEED = {
 const axis = (page: Page, a: 'X' | 'Y' | 'Z') => page.getByRole('button', { name: `position ${a}` });
 
 test('a block on a sub-grid surface loads, and Add stacks on its exact top', async ({ page }) => {
-  await goToModeHermetic(page, 'room', SEED);
-  const canvas = await waitForCanvasReady(page, 1200);
+  test.setTimeout(240_000);
+  const canvas = await openRoom(page);
   const box = await canvas.boundingBox();
   if (!box) throw new Error('canvas has no bounding box');
 
@@ -71,8 +81,8 @@ test('a block on a sub-grid surface loads, and Add stacks on its exact top', asy
 });
 
 test('the inspector edits a position onto the sub-grid', async ({ page }) => {
-  await goToModeHermetic(page, 'room', SEED);
-  const canvas = await waitForCanvasReady(page, 1200);
+  test.setTimeout(240_000);
+  const canvas = await openRoom(page);
   const box = await canvas.boundingBox();
   if (!box) throw new Error('canvas has no bounding box');
   const top = blueTop(await canvas.screenshot());

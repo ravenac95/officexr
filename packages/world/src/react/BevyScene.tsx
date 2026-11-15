@@ -15,6 +15,7 @@ import type { SimBakedColliders, SimCore } from '../sim/SimCore.ts';
 import { useApplication, useCatalog, useCatalogCharacters } from './application-context.tsx';
 import { bootBevy, playCanvas } from './bevyRenderer.ts';
 import { FrameLoop } from './frameLoop.ts';
+import { frameStatsMeter } from './frameStatsMeter.ts';
 import { RoomFrame, type RoomView } from './roomFrame.ts';
 import { useCreateSim, type SimImplementation } from './useCreateSim.ts';
 import { useStoreSelector } from './useStoreSelector.ts';
@@ -59,7 +60,6 @@ interface BevySentinels {
   __officexrBevyReady?: boolean;
 }
 
-const STATS_INTERVAL_MS = 500;
 const SCROLL_KEYS = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 const NO_SPAWNS: readonly Vec3[] = [];
 
@@ -288,7 +288,7 @@ export function BevyScene(props: BevySceneProps) {
     );
     frame.current = room;
     const loading = { done: false, mostPending: 0, percent: -1 };
-    const stats = { frames: 0, elapsedMs: 0, lastMs: performance.now() };
+    const meterStats = frameStatsMeter(() => wasm.frameStats(view), onFrameStats);
     const loop = new FrameLoop({ actions, store, rules, bus, sync, handshake }, (dtSec, nowMs) => {
       room.step(dtSec, nowMs);
       if (!loading.done) {
@@ -305,16 +305,7 @@ export function BevyScene(props: BevySceneProps) {
           onModelsReady();
         }
       }
-      // Real frame time, not the loop's capped dt.
-      stats.frames += 1;
-      stats.elapsedMs += nowMs - stats.lastMs;
-      stats.lastMs = nowMs;
-      if (stats.elapsedMs >= STATS_INTERVAL_MS) {
-        const { drawCalls, triangles } = wasm.frameStats(view);
-        onFrameStats({ fps: (1000 * stats.frames) / stats.elapsedMs, frameMs: stats.elapsedMs / stats.frames, drawCalls, triangles });
-        stats.frames = 0;
-        stats.elapsedMs = 0;
-      }
+      meterStats(nowMs);
     }, { onError: (error) => reportError(error) });
     loop.start();
     return () => {

@@ -24,8 +24,9 @@ export function bootBevy(primary?: HTMLCanvasElement): Promise<RendererModule> {
 }
 
 /**
- * The play view's canvas, one per page: Bevy draws its primary window straight into the canvas
- * it booted with, so a remounted play view moves this element instead of making a new one.
+ * Bevy's primary canvas, one per page, shared by the play view and the studio's scene editor (one
+ * mounted at a time): Bevy draws its primary window straight into the canvas it booted with, so a
+ * remounted view moves this element instead of making a new one.
  */
 export function playCanvas(): HTMLCanvasElement {
   playCanvasElement ??= document.createElement('canvas');

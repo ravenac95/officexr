@@ -96,9 +96,9 @@ The previously-rotted specs are repaired:
 
 - `object-editor.spec.ts` / `routing.spec.ts` now query the renamed
   `/api/world-object-kinds` endpoint (was `/api/cube-kinds`).
-- `room-editor.spec.ts` reveals the "Show layout objects" toggle before
-  staging `Blue block` (a layout object, hidden by default), and
-  expects the current five-tool toolbar (Select/Add/Delete/Tile/Move).
+- `room-editor.spec.ts` is a hermetic smoke test on the Bevy view: one
+  Add-tool canvas click must add a history entry. Tool behaviour is
+  tested against the store (`scene-editor/__tests__/`).
 - `debug-mode.spec.ts` was realigned to the baked-geometry model: the
   map-switch test asserts a new `/api/baked-layouts/<layout>` fetch +
   pixel-hash change (maps carry no inline store cubes anymore), and the

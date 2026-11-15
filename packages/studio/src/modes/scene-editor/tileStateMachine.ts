@@ -2,11 +2,11 @@
  * Pure tiling state machine for the Room editor's Tile tool.
  *
  * SRP: this module owns the state shape and pure transition rules.
- * SceneEditorCanvas (the React/R3F component) owns event handling,
- * rendering, and the useState that holds TileMachineState.
+ * `useSceneEditorTools` owns event handling and the useState that holds
+ * TileMachineState.
  *
  * OCP: new tiling behaviors (e.g. diagonal axes) can be added here
- * without modifying SceneEditorCanvas.
+ * without modifying `useSceneEditorTools`.
  */
 
 type Vec3 = [number, number, number];
@@ -33,7 +33,6 @@ export function resolveAvailableAxes(
 /**
  * The generalized tile state machine state.
  *
- * Replaces the hardcoded `TileState` union in SceneEditorCanvas.
  * The axis sequence is dynamic and driven by `kind.tilingAxes`.
  */
 export type TileMachineState =
@@ -63,15 +62,11 @@ export type TileMachineState =
     };
 
 /**
- * Compute the ghost voxels for the current state + cursor position.
+ * Compute the ghost voxels for the current state + cursor position: what
+ * the next click places.
  *
- * Pure — no React, no THREE, no side effects.
- *
- * SRP violation note: Y-axis delta computation (PIXELS_PER_VOXEL screen
- * mapping) stays in SceneEditorCanvas because it requires R3F's camera
- * projection. For Y-axis ghosts in `placed` stage, pass the pre-computed
- * hover voxel (including Y) as `hoverVoxel`. The tileStep.y parameter
- * is used for step-snapping the Y extent.
+ * Pure — no React, no THREE, no side effects. For Y-axis extrusion, pass
+ * the hover voxel with the pointer's projected height as its Y.
  *
  * @param state - Current tile machine state.
  * @param hoverVoxel - The cursor's snapped voxel (or null if no hit).
