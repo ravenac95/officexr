@@ -13,7 +13,7 @@ The OfficeXR authoring tool. Top header with three tabs:
   WASD. The collapsible Tuning section overrides per-character
   speed / collision / animation playback (saved to localStorage).
 - **Debug** — original multiplayer scene with the full SDK stack:
-  bots, networked peers, the Leva debug panels. Used to debug
+  bots, networked peers, the world tuning panels. Used to debug
   gameplay and the network protocol; consumes the editors' on-disk
   output (loads scenes + character configs and broadcasts via the
   existing `world:objects` / `world:characters` NetEvents).
@@ -33,7 +33,7 @@ Then open `http://localhost:5174` in a browser.
 
 ## Bot controls (Debug only)
 
-The **Bot Controls** Leva panel appears when the Debug tab is active.
+The **Bot** tuning panel appears when the Debug tab is active.
 The Node bot CLI runs as a child of the dev server automatically
 (`@officexr/world/vite-plugin-bots`). For log isolation, you can also
 run the CLI yourself in a separate terminal:
@@ -66,7 +66,7 @@ spawning when it sees an existing instance.
 
 | Action | Effect |
 |---|---|
-| Pick a model | Adventurer reloads |
+| Pick a model | The preview loads that model |
 | Click an animation-state button | Plays that clip on loop (or once + clamp for non-locomotion states) |
 | Take control toggle | WASD walks the character; state buttons disable while motion drives the clip |
 | Tuning sliders | Save per-model overrides to localStorage |

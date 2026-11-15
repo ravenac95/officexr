@@ -9,9 +9,9 @@ framebuffer. Two frames:
 2. `2-long_corridor.png` — switched to `long_corridor`. Shows the
    smaller corridor cube cluster at the new spawn (-7, 2, -1).
 
-History: these were re-captured after the default `<Floor>` (the
-hard-coded 27×27 blue platform that Scene used to render
-underneath ObjectInstances) was deleted. Earlier screenshots showed
+History: these were re-captured after the default floor (a
+hard-coded 27×27 blue platform the old renderer drew under every
+map) was deleted. Earlier screenshots showed
 the map content stacked on top of that default Floor — which the
 user noticed because there was a stripe of "default" cubes around
 the edge of every authored map. With Floor gone, Map Editor maps

@@ -112,9 +112,9 @@ const CHARACTER_ORBIT = { target: [0, 1, 0] as Vec3, azimuth: 0, elevation: 0.45
 const KIND_ORBIT = orbitFromEye([0, 0.5, 0], [2.5, 2, 2.5]);
 
 /**
- * The voxel position that puts the kind's mesh origin at `(0, scale / 2, 0)`, as the three.js preview
- * placed it. `placement.rs` anchors the bounds' min corner at the voxel: `localAABB`, else `dimensions`
- * X/Z-centred and Y-bottom, else one voxel.
+ * The voxel position that puts the kind's mesh origin at `(0, scale / 2, 0)`, where the object
+ * preview has always framed it. `placement.rs` anchors the bounds' min corner at the voxel:
+ * `localAABB`, else `dimensions` X/Z-centred and Y-bottom, else one voxel.
  */
 function previewPosition(kind: WorldObjectKind): Vec3 {
   const min = kind.localAABB?.min ??

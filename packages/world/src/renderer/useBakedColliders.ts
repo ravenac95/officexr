@@ -32,7 +32,7 @@ export function useBakedColliders(
     for (const [roomInstanceId, url] of urls) {
       fetch(url)
         .then((res) => (res.ok ? res.arrayBuffer() : Promise.reject(new Error(`${url}: HTTP ${res.status}`))))
-        // ponytail: the GLB is downloaded twice (here and by BakedLayout); Range requests for the header and JSON chunk would avoid it.
+        // ponytail: the GLB is downloaded twice (here and by the Bevy renderer); Range requests for the header and JSON chunk would avoid it.
         .then((glb) => {
           const colliders = readGlbColliders(glb);
           if (!colliders) {

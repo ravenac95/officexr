@@ -66,10 +66,11 @@ above, leave a comment at the violation site that says:
 Example shape (don't copy verbatim, adapt to the situation):
 
 ```ts
-// SRP violation: this view both feeds the Bevy renderer AND turns
-// its picks into edits. `onPick` keeps one callback per view, so
-// splitting "rendering" and "picking" into two modules would have
-// them fight over it. Acceptable scope for a single editor view.
+// DIP violation: `bootBevy` keeps the renderer in a module-level
+// promise instead of taking it as an injected dependency. Bevy owns
+// its event loop for the page's lifetime and boots once per page, so
+// there is never a second instance to inject. Removing this needs a
+// Bevy that can boot and shut down per view.
 ```
 
 Comments like that turn a code smell into a reviewed, traceable
@@ -108,7 +109,8 @@ escape hatch is for genuine constraints, not for skipping refactors.
   menus) sits beside the canvas. If you need a new primitive, add
   it to `crates/officexr-render` (a new `Overlay` kind, say) and
   expose it through `officexr-render-web` — don't draw it in a
-  second canvas inside an editor.
+  second canvas inside an editor. No lint checks this; it is
+  enforced in review.
 - **Hermetic studio test mode (`?test=1`).** `packages/studio/src/App.tsx`
   has a startup branch: when the URL carries `?test=1`, the studio boots
   with a bundled-catalog `ApplicationApi` (no `/api/world-object-kinds`
