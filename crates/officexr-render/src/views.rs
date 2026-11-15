@@ -18,6 +18,7 @@ use bevy::window::{PrimaryWindow, WindowOccluded, WindowRef};
 use crate::avatars::Bound;
 use crate::lighting::ObjectMaterial;
 use crate::overlays::{Overlay, OverlayIndex, ViewOverlays};
+use crate::proximity::{Proximity, ViewProximity};
 use crate::{
     LayoutIndex, ObjectIndex, ObjectKinds, Players, SceneCamera, WorldDiff, WorldSceneData,
 };
@@ -51,6 +52,7 @@ pub enum ViewMsg {
     Players(Players),
     Camera(SceneCamera),
     Overlays(Vec<Overlay>),
+    Proximity(Proximity),
     /// For an image view: its new size, zero to pause it.
     Resize(UVec2),
 }
@@ -253,6 +255,9 @@ pub(crate) fn drain_hub(world: &mut World) {
             }
             (ViewMsg::Overlays(overlays), Some(view)) => {
                 world.entity_mut(view).insert(ViewOverlays(overlays));
+            }
+            (ViewMsg::Proximity(proximity), Some(view)) => {
+                world.entity_mut(view).insert(ViewProximity(proximity));
             }
             (ViewMsg::Resize(size), Some(view)) => resize(world, view, size),
         }
