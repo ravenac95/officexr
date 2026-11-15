@@ -1,37 +1,29 @@
-import { DEFAULT_WORLD_CONSTANTS } from '@officexr/sdk';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import JSZip from 'jszip';
-import { Scene } from '@officexr/world/renderer';
 import { CHARACTERS, isCharacterName } from '@officexr/world';
 import type { CharacterName } from '@officexr/world';
-import type {
-  BackgroundViewConfig,
-  LightingViewConfig,
-  ViewConfig,
-} from '@officexr/world/renderer';
-import {
-  createPersistentLocalState,
-  type PersistentLocalState,
-} from '@officexr/core-refactor';
-import { buildInMemoryStack, type ChannelStack } from '../../realtime/services.ts';
+import type { BackgroundViewConfig, LightingViewConfig } from '@officexr/world/renderer';
+import { createPersistentLocalState } from '@officexr/core-refactor';
+import { bodyPosition, setBevyReady, useApplication, usePrimaryBevyView, type BevyView } from '@officexr/world/react';
 import { downloadBlob } from '../../lib/utils.ts';
+import { bevySentinels } from '../headless/BevyCanvas.tsx';
+import {
+  DEFAULT_MUGSHOT_BACKGROUND,
+  DEFAULT_MUGSHOT_LIGHTING,
+  MUGSHOT_FOV,
+  MUGSHOT_PITCH_DEG,
+  cubesForMode,
+  mugshotCamera,
+  mugshotWorld,
+  type CubeMode,
+} from './mugshotScene.ts';
 
 const SELF_ID = 'mugshot-player';
 const OFFICE_ID = 'mugshot';
 const DEFAULT_CHARACTER: CharacterName = 'Barbarian';
+const CHAR_RADIUS = 0.4;
 
-/** Height (world y, in metres) the character body is spawned at so
- * gravity can drop it onto the cube cluster. The 2×2 cluster's tops
- * sit at world y=1; dropping from well above and letting Rapier's
- * kinematic controller settle the body is what places the character —
- * NOT a teleport to a tuned constant. (See the component doc comment
- * for why the old DEFAULT_Y_OFFSET teleport was retired.) */
-const SPAWN_DROP_HEIGHT = 4;
-
-/** Default value shown by the manual Y-offset slider. This is the
- * approximate gravity-settled root y; it is a DISPLAY/override seed
- * only — officexr never relies on it to place the character (gravity
- * does). See the slider's manual-override note below. */
+/** The manual Y-offset slider's starting value: about where gravity settles the body root. */
 const SLIDER_DEFAULT_Y = 0.5;
 
 const DEFAULT_DISTANCE_M = 6;
@@ -39,6 +31,7 @@ const DEFAULT_CAMERA_HEIGHT = 1.7;
 const DEFAULT_VIEWPORT_W = 512;
 const DEFAULT_VIEWPORT_H = 512;
 const DEFAULT_AZIMUTH: AzimuthDeg = 180;
+const READY_POLL_MS = 50;
 
 type AzimuthDeg = 0 | 90 | 180 | 270;
 
@@ -61,65 +54,6 @@ function readCharacterFromHash(): CharacterName {
     return candidate;
   }
   return DEFAULT_CHARACTER;
-}
-
-type CubeMode = 'gltf' | 'primitive';
-
-/** The mugshot scene: a 2×2 cube square whose CLUSTER is centered
- * on world origin (0, 0, 0). With voxelSize=0.5 (the global
- * `VOXEL_SIZE`), voxel positions in [-4, 0] on X/Z translate to
- * world cube anchors in [-2, 0]; each 2 m kind extends +2 m so the
- * cluster bbox is x∈[-2,2], y∈[-1,1], z∈[-2,2]. Cube tops at world
- * y=1, bottoms at y=-1.
- *
- * Why voxelSize=0.5 (not 2): the geometry service in the renderer is
- * pinned to the global `VOXEL_SIZE` constant (see
- * `packages/world/src/app/create-default-api.ts`); a per-scene
- * `cubeSize` mismatch silently shifts every instance because
- * `geometry.meshOrigin` uses the global, not the snapshot's
- * `cubeSize`. Until the geometry service learns a per-call voxel
- * size, every scene MUST use `cubeSize = VOXEL_SIZE` to stay
- * consistent with both the visible mesh placement AND the collider
- * placement (which also flows through the geometry service).
- *
- * Why origin-centered: the fixed camera is set to `lookAt:
- * [0, 0, 0]` so framing is purely a function of azimuth + distance
- * + height + fov — never the character's body root position. Two
- * characters at different body.y heights frame identically.
- *
- * The two layouts share INSTANCE IDs deliberately — when the user
- * flips cubeMode, the SDK store swap to `setWorldObjects` produces
- * the same set of inst.id values, so React-keyed reconciliation
- * keeps the same static colliders. The
- * colliders are literally identical between modes; only the
- * visible mesh path differs. That's the whole point of the A/B
- * diagnostic. */
-const GLTF_CUBES: ReadonlyArray<{
-  id: string;
-  sourceCommandId: string;
-  kindId: string;
-  position: [number, number, number];
-}> = [
-  { id: 'm-0-0', sourceCommandId: 'mugshot', kindId: 'colored_block_blue', position: [-4, -2, -4] },
-  { id: 'm-1-0', sourceCommandId: 'mugshot', kindId: 'stone', position: [0, -2, -4] },
-  { id: 'm-0-1', sourceCommandId: 'mugshot', kindId: 'stone', position: [-4, -2, 0] },
-  { id: 'm-1-1', sourceCommandId: 'mugshot', kindId: 'colored_block_blue', position: [0, -2, 0] },
-];
-
-const PRIMITIVE_CUBES: ReadonlyArray<{
-  id: string;
-  sourceCommandId: string;
-  kindId: string;
-  position: [number, number, number];
-}> = [
-  { id: 'm-0-0', sourceCommandId: 'mugshot', kindId: '__primitive_blue', position: [-4, -2, -4] },
-  { id: 'm-1-0', sourceCommandId: 'mugshot', kindId: '__primitive_stone', position: [0, -2, -4] },
-  { id: 'm-0-1', sourceCommandId: 'mugshot', kindId: '__primitive_stone', position: [-4, -2, 0] },
-  { id: 'm-1-1', sourceCommandId: 'mugshot', kindId: '__primitive_blue', position: [0, -2, 0] },
-];
-
-export function cubesForMode(mode: CubeMode) {
-  return mode === 'gltf' ? GLTF_CUBES : PRIMITIVE_CUBES;
 }
 
 /** v2 of the mugshot export manifest. Captures rendering inputs but
@@ -148,53 +82,40 @@ export interface MugshotManifest {
   background: BackgroundViewConfig;
 }
 
-/** Default lighting bag for the mugshot. Same as the studio's
- * default lighting but with the visible sun disc hidden — a bright
- * disc in the sky would dominate any pixel diff. */
-export const DEFAULT_MUGSHOT_LIGHTING: LightingViewConfig = {
-  ...DEFAULT_WORLD_CONSTANTS.lighting,
-  showSunDisc: false,
-};
-
-export const DEFAULT_MUGSHOT_BACKGROUND: BackgroundViewConfig =
-  DEFAULT_WORLD_CONSTANTS.background;
-
 /**
  * Mugshot mode: a deterministic 2×2 cube scene with a paused
- * character (no animation), tunable camera angle / distance /
- * viewport. Drives the export-for-test workflow (downloads a ZIP
- * of 4 PNGs + manifest.json) and is the live target for the
- * manifest-driven comparison test.
+ * character (bind pose), tunable camera angle / distance / viewport,
+ * drawn by a Bevy view on the page's primary canvas. Drives the export-for-test workflow
+ * (downloads a ZIP of 8 PNGs + manifest.json).
  *
- * Placement is GRAVITY-DRIVEN. The character body is spawned above
- * the cubes (`SPAWN_DROP_HEIGHT`) and falls onto them under the same
- * kinematic controller + gravity integration Debug mode uses — the
- * rendered resting height is whatever physics produces, never a tuned
- * constant. This is deliberate: the whole point of the mugshot is to
- * surface the renderer's NATURAL placement so a human can catch
- * gravity/anchor regressions visually.
+ * Placement is GRAVITY-DRIVEN: `setWorld`'s mugshot drops the
+ * character onto the cubes' colliders with `officexr-sim`, the same
+ * controller every character uses, and draws it where it settled —
+ * never at a tuned constant. The settled body root is mirrored into
+ * `window.__OFFICE_STORE__`'s self player for drivers to read.
  *
- * The Y-offset slider is a MANUAL DIAGNOSTIC OVERRIDE for that human,
+ * The Y-offset slider is a MANUAL DIAGNOSTIC OVERRIDE for a human,
  * NOT a placement mechanism officexr relies on. While untouched
- * (`manualPlacement === false`) gravity owns the body. The moment the
- * human drags the slider (or a test calls `__OFFICE_MUGSHOT_SET_Y_OFFSET__`)
- * we flip into manual mode: gravity is suspended and the body is
- * pinned at the slider value, so a human can lift/lower the character
- * to inspect placement when gravity rendering looks wrong. The "Auto
- * (gravity)" button drops it back under gravity. See the mugshot test
- * README for why this knob exists.
+ * (`manualPlacement === false`) gravity owns the body. Once the human
+ * drags the slider (or a test calls `__OFFICE_MUGSHOT_SET_Y_OFFSET__`)
+ * the body is pinned at the slider value instead; "Auto (gravity)"
+ * drops it back under gravity. See `tests/playwright/CLAUDE.md`.
  */
 export function MugshotApp() {
-  const [local, setLocal] = useState<PersistentLocalState | null>(null);
-  const [stack, setStack] = useState<ChannelStack | null>(null);
+  const { catalog } = useApplication();
+  const [local] = useState(() =>
+    createPersistentLocalState({ selfId: SELF_ID, officeId: OFFICE_ID }),
+  );
+  const container = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const bevy = usePrimaryBevyView(container, (e) => setError(e.message));
+  const [catalogReady, setCatalogReady] = useState(false);
   const [character, setCharacter] = useState<CharacterName>(() =>
     readCharacterFromHash(),
   );
 
-  // Tunable rendering inputs.
   // `yOffset` is the manual Y-override slider value; `manualPlacement`
-  // gates whether it actually drives the body. Default false → gravity
-  // places the character and the slider is inert (display only).
+  // gates whether it drives the body. Default false: gravity places it.
   const [yOffset, setYOffset] = useState(SLIDER_DEFAULT_Y);
   const [manualPlacement, setManualPlacement] = useState(false);
   const [azimuthDeg, setAzimuthDeg] = useState<AzimuthDeg>(DEFAULT_AZIMUTH);
@@ -218,156 +139,75 @@ export function MugshotApp() {
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
-  // Bootstrap: build the local-player + in-memory stack once.
   useEffect(() => {
-    const audio = new Audio();
-    audio.volume = 0;
+    const w = window as unknown as { __OFFICE_STORE__?: typeof local.store };
+    w.__OFFICE_STORE__ = local.store;
+    return () => {
+      delete w.__OFFICE_STORE__;
+    };
+  }, [local]);
 
-    const lp = createPersistentLocalState({
-      selfId: SELF_ID,
-      officeId: OFFICE_ID,
-      // Cluster of cubes is centered on world origin; spawn the
-      // character at origin XZ but ABOVE the cube tops (y=1) so
-      // gravity drops it onto the surface and settles it. The resting
-      // height is produced by physics, not a hardcoded offset.
-      startPos: { x: 0, y: SPAWN_DROP_HEIGHT, z: 0 },
-    });
-    setLocal(lp);
-    (window as unknown as { __OFFICE_STORE__: typeof lp.store }).__OFFICE_STORE__ =
-      lp.store;
-
-    let built: ChannelStack | null = null;
+  // The character settles on the kinds' colliders, so the scene waits for the served catalog.
+  useEffect(() => {
     let cancelled = false;
-    buildInMemoryStack({ local: lp, audio })
-      .then((s) => {
-        if (cancelled) {
-          void s.teardown();
-          return;
-        }
-        built = s;
-        s.bots.setCount(0).catch(() => {});
-        setStack(s);
-      })
-      .catch((err) => {
-        console.warn('[mugshot] stack build failed:', err);
-      });
-
+    void catalog.ready().then(() => !cancelled && setCatalogReady(true));
     return () => {
       cancelled = true;
-      if (built) void built.teardown();
     };
-  }, []);
+  }, [catalog]);
 
-  // Gravity placement vs. manual override. By DEFAULT gravity is ON
-  // (manualPlacement === false): the character is dropped from
-  // SPAWN_DROP_HEIGHT and settles onto the cubes under physics. When
-  // the human grabs the Y slider (manualPlacement === true) we suspend
-  // gravity so the body can be pinned at an arbitrary height for
-  // inspection — the diagnostic the slider exists for. The
-  // `__OFFICE_GRAVITY__` hook is published by SceneFrame as soon as
-  // Scene mounts; we retry until it appears since Scene mounts after
-  // `stack` resolves. Re-enable gravity on unmount so navigating back
-  // to Debug behaves normally.
+  // Readiness, and the view for drivers that capture it (`captureBevyView`).
   useEffect(() => {
-    if (!stack) return;
-    let cancelled = false;
-    const tryApply = () => {
-      const g = (
-        window as unknown as {
-          __OFFICE_GRAVITY__?: { setEnabled: (v: boolean) => void };
-        }
-      ).__OFFICE_GRAVITY__;
-      if (g) {
-        g.setEnabled(!manualPlacement);
-        return true;
-      }
-      return false;
-    };
-    if (!tryApply()) {
-      const id = setInterval(() => {
-        if (cancelled || tryApply()) clearInterval(id);
-      }, 50);
-      return () => {
-        cancelled = true;
-        clearInterval(id);
-      };
-    }
+    if (!bevy) return;
+    const sentinels = bevySentinels();
+    sentinels.__officexrBevy = bevy.wasm;
+    sentinels.__officexrBevyViews = [bevy.view];
+    let frame = requestAnimationFrame(function tick() {
+      setBevyReady(bevy.wasm.isReady(bevy.view).ready);
+      frame = requestAnimationFrame(tick);
+    });
     return () => {
-      const g = (
-        window as unknown as {
-          __OFFICE_GRAVITY__?: { setEnabled: (v: boolean) => void };
-        }
-      ).__OFFICE_GRAVITY__;
-      g?.setEnabled(true);
+      cancelAnimationFrame(frame);
+      delete sentinels.__officexrBevy;
+      delete sentinels.__officexrBevyViews;
+      delete sentinels.__officexrBevyMugshotFeetY;
     };
-  }, [stack, manualPlacement]);
+  }, [bevy]);
 
-  // Push the cube field. Re-runs on cubeMode change to swap the
-  // kindIds (instance IDs stay the same, so the sim's static
-  // colliders come out identical).
+  // The scene, settled under gravity unless the slider has pinned the body.
   useEffect(() => {
-    if (!local) return;
-    // cubeSize MUST equal the global VOXEL_SIZE (0.5) — see the
-    // comment above the CUBES tables. The geometry service reads
-    // VOXEL_SIZE, not this snapshot's cubeSize, so a mismatch
-    // silently shifts every instance off-baseline.
-    local.actions.setWorldObjects({
-      cubeSize: 0.5,
-      instances: cubesForMode(cubeMode).map((c) => ({ ...c })),
+    if (!bevy || !catalogReady) return;
+    const world = mugshotWorld(catalog.getCatalog().kinds, cubeMode, lighting, background);
+    const json = JSON.stringify(world);
+    local.actions.setWorldObjects(world.objects as Parameters<typeof local.actions.setWorldObjects>[0]);
+    local.actions.upsertPlayer({ id: SELF_ID, avatar: { model: character } });
+    if (manualPlacement) {
+      bevy.wasm.setWorld(bevy.view, json);
+      delete bevySentinels().__officexrBevyMugshotFeetY;
+      return;
+    }
+    const feetY = bevy.wasm.setWorld(bevy.view, json, character) ?? NaN;
+    bevySentinels().__officexrBevyMugshotFeetY = feetY;
+    const rootY = bodyPosition({ x: 0, y: feetY, z: 0 }, CHAR_RADIUS).y;
+    local.actions.setSelfPosition({ x: 0, y: rootY, z: 0 }, { x: 0, y: 0, z: 0 }, 0, false);
+  }, [bevy, catalogReady, catalog, local, character, cubeMode, lighting, background, manualPlacement]);
+
+  // The slider's pin, sent on its own so dragging doesn't resend the scene.
+  useEffect(() => {
+    if (!bevy || !catalogReady || !manualPlacement) return;
+    bevy.wasm.setPlayers(bevy.view, {
+      players: [{ id: SELF_ID, character, pos: [0, yOffset, 0], yaw: 0, vel: [0, 0, 0], name: '', airborne: false }],
+      charRadius: CHAR_RADIUS,
+      playerSpeed: 0,
+      runSpeed: 0,
+      paused: true,
     });
-  }, [local, cubeMode]);
+    local.actions.setSelfPosition({ x: 0, y: yOffset, z: 0 }, { x: 0, y: 0, z: 0 }, 0, false);
+  }, [bevy, catalogReady, local, character, manualPlacement, yOffset]);
 
-  // Force the rendered character via `avatar.model`.
   useEffect(() => {
-    if (!local) return;
-    local.actions.upsertPlayer({
-      id: SELF_ID,
-      avatar: { model: character },
-    });
-  }, [local, character]);
-
-  // Manual-override pin. ONLY runs in manual mode (the human is
-  // diagnosing placement via the slider). With gravity suspended,
-  // SceneFrame's auto-warp threshold is 0, so this setSelfPosition
-  // teleports the body to the slider's Y on the next frame and holds
-  // it there. In the default gravity mode this effect is inert — the
-  // body's position is owned entirely by the physics settle, never by
-  // `yOffset`. Character XZ is locked at world origin so the
-  // cluster-of-cubes-at-origin scene stays symmetric around the
-  // standing position.
-  useEffect(() => {
-    if (!local || !manualPlacement) return;
-    local.actions.setSelfPosition(
-      { x: 0, y: yOffset, z: 0 },
-      { x: 0, y: 0, z: 0 },
-      0,
-      false,
-    );
-  }, [local, manualPlacement, yOffset]);
-
-  // Memoized so Scene sees a new view only when the tunables change.
-  const view: ViewConfig = useMemo(
-    () => ({
-      ...DEFAULT_WORLD_CONSTANTS,
-      lighting,
-      background,
-      fixedCamera: {
-        ...DEFAULT_WORLD_CONSTANTS.fixedCamera,
-        azimuthDeg,
-        pitchDeg: -8,
-        height: cameraHeight,
-        fov: 40,
-        maxOnScreenFrac: 0.45,
-        minOnScreenFrac: 0.4,
-        lateralFrac: 0,
-        distanceM,
-        // Camera anchors on world origin — cubes are centered
-        // here, so the frame is character-independent.
-        lookAt: [0, 0, 0],
-      },
-    }),
-    [lighting, background, azimuthDeg, distanceM, cameraHeight],
-  );
+    bevy?.wasm.setCamera(bevy.view, mugshotCamera({ azimuthDeg, distanceM, height: cameraHeight }));
+  }, [bevy, azimuthDeg, distanceM, cameraHeight]);
 
   // Expose test hooks for the manifest-load / per-angle capture
   // comparison spec. Production code never reads these.
@@ -385,12 +225,7 @@ export function MugshotApp() {
     };
     win.__OFFICE_MUGSHOT_APPLY_MANIFEST__ = (m: MugshotManifest) => {
       setCharacter(m.character);
-      // Drop any manual Y-override and return to gravity placement —
-      // manifests don't carry yOffset (by design, see the schema
-      // comment above). The compare test must reproduce the renderer's
-      // NATURAL gravity-settled placement, not a tuned Y. If the human
-      // had pinned the body via the slider before the test ran, this
-      // re-enables gravity so the body re-settles onto the cubes.
+      // Manifests carry no Y: the compare must see gravity's natural placement.
       setManualPlacement(false);
       setDistanceM(m.fixedCamera.distanceM);
       setCameraHeight(m.fixedCamera.height);
@@ -398,20 +233,16 @@ export function MugshotApp() {
       setViewportHeight(m.viewportHeight);
       setLighting(m.lighting);
       setBackground(m.background);
-      // Don't restore azimuthDeg from the manifest — the test driver
-      // sets it per-angle via __OFFICE_MUGSHOT_SET_AZIMUTH__.
+      // Not azimuthDeg: the driver sets it per angle via __OFFICE_MUGSHOT_SET_AZIMUTH__.
     };
     win.__OFFICE_MUGSHOT_SET_AZIMUTH__ = (deg) => setAzimuthDeg(deg);
-    // Driving the Y override flips into manual placement (gravity
-    // suspended, body pinned) — same as the human grabbing the slider.
+    // Driving the Y override pins the body, as the human grabbing the slider does.
     win.__OFFICE_MUGSHOT_SET_Y_OFFSET__ = (y) => {
       setManualPlacement(true);
       setYOffset(y);
     };
     win.__OFFICE_MUGSHOT_SET_CUBE_MODE__ = (mode) => setCubeMode(mode);
     win.__OFFICE_MUGSHOT_SET_CAMERA_HEIGHT__ = (h) => setCameraHeight(h);
-    // Forwards through `onExportRef` so the latest onExport closure
-    // is invoked even though this useEffect captured the original.
     win.__OFFICE_MUGSHOT_TRIGGER_EXPORT__ = (opts) =>
       onExportRef.current?.(opts) ?? Promise.resolve();
     return () => {
@@ -424,62 +255,38 @@ export function MugshotApp() {
     };
   }, []);
 
-  const azimuthBeforeExportRef = useRef<AzimuthDeg>(DEFAULT_AZIMUTH);
-  const cubeModeBeforeExportRef = useRef<CubeMode>('gltf');
-
   const onExport = useCallback(async (opts?: { download?: boolean }) => {
-    if (exporting) return;
+    if (exporting || !bevy) return;
     setExporting(true);
-    azimuthBeforeExportRef.current = azimuthDeg;
-    cubeModeBeforeExportRef.current = cubeMode;
-    // Diagnostic side-channel for the export-y-offset regression
-    // test: records the body's actual pos.y at the moment of each
-    // capture. If the export ever silently snaps Y away from the
-    // user's tuned value, the test sees the captured Ys are not
-    // what the user set and fails loudly.
+    const azimuthBefore = azimuthDeg;
+    const cubeModeBefore = cubeMode;
+    // Records the body's y at each capture, so a regression test sees an
+    // export that snapped Y away from what the user tuned.
     const capturedYs: Array<{ mode: string; angle: number; y: number }> = [];
     try {
-      // CRITICAL: do NOT snap Y to a default here. The captured
-      // PNGs MUST reflect what the user tuned in the live preview —
-      // that's the whole point of an ideal-baseline workflow.
-      // Y is decoupled from the test's assertion target by being
-      // omitted from the MANIFEST (so test-time apply uses default
-      // Y and the renderer's natural placement is the diff target),
-      // not by being scrubbed out of the captured pixels.
-
+      // The PNGs keep whatever Y the user tuned; only the manifest leaves it out.
       const zip = new JSZip();
       const angles: AzimuthDeg[] = [0, 90, 180, 270];
-      // Capture both cube modes (GLB + primitive) so the ZIP carries
-      // the full A/B diagnostic pair. The ZIP nests under `ideal/`
-      // so unzipping over `tests/playwright/mugshot-baselines/
-      // <Character>/` lands the curated subset in the right place.
+      // Both cube modes, so the ZIP carries the GLB / primitive A/B pair under `ideal/`,
+      // which unzips over `tests/playwright/mugshot-baselines/<Character>/`.
       for (const mode of ['gltf', 'primitive'] as const) {
         setCubeMode(mode);
-        // Two RAFs for setWorldObjects → ObjectInstances rebuild.
         await waitFrames(2);
+        // A capture resolves on a drawn frame, so readiness is read after Bevy applied the new cubes.
+        await bevy.wasm.captureView(bevy.view);
+        await waitReady(bevy);
         for (const angle of angles) {
           setAzimuthDeg(angle);
-          // Two RAFs: React commits the new view down to
-          // Scene → CameraRig; R3F renders the new frame at the
-          // new camera. Without this the captured PNG is the
-          // previous angle's frame.
+          // React commits the angle and its effect sends the camera before the capture is asked for.
           await waitFrames(2);
-          const canvas = document.querySelector('canvas') as HTMLCanvasElement | null;
-          if (!canvas) throw new Error('[mugshot] no canvas to capture');
-          // Record actual body y at capture time (for the
-          // regression test; production never reads this).
-          const localStore = local?.store;
-          if (localStore) {
-            const p = localStore.getState().players[SELF_ID];
-            if (p) capturedYs.push({ mode, angle, y: p.pos.y });
-          }
-          const dataUrl = canvas.toDataURL('image/png');
-          const base64 = dataUrl.split(',')[1] ?? '';
+          const p = local.store.getState().players[SELF_ID];
+          if (p) capturedYs.push({ mode, angle, y: p.pos.y });
+          const png = await sizedPng(await bevy.wasm.captureView(bevy.view), viewportWidth, viewportHeight);
           const fileName =
             mode === 'gltf'
               ? `${ANGLE_NAMES[angle]}.png`
               : `primitive-${ANGLE_NAMES[angle]}.png`;
-          zip.file(`ideal/${fileName}`, base64, { base64: true });
+          zip.file(`ideal/${fileName}`, png);
         }
       }
       const manifest: MugshotManifest = {
@@ -490,9 +297,9 @@ export function MugshotApp() {
         exportedAt: new Date().toISOString(),
         fixedCamera: {
           azimuthDeg,
-          pitchDeg: -8,
+          pitchDeg: MUGSHOT_PITCH_DEG,
           height: cameraHeight,
-          fov: 40,
+          fov: MUGSHOT_FOV,
           distanceM,
         },
         lighting,
@@ -521,18 +328,16 @@ export function MugshotApp() {
     } catch (err) {
       console.warn('[mugshot] export failed:', err);
     } finally {
-      // Restore azimuth + cubeMode. Y is intentionally NOT
-      // restored from a saved ref — we never changed it during
-      // the export, so there's nothing to restore.
-      setAzimuthDeg(azimuthBeforeExportRef.current);
-      setCubeMode(cubeModeBeforeExportRef.current);
+      // Y was never changed by the export, so only these two are restored.
+      setAzimuthDeg(azimuthBefore);
+      setCubeMode(cubeModeBefore);
       setExporting(false);
     }
   }, [
+    bevy,
     azimuthDeg,
     distanceM,
     cameraHeight,
-    yOffset,
     cubeMode,
     viewportWidth,
     viewportHeight,
@@ -542,9 +347,7 @@ export function MugshotApp() {
     exporting,
   ]);
 
-  // Keep the test trigger hook pointed at the latest onExport
-  // closure — the window-hook useEffect captured the version from
-  // mount time.
+  // The window hook above captured onExport from mount; keep it on the latest closure.
   useEffect(() => {
     onExportRef.current = onExport;
   }, [onExport]);
@@ -572,10 +375,7 @@ export function MugshotApp() {
         }}
       >
         <div
-          // Fixed-pixel canvas container. R3F sizes the WebGL backing
-          // store off this element; with `dpr={1}` the pixel buffer
-          // matches exactly so canvas.toDataURL() returns the
-          // configured viewport size.
+          // The view's canvas fills this fixed-pixel box; exports are scaled to it.
           style={{
             width: viewportWidth,
             height: viewportHeight,
@@ -585,24 +385,11 @@ export function MugshotApp() {
             flexShrink: 0,
           }}
         >
-          {stack && local && (
-            <Scene
-              key={character}
-              store={local.store}
-              actions={local.actions}
-              rules={local.rules}
-              bus={local.bus}
-              sync={stack.sync}
-              handshake={stack.handshake}
-              bots={stack.bots}
-              selfId={SELF_ID}
-              cameraMode="fixed"
-              view={view}
-              worldFocused={false}
-              paused={true}
-              spawnPoints={[]}
-              dpr={1}
-            />
+          <div ref={container} style={{ position: 'absolute', inset: 0 }} />
+          {error && (
+            <p role="alert" style={{ position: 'absolute', inset: 0, margin: 0, padding: 8, color: '#fca5a5', font: '12px sans-serif' }}>
+              The 3D view couldn't start: {error}
+            </p>
           )}
         </div>
       </main>
@@ -612,8 +399,7 @@ export function MugshotApp() {
           window.location.hash = `mugshot/${c}`;
         }}
         yOffset={yOffset}
-        // Grabbing the slider enters manual placement (gravity off,
-        // body pinned) — the human's diagnostic override.
+        // Grabbing the slider enters manual placement (body pinned): the human's diagnostic override.
         onYOffsetChange={(v) => {
           setManualPlacement(true);
           setYOffset(v);
@@ -653,6 +439,25 @@ function waitFrames(n: number): Promise<void> {
     };
     requestAnimationFrame(tick);
   });
+}
+
+async function waitReady({ wasm, view }: BevyView): Promise<void> {
+  while (!wasm.isReady(view).ready) {
+    await new Promise((resolve) => setTimeout(resolve, READY_POLL_MS));
+  }
+}
+
+/** `png` at `width`×`height`: a view captures at the device's pixel ratio. */
+async function sizedPng(png: Blob, width: number, height: number): Promise<Blob> {
+  const bitmap = await createImageBitmap(png);
+  if (bitmap.width === width && bitmap.height === height) {
+    bitmap.close();
+    return png;
+  }
+  const canvas = new OffscreenCanvas(width, height);
+  canvas.getContext('2d')!.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+  return canvas.convertToBlob({ type: 'image/png' });
 }
 
 interface ControlPanelProps {

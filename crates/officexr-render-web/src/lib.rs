@@ -81,7 +81,12 @@ struct PlayersInput {
     char_radius: f32,
     player_speed: f32,
     run_speed: f32,
+    /// Only read while a bump plays, so views that never bump may omit it.
+    #[serde(default)]
     bump_easing_ms: f32,
+    /// Draws the players in their bind pose, as a `setWorld` mugshot does.
+    #[serde(default)]
+    paused: bool,
 }
 
 #[derive(Deserialize)]
@@ -353,6 +358,7 @@ pub fn set_players(id: ViewId, players: JsValue) -> Result<(), JsError> {
         player_speed: input.player_speed,
         run_speed: input.run_speed,
         bump_easing_ms: input.bump_easing_ms,
+        paused: input.paused,
         ..default()
     };
     send(id, ViewMsg::Players(players))

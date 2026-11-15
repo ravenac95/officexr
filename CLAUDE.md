@@ -21,8 +21,7 @@ not aspirational rules — they're the baseline the existing
   using "and", split it. Concrete examples in this repo: `SyncEngine`
   delegates to `PositionBroadcaster` + `StateDiffBroadcaster` +
   `InboundRouter`; `BotDriver` delegates to `BotPhysicsWorld` + per-mode
-  strategy files in `bot/modes/`; `Scene.tsx` delegates Leva panels to
-  per-panel hooks in `renderer/panels/`.
+  strategy files in `bot/modes/`.
 - **Open/Closed.** Prefer adding a new file (a new mode strategy, a new
   panel, a new `NetEvent` kind) to editing an existing switch/giant
   function. Strategy tables (`BOT_MODE_STRATEGIES: Record<BotMode, …>`)
@@ -136,17 +135,16 @@ escape hatch is for genuine constraints, not for skipping refactors.
     `OFFICEXR_UPDATE_BASELINES=1` writes them. CI renders on
     ubuntu-24.04 lavapipe, so regenerate on linux and review each PNG
     by hand before committing.
-  - three.js (`@officexr/world` renderer logic): the remaining
-    Playwright specs still hold its contract until they are trimmed to
-    smoke tests: the mugshot specs (`pnpm exec playwright test
-    tests/playwright/mugshot-*`, baselines under
-    `tests/playwright/mugshot-baselines/`) and
-    `character-on-surface.spec.ts`, which `pnpm test:e2e:ci` runs.
+  - The studio Mugshot mode and `?op=render` page draw through Bevy;
+    their Playwright specs (`character-on-surface`, `render-page`,
+    `render-view-mcp`) are smoke tests. The older `mugshot-*` specs
+    and their three.js ideals under `tests/playwright/mugshot-baselines/`
+    are evidence only, until they are trimmed.
   - Never widen a diff threshold to make a suite green.
 - **Regenerating `*-chromium-linux.png` Playwright baselines: use
-  podman.** `character-on-surface.spec.ts` writes OS-suffixed
-  baselines and CI runs on linux. From a macOS box, run the spec in
-  `mcr.microsoft.com/playwright:v<version>-noble` (the installed
+  podman.** A spec that writes OS-suffixed `toHaveScreenshot` baselines
+  must have them rendered on linux, as CI is. From a macOS box, run the
+  spec in `mcr.microsoft.com/playwright:v<version>-noble` (the installed
   Playwright version) via **podman** against a throwaway `git clone`
   (not a mount of the working tree: an in-container `pnpm install`
   clobbers the host's node_modules), with `--update-snapshots`, then

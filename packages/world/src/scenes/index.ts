@@ -121,6 +121,7 @@ export {
 } from './filesystem-map-storage.ts';
 export {
   groupPlacementsByLayout,
+  layoutPlacements,
   mapLayoutPlacements,
   type BakedLayoutPlacement,
   type MapLayoutPlacements,

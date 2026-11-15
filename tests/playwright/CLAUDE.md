@@ -8,10 +8,12 @@ Mugshot places its character, and what the Y-offset slider is for.**
 
 ## The Mugshot places the character by GRAVITY, never by an offset
 
-`packages/studio/src/modes/mugshot/MugshotApp.tsx` drops the character
-body from `SPAWN_DROP_HEIGHT` above the 2×2 cube cluster and lets it
-**settle onto the cubes under the kinematic character controller** —
-the same physics Debug mode uses. The rendered resting height is
+`packages/studio/src/modes/mugshot/MugshotApp.tsx` draws through a Bevy
+view whose `setWorld(view, scene, character)` mugshot
+(`crates/officexr-render/src/mugshot.rs`) drops the character body from
+`SPAWN_DROP_HEIGHT` above the 2×2 cube cluster and lets it **settle onto
+the cubes under `officexr-sim`'s character controller** — the same
+physics every character uses. The rendered resting height is
 whatever gravity produces (≈ root y 0.50, feet flush on the cube tops
 at y=1), not a hand-tuned constant.
 
@@ -21,11 +23,10 @@ body was teleported to a `DEFAULT_Y_OFFSET` constant. That is gone.
 body to a magic Y to "fix" placement, the bug is in gravity/geometry —
 fix that instead.
 
-The character settles flush because the kinematic controller's
-penetration skin is **near-zero globally** —
-`CHARACTER_CONTROLLER_SKIN` in `packages/world/src/physics/rules.ts`,
-used by BOTH the local player (`SceneFrame`) and bots
-(`BotPhysicsWorld`). Nothing about physics is mugshot-scoped: every
+The character settles flush because the controller's penetration skin
+is **near-zero globally** (`CHARACTER_CONTROLLER_SKIN` in
+`packages/world/src/physics/rules.ts`, mirrored by `officexr-sim`).
+Nothing about physics is mugshot-scoped: every
 character in the game settles on the ground the same way. (A larger
 "anti-tunnel" skin would float the collider ~1 cm above every surface;
 the world's solid 2 m cubes make tunneling at a near-zero skin a
@@ -52,9 +53,9 @@ override**:
   slider is inert (display only).
 - The moment a human drags the slider — or a test calls
   `__OFFICE_MUGSHOT_SET_Y_OFFSET__` — the Mugshot enters **manual
-  mode**: gravity is suspended and the body is pinned at the slider
-  value, so the human can lift/lower the character to inspect placement
-  when the gravity render looks wrong. The "Auto (gravity)" button
+  mode**: no mugshot settle runs and the body is pinned at the slider
+  value (a paused `setPlayers`), so the human can lift/lower the
+  character to inspect placement when the gravity render looks wrong. The "Auto (gravity)" button
   drops the pin and re-settles under gravity.
 
 **officexr itself MUST NOT rely on this offset to position the

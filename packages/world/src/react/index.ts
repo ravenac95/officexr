@@ -43,7 +43,7 @@ export {
 } from './playControls.tsx';
 export type { AutoWalkState } from '../nav/autoWalk.ts';
 export { findPath } from '../nav/path.ts';
-export { feetPosition } from '../physics/rules.ts';
+export { bodyPosition, feetPosition } from '../physics/rules.ts';
 export type { NavGrid } from '../nav/grid.ts';
 export { useCoarsePointer } from './useCoarsePointer.ts';
 export { useMediaQuery } from './useMediaQuery.ts';
