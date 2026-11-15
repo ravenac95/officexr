@@ -114,21 +114,27 @@ export interface OverlayObject {
 }
 
 /**
- * Drawn over a view's world. `tag` names it across `setOverlays` calls, and picks on it report
- * `{ type: 'overlay', tag }`; lines and labels are never hit. With `pickable: false`, picks pass
- * through it, as tool ghosts need.
+ * Drawn over a view's world. `tag` names it across `setOverlays` calls. A pickable overlay's picks
+ * report `{ type: 'overlay', tag }`; lines and labels are never hit. An unpickable one lets picks
+ * through to what lies behind. `pickable` defaults to `true` for markers only: the map editor
+ * selects spawn points by clicking them. Pass `true` for clickable desk areas; leave the grid
+ * unpickable, or it takes every floor click from the ground.
  */
 export type Overlay = { tag: string; pickable?: boolean } & (
   /** Drawn through other geometry. Edges shared by flush boxes are drawn once. */
   | { kind: 'outline'; boxes?: WorldAabb[]; segments?: [Vec3, Vec3][]; color: HexColor }
-  /** The objects drawn translucent with the view's kinds (sent with `setWorld`). */
+  /**
+   * The objects drawn translucent with the view's kinds: each `kindId` must be in a `setWorld` diff's
+   * `kinds`. A kind a ghost has used stays loaded while it is there, so the ghost shows at once when
+   * it comes back.
+   */
   | { kind: 'ghost'; objects: OverlayObject[]; opacity: number; pulse?: boolean; tint?: HexColor }
   /** `EndlessGrid`: lines every `cellSize`, a major one every 10, faded out by `fade` metres from the origin. */
   | { kind: 'grid'; y: number; cellSize: number; fade: number }
   /** `DirectionGizmo`: a 1.5 m arrow from `at`, drawn through other geometry. */
   | { kind: 'directionGizmo'; at: Vec3; direction: Vec3; color: HexColor }
-  /** A spawn point's cone, standing on `pos`. */
-  | { kind: 'marker'; shape: 'spawnCone'; pos: Vec3; yaw: number; color: HexColor }
+  /** A spawn point's cone, standing on `pos`; `selected` makes it glow in `color` under a yellow tip. */
+  | { kind: 'marker'; shape: 'spawnCone'; pos: Vec3; yaw: number; color: HexColor; selected?: boolean }
   /** A flat area at height `y`, drawn through other geometry. */
   | { kind: 'zone'; shape: ZoneShape; y: number; color: HexColor }
   /** White text centred on `at`. */
@@ -231,7 +237,10 @@ export interface RendererModule {
   rayAtScreen(id: ViewId, x: number, y: number): { origin: Vec3; dir: Vec3 };
   /** Where that ray meets `plane` ahead of the camera, or `null`. Throws for a zero normal. */
   intersectPlane(id: ViewId, x: number, y: number, plane: Plane): Vec3 | null;
-  /** Replaces the view's overlays; only those whose `tag` is new or whose content changed are redrawn. */
+  /**
+   * Replaces the view's overlays, diffed by `tag`. Moving a label, marker or gizmo, changing a label's
+   * text, moving a ghost's objects or an outline's lines updates it in place; any other change redraws it.
+   */
   setOverlays(id: ViewId, overlays: Overlay[]): void;
 
   // Controls: once any of these is called on a view, its controls drive its camera, overriding

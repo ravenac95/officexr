@@ -47,47 +47,63 @@ pub(crate) fn label(
     )
 }
 
+/// The camera of the view `anchor` is in, once it has one.
+fn view_camera(anchor: Entity, parents: &Query<&ChildOf>, views: &Query<&View>) -> Option<Entity> {
+    parents
+        .iter_ancestors(anchor)
+        .find_map(|e| views.get(e).ok())
+        .and_then(|v| v.camera)
+}
+
+/// Puts each new label on its view's camera before the UI first lays it
+/// out, so it never draws, even for a frame, on another view's.
+#[allow(clippy::type_complexity)]
+pub(crate) fn target_labels(
+    mut commands: Commands,
+    labels: Query<(Entity, &LabelOf), (With<WorldLabel>, Without<UiTargetCamera>)>,
+    parents: Query<&ChildOf>,
+    views: Query<&View>,
+) {
+    for (label, anchor) in &labels {
+        if let Some(camera) = view_camera(anchor.0, &parents, &views) {
+            commands.entity(label).insert(UiTargetCamera(camera));
+        }
+    }
+}
+
 /// Centres each label on its point in its anchor's view, hiding it when
-/// it isn't shown or the point is off camera.
+/// it isn't shown, the point is off camera, or it hasn't been laid out yet
+/// (it would show off centre).
 #[allow(clippy::type_complexity)]
 pub(crate) fn place_labels(
-    mut commands: Commands,
     anchors: Query<&GlobalTransform>,
     parents: Query<&ChildOf>,
     views: Query<&View>,
     cameras: Query<(&Camera, &GlobalTransform)>,
-    mut labels: Query<(
-        Entity,
-        &WorldLabel,
-        &LabelOf,
-        &mut Node,
-        &mut Visibility,
-        &ComputedNode,
-        Has<UiTargetCamera>,
-    )>,
+    mut labels: Query<
+        (
+            &WorldLabel,
+            &LabelOf,
+            &mut Node,
+            &mut Visibility,
+            &ComputedNode,
+        ),
+        With<UiTargetCamera>,
+    >,
 ) {
-    for (entity, label, anchor, mut node, mut visibility, computed, targeted) in &mut labels {
-        let Some((camera_entity, (camera, camera_transform))) = parents
-            .iter_ancestors(anchor.0)
-            .find_map(|e| views.get(e).ok())
-            .and_then(|v| v.camera)
-            .and_then(|c| Some((c, cameras.get(c).ok()?)))
+    for (label, anchor, mut node, mut visibility, computed) in &mut labels {
+        let Some((camera, camera_transform)) =
+            view_camera(anchor.0, &parents, &views).and_then(|c| cameras.get(c).ok())
         else {
             continue;
         };
-        // Spawned before its view's camera.
-        if !targeted {
-            commands
-                .entity(entity)
-                .insert(UiTargetCamera(camera_entity));
-        }
         let at = anchors.get(anchor.0).ok().and_then(|t| {
             camera
                 .world_to_viewport(camera_transform, t.translation() + label.offset)
                 .ok()
         });
         match at {
-            Some(xy) if label.shown => {
+            Some(xy) if label.shown && computed.size() != Vec2::ZERO => {
                 let half = computed.size() * computed.inverse_scale_factor() / 2.0;
                 node.left = Val::Px(xy.x - half.x);
                 node.top = Val::Px(xy.y - half.y);
@@ -95,5 +111,149 @@ pub(crate) fn place_labels(
             }
             _ => *visibility = Visibility::Hidden,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::app::{HierarchyPropagatePlugin, PropagateSet};
+    use bevy::camera::{
+        CameraPlugin, CameraProjection, ComputedCameraValues, PerspectiveProjection,
+        RenderTargetInfo,
+    };
+    use bevy::ui::{ComputedUiTargetCamera, UiScale, update::propagate_ui_target_cameras};
+
+    use super::*;
+    use crate::WorldDiff;
+    use crate::tests::{bare_app, camera, scene};
+    use crate::views::{ViewHub, ViewId, ViewKind, ViewMsg, ViewTarget, find_view};
+
+    /// With the transforms, cameras and the UI's camera targeting the labels need.
+    fn app() -> App {
+        let mut app = bare_app();
+        app.add_plugins((
+            TransformPlugin,
+            CameraPlugin,
+            HierarchyPropagatePlugin::<ComputedUiTargetCamera>::new(PostUpdate),
+        ))
+        .init_asset::<bevy::mesh::skinning::SkinnedMeshInverseBindposes>()
+        .init_resource::<UiScale>()
+        .add_systems(
+            PostUpdate,
+            propagate_ui_target_cameras.before(PropagateSet::<ComputedUiTargetCamera>::default()),
+        );
+        app
+    }
+
+    fn view_with_label(app: &mut App, text: &str) -> ViewId {
+        let hub = app.world().resource::<ViewHub>().clone();
+        let id = hub.create(ViewKind::World, |_| ViewTarget::Image(UVec2::new(64, 48)));
+        let mut diff: WorldDiff =
+            serde_json::from_str(include_str!("../examples/booper.scene.json")).unwrap();
+        diff.kinds = Some(vec![]);
+        diff.objects = scene(&[]).objects.into();
+        hub.send(id, ViewMsg::World(Box::new(diff)));
+        hub.send(id, ViewMsg::Camera(camera(0.0)));
+        let label =
+            serde_json::json!([{"tag": "l", "kind": "label", "at": [0, 0, 0], "text": text}]);
+        hub.send(
+            id,
+            ViewMsg::Overlays(serde_json::from_value(label).unwrap()),
+        );
+        id
+    }
+
+    fn label_in(app: &mut App, id: ViewId) -> (Entity, Entity) {
+        let view = find_view(app.world_mut(), id).unwrap();
+        let camera = app.world().get::<View>(view).unwrap().camera.unwrap();
+        let mut labels = app.world_mut().query::<(Entity, &LabelOf)>();
+        let mut parents = app.world_mut().query::<&ChildOf>();
+        let world = app.world();
+        let label = labels
+            .iter(world)
+            .find(|(_, a)| parents.get(world, a.0).is_ok_and(|p| p.parent() == view))
+            .unwrap()
+            .0;
+        (label, camera)
+    }
+
+    #[test]
+    fn a_label_is_on_its_own_views_camera_from_its_first_frame() {
+        let mut app = app();
+        let a = view_with_label(&mut app, "A");
+        let b = view_with_label(&mut app, "B");
+        app.update();
+        for id in [a, b] {
+            let (label, camera) = label_in(&mut app, id);
+            let target = app.world().get::<ComputedUiTargetCamera>(label);
+            assert_eq!(target.and_then(|t| t.get()), Some(camera), "view {id}");
+            assert_eq!(
+                app.world().get::<Visibility>(label),
+                Some(&Visibility::Hidden)
+            );
+        }
+    }
+
+    fn visibility(app: &App, label: Entity) -> Visibility {
+        *app.world().get::<Visibility>(label).unwrap()
+    }
+
+    #[test]
+    fn a_label_shows_once_laid_out_and_while_shown() {
+        let mut app = app();
+        let id = view_with_label(&mut app, "A");
+        app.update();
+        app.update();
+        let (label, view_camera) = label_in(&mut app, id);
+        assert_eq!(
+            visibility(&app, label),
+            Visibility::Hidden,
+            "not laid out yet"
+        );
+
+        // Stand in for the UI's layout and the render target's size, which
+        // this app doesn't compute.
+        app.world_mut().get_mut::<ComputedNode>(label).unwrap().size = Vec2::new(20.0, 10.0);
+        let size = UVec2::new(64, 48);
+        let projection = PerspectiveProjection {
+            fov: 60f32.to_radians(),
+            aspect_ratio: size.x as f32 / size.y as f32,
+            ..default()
+        };
+        app.world_mut()
+            .get_mut::<Camera>(view_camera)
+            .unwrap()
+            .computed = ComputedCameraValues {
+            clip_from_view: projection.get_clip_from_view(),
+            target_info: Some(RenderTargetInfo {
+                physical_size: size,
+                scale_factor: 1.0,
+            }),
+            ..default()
+        };
+        app.update();
+        assert_eq!(visibility(&app, label), Visibility::Inherited);
+        let node = app.world().get::<Node>(label).unwrap();
+        // The origin, at the centre of a 64×48 view, less half the label.
+        let (Val::Px(left), Val::Px(top)) = (node.left, node.top) else {
+            panic!("not placed in pixels");
+        };
+        assert!(Vec2::new(left, top).distance(Vec2::new(22.0, 19.0)) < 1e-3);
+
+        app.world_mut().get_mut::<WorldLabel>(label).unwrap().shown = false;
+        app.update();
+        assert_eq!(visibility(&app, label), Visibility::Hidden);
+    }
+
+    #[test]
+    fn a_label_goes_with_its_anchor() {
+        let mut app = app();
+        let anchor = app.world_mut().spawn(Transform::default()).id();
+        let label = app
+            .world_mut()
+            .spawn(label("tag".into(), 14.0, Color::NONE, anchor, Vec3::Y))
+            .id();
+        app.world_mut().entity_mut(anchor).despawn();
+        assert!(app.world().get_entity(label).is_err());
     }
 }

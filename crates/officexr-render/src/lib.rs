@@ -185,7 +185,12 @@ fn scene_systems(app: &mut App) {
                     layouts::spawn_loaded_layouts,
                 )
                     .chain(),
-                (spawn_camera, sky::sync_background).chain(),
+                (
+                    spawn_camera,
+                    sky::sync_background,
+                    world_label::target_labels,
+                )
+                    .chain(),
             )
                 .chain()
                 .in_set(views::SceneSystems)

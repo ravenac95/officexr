@@ -43,18 +43,23 @@ struct KindModel {
 
 /// A view's kinds and their models.
 #[derive(Component, Default)]
-pub struct ObjectKinds(HashMap<String, KindModel>);
+pub struct ObjectKinds {
+    models: HashMap<String, KindModel>,
+    /// Kinds a ghost overlay has drawn, kept loaded while the catalog has
+    /// them, so a tool's ghost shows at once when it comes back.
+    ghosted: HashSet<String>,
+}
 
 impl ObjectKinds {
     pub fn pending(&self) -> usize {
-        self.0
+        self.models
             .values()
             .filter(|m| matches!(m.state, ModelState::Loading))
             .count()
     }
 
     pub(crate) fn materials(&self) -> impl Iterator<Item = &Handle<ObjectMaterial>> {
-        self.0.values().filter_map(|m| match &m.state {
+        self.models.values().filter_map(|m| match &m.state {
             ModelState::Ready(model) => Some(&model.material),
             _ => None,
         })
@@ -62,14 +67,14 @@ impl ObjectKinds {
 
     /// The ids of the kinds whose model failed to load.
     pub fn failed(&self) -> impl Iterator<Item = &str> {
-        self.0
+        self.models
             .iter()
             .filter(|(_, m)| matches!(m.state, ModelState::Failed))
             .map(|(id, _)| id.as_str())
     }
 
     fn placed(&self, inst: &ObjectInstance) -> Option<(&Model, Transform)> {
-        let kind = self.0.get(&inst.kind_id)?;
+        let kind = self.models.get(&inst.kind_id)?;
         let ModelState::Ready(model) = &kind.state else {
             return None;
         };
@@ -99,24 +104,25 @@ pub(crate) fn sync_kinds(
     base: Res<AssetBase>,
     assets: Res<AssetServer>,
     mut views: Query<
-        (
-            &ViewScene,
-            Option<&ViewOverlays>,
-            &mut ObjectKinds,
-            Option<&Children>,
-        ),
+        (Entity, &ViewScene, Option<&ViewOverlays>, &mut ObjectKinds),
         Or<(Changed<ViewScene>, Changed<ViewOverlays>)>,
     >,
-    placed: Query<&Placed>,
+    placed: Query<(Entity, &Placed)>,
+    parents: Query<&ChildOf>,
 ) {
-    for (scene, overlays, mut kinds, children) in &mut views {
+    for (view, scene, overlays, mut kinds) in &mut views {
+        let ghosts = overlays.into_iter().flat_map(ViewOverlays::ghost_objects);
+        kinds.ghosted.extend(ghosts.map(|g| g.kind_id.clone()));
         let used = used_kinds(scene, overlays).collect();
         let redefined = sync_view_kinds(scene, used, &mut kinds, &base, &assets);
-        // The entities keep their place; `attach_models` redraws them once the new model is ready.
-        for &entity in children.into_iter().flatten() {
-            if placed
-                .get(entity)
-                .is_ok_and(|p| redefined.contains(&p.0.kind_id))
+        if redefined.is_empty() {
+            continue;
+        }
+        // The entities, ghosts included, keep their place; `attach_models`
+        // redraws them once the new model is ready.
+        for (entity, placed) in &placed {
+            if redefined.contains(&placed.0.kind_id)
+                && parents.iter_ancestors(entity).any(|e| e == view)
             {
                 commands
                     .entity(entity)
@@ -154,16 +160,20 @@ fn sync_view_kinds(
         .filter(|k| used.contains(k.id.as_str()))
         .collect();
     let wanted_ids: HashSet<&str> = wanted.iter().map(|k| k.id.as_str()).collect();
-    kinds
-        .0
-        .retain(|id, m| m.gltf.is_none() || wanted_ids.contains(id.as_str()));
+    let catalog: HashSet<&str> = scene.kinds.iter().map(|k| k.id.as_str()).collect();
+    let ObjectKinds { models, ghosted } = kinds;
+    models.retain(|id, m| {
+        m.gltf.is_none()
+            || wanted_ids.contains(id.as_str())
+            || (ghosted.contains(id) && catalog.contains(id.as_str()))
+    });
     let mut redefined = HashSet::new();
     for kind in wanted {
-        if kinds.0.get(&kind.id).is_some_and(|m| m.kind == *kind) {
+        if models.get(&kind.id).is_some_and(|m| m.kind == *kind) {
             continue;
         }
         redefined.insert(kind.id.clone());
-        kinds.0.insert(
+        models.insert(
             kind.id.clone(),
             KindModel {
                 kind: kind.clone(),
@@ -191,7 +201,7 @@ pub(crate) fn register_primitives(
             let Some(colour) = kind_id.strip_prefix(PRIMITIVE_KIND_PREFIX) else {
                 continue;
             };
-            if kinds.0.contains_key(kind_id) {
+            if kinds.models.contains_key(kind_id) {
                 continue;
             }
             let mesh = cuboid
@@ -206,7 +216,7 @@ pub(crate) fn register_primitives(
                 },
                 extension: HemisphereFill::new(&scene.lighting),
             });
-            kinds.0.insert(
+            kinds.models.insert(
                 kind_id.to_string(),
                 KindModel {
                     kind: primitive_kind(kind_id),
@@ -279,7 +289,7 @@ fn sync_view_objects(
         .objects
         .instances
         .iter()
-        .filter(|i| kinds.0.contains_key(&i.kind_id))
+        .filter(|i| kinds.models.contains_key(&i.kind_id))
     {
         if wanted.insert(inst.id.as_str(), inst).is_some() {
             warn!("duplicate object id {}", inst.id);
@@ -333,7 +343,7 @@ pub(crate) fn load_kinds(
         if kinds.pending() == 0 {
             continue;
         }
-        for model in kinds.0.values_mut() {
+        for model in kinds.models.values_mut() {
             let Some(handle) = model
                 .gltf
                 .clone()

@@ -7,8 +7,8 @@ use wasm_bindgen::prelude::*;
 
 use super::{js_err, send, to_json};
 
-/// Replaces the view's overlays; only those whose `tag` is new or whose
-/// content changed are redrawn.
+/// Replaces the view's overlays, diffed by `tag`: a moved or retexted one
+/// is updated in place, any other change redraws it.
 #[wasm_bindgen(js_name = setOverlays)]
 pub fn set_overlays(id: ViewId, overlays: JsValue) -> Result<(), JsError> {
     let json = to_json(&overlays).ok_or_else(|| js_err("overlays must be an array"))?;

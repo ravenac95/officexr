@@ -418,6 +418,9 @@ mod tests {
         let mut app = bare_app();
         app.add_plugins((TransformPlugin, CameraPlugin, plugin))
             .init_asset::<bevy::mesh::skinning::SkinnedMeshInverseBindposes>();
+        // Picks bubble up through a query that reads `Window`, which fails
+        // while no window has registered it, as here.
+        app.world_mut().register_component::<Window>();
         app
     }
 
@@ -657,5 +660,37 @@ mod tests {
         let in_b = click_centre(&mut app, b_view);
         assert_eq!(in_b.len(), 1, "{in_b:?}");
         assert_eq!(in_b[0].target, PickTarget::Object { id: "b".into() });
+    }
+
+    fn set_overlays(app: &mut App, id: ViewId, overlays: serde_json::Value) {
+        let overlays = serde_json::from_value(overlays).unwrap();
+        let hub = app.world().resource::<ViewHub>().clone();
+        hub.send(id, ViewMsg::Overlays(overlays));
+        for _ in 0..3 {
+            app.update();
+        }
+    }
+
+    #[test]
+    fn the_grid_lets_floor_clicks_through_to_the_ground_and_a_marker_reports_its_tag() {
+        let at = Vec3::new(10.0, 0.0, 10.0);
+        let (mut app, id) = view_of(&[("a", [0.0; 3])], Vec3::new(10.0, 5.0, 15.0), at);
+        let grid = |pickable: Option<bool>| {
+            serde_json::json!({"tag": "grid", "kind": "grid", "y": 0.01, "cellSize": 1,
+                "fade": 30, "pickable": pickable})
+        };
+        set_overlays(&mut app, id, serde_json::json!([grid(None)]));
+        assert_eq!(click_centre(&mut app, id)[0].target, PickTarget::Ground);
+        assert_eq!(presses(&mut app), []);
+
+        // Made pickable, the grid would take the click.
+        set_overlays(&mut app, id, serde_json::json!([grid(Some(true))]));
+        let overlay = |tag: &str| PickTarget::Overlay { tag: tag.into() };
+        assert_eq!(click_centre(&mut app, id)[0].target, overlay("grid"));
+
+        let spawn = serde_json::json!({"tag": "spawn", "kind": "marker", "shape": "spawnCone",
+            "pos": at, "yaw": 0, "color": "#22d3ee"});
+        set_overlays(&mut app, id, serde_json::json!([grid(None), spawn]));
+        assert_eq!(click_centre(&mut app, id)[0].target, overlay("spawn"));
     }
 }

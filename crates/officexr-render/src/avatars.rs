@@ -199,7 +199,8 @@ pub(crate) fn plugin(app: &mut App) {
         (build_graph, sync_avatars, bind_avatars, animate, show_tags)
             .chain()
             .in_set(crate::views::SceneSystems)
-            .after(crate::views::mirror_resources),
+            .after(crate::views::mirror_resources)
+            .before(world_label::target_labels),
     );
 }
 

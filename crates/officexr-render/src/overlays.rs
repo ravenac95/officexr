@@ -2,8 +2,9 @@
 //! `selectionOutline.ts`, `GhostLayer.tsx`, `EndlessGrid.tsx`,
 //! `DirectionGizmo.tsx`, and the map editor's spawn markers, zones and labels.
 //!
-//! A view's overlays are replaced as a list; each is diffed by its `tag`,
-//! so only the added, removed and changed ones are respawned.
+//! A view's overlays are replaced as a list, diffed by `tag`: an overlay
+//! that only moved, or changed its text, ghosts' places or outline lines, is
+//! updated in place; any other change respawns it.
 
 use std::collections::{HashMap, HashSet};
 
@@ -20,11 +21,12 @@ use bevy::render::render_resource::{
 use bevy::shader::ShaderRef;
 use serde::Deserialize;
 
-use crate::lighting::ObjectMaterial;
+use crate::lighting::{HemisphereFill, ObjectMaterial};
 use crate::objects::Placed;
 use crate::picking::PickTarget;
-use crate::scene::{ObjectInstance, hex};
-use crate::world_label;
+use crate::scene::{LightingConfig, ObjectInstance, hex};
+use crate::views::ViewScene;
+use crate::world_label::{self, Labels};
 
 const GRID_HALF_SIZE: f32 = 200.0;
 const GRID_SECTION_CELLS: f32 = 10.0;
@@ -42,23 +44,49 @@ const GIZMO_LENGTH: f32 = 1.5;
 const SPAWN_CONE_HEIGHT: f32 = 1.6;
 const SPAWN_CONE_RADIUS: f32 = 0.6;
 const SPAWN_TIP_RADIUS: f32 = 0.18;
+const SPAWN_EMISSIVE: Srgba = Srgba::rgb(
+    0x0e as f32 / 255.0,
+    0x74 as f32 / 255.0,
+    0x90 as f32 / 255.0,
+);
+const SPAWN_TIP: Srgba = Srgba::rgb(
+    0xcf as f32 / 255.0,
+    0xfa as f32 / 255.0,
+    0xfe as f32 / 255.0,
+);
+const SPAWN_TIP_SELECTED: Srgba = Srgba::rgb(
+    0xfe as f32 / 255.0,
+    0xf9 as f32 / 255.0,
+    0xc3 as f32 / 255.0,
+);
 const LABEL_FONT_SIZE: f32 = 12.0;
 /// `GhostLayer.tsx`'s pulse: ±50% of the opacity at 4 rad/s.
 const PULSE_RATE: f32 = 4.0;
+/// Transparent draws sort by view depth plus a material's bias, so these
+/// put the x-ray overlays after the world's, as three.js's `renderOrder`:
+/// zones and the gizmo at 1, the outline at 2. Far past any scene depth.
+const ORDER_1: f32 = 1e5;
+const ORDER_2: f32 = 2e5;
 
 #[derive(Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Overlay {
     pub tag: String,
-    /// Off, picks pass through it to what lies behind.
-    #[serde(default = "pickable")]
-    pub pickable: bool,
+    /// See [`Overlay::pickable`].
+    #[serde(default)]
+    pub pickable: Option<bool>,
     #[serde(flatten)]
     pub kind: OverlayKind,
 }
 
-fn pickable() -> bool {
-    true
+impl Overlay {
+    /// Off, picks pass through it to what lies behind. Only markers default
+    /// on: the editors' other overlays took no clicks in three.js, and the
+    /// grid would hide the ground from every floor click.
+    pub fn pickable(&self) -> bool {
+        self.pickable
+            .unwrap_or(matches!(self.kind, OverlayKind::Marker { .. }))
+    }
 }
 
 /// Colours are `#rrggbb` or, translucent, `#rrggbbaa`.
@@ -108,6 +136,9 @@ pub enum OverlayKind {
         yaw: f32,
         #[serde(deserialize_with = "hex")]
         color: Color,
+        /// Glows in `color` rather than dark cyan, under a pale yellow tip.
+        #[serde(default)]
+        selected: bool,
     },
     /// A flat area at height `y`, drawn through other geometry.
     Zone {
@@ -171,6 +202,44 @@ pub struct OverlayIndex(HashMap<String, (Entity, Overlay)>);
 pub struct OverlayMaterial {
     #[uniform(0)]
     color: LinearRgba,
+    order: f32,
+}
+
+impl OverlayMaterial {
+    fn new(color: Color, order: f32) -> Self {
+        Self {
+            color: color.to_linear(),
+            order,
+        }
+    }
+
+    /// As three.js draws a tone-mapped basic material.
+    fn tone_mapped(color: Color, order: f32) -> Self {
+        let linear = color.to_linear();
+        let [r, g, b] = aces_filmic(Vec3::new(linear.red, linear.green, linear.blue)).to_array();
+        Self {
+            color: LinearRgba::new(r, g, b, linear.alpha),
+            order,
+        }
+    }
+}
+
+/// three.js's `ACESFilmicToneMapping` at an exposure of 1.
+fn aces_filmic(color: Vec3) -> Vec3 {
+    let input = Mat3::from_cols(
+        Vec3::new(0.59719, 0.07600, 0.02840),
+        Vec3::new(0.35458, 0.90834, 0.13383),
+        Vec3::new(0.04823, 0.01566, 0.83777),
+    );
+    let output = Mat3::from_cols(
+        Vec3::new(1.60475, -0.10208, -0.00327),
+        Vec3::new(-0.53108, 1.10813, -0.07276),
+        Vec3::new(-0.07367, -0.00605, 1.07602),
+    );
+    let v = input * (color / 0.6);
+    let a = v * (v + 0.0245786) - 0.000090537;
+    let b = v * (0.983729 * v + 0.432951) + 0.238081;
+    (output * (a / b)).clamp(Vec3::ZERO, Vec3::ONE)
 }
 
 impl Material for OverlayMaterial {
@@ -180,6 +249,10 @@ impl Material for OverlayMaterial {
 
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Blend
+    }
+
+    fn depth_bias(&self) -> f32 {
+        self.order
     }
 
     fn enable_shadows() -> bool {
@@ -247,7 +320,6 @@ pub(crate) struct Ghost {
     opacity: f32,
     pulse: bool,
     tint: Option<Color>,
-    // ponytail: copies miss later lighting edits until the overlay changes; fine while ghosts are transient.
     materials: HashMap<AssetId<ObjectMaterial>, Handle<ObjectMaterial>>,
 }
 
@@ -272,17 +344,34 @@ pub(crate) struct OverlayAssets<'w> {
     meshes: ResMut<'w, Assets<Mesh>>,
     overlays: ResMut<'w, Assets<OverlayMaterial>>,
     grids: ResMut<'w, Assets<GridMaterial>>,
+    objects: ResMut<'w, Assets<ObjectMaterial>>,
     standard: ResMut<'w, Assets<StandardMaterial>>,
 }
 
-/// Respawns each overlay whose tag is new or whose content changed, and
-/// despawns those gone.
+/// What an overlay is updated in place through.
+#[derive(SystemParam)]
+pub(crate) struct OverlayParts<'w, 's> {
+    transforms: Query<'w, 's, &'static mut Transform>,
+    children: Query<'w, 's, &'static Children>,
+    labels: Query<'w, 's, &'static Labels>,
+    texts: Query<'w, 's, &'static mut Text>,
+    placed: Query<'w, 's, &'static mut Placed>,
+    drawn: Query<'w, 's, &'static Mesh3d>,
+}
+
+/// Brings each view's drawn overlays in line with its list: despawns the
+/// gone, spawns the new, and updates or respawns the changed.
+#[allow(clippy::type_complexity)]
 pub(crate) fn sync_overlays(
     mut commands: Commands,
-    mut views: Query<(Entity, &ViewOverlays, &mut OverlayIndex), Changed<ViewOverlays>>,
+    mut views: Query<
+        (Entity, &ViewOverlays, &mut OverlayIndex, &ViewScene),
+        Or<(Changed<ViewOverlays>, Changed<ViewScene>)>,
+    >,
     mut assets: OverlayAssets,
+    mut parts: OverlayParts,
 ) {
-    for (view, overlays, mut index) in &mut views {
+    for (view, overlays, mut index, scene) in &mut views {
         let mut wanted: HashMap<&str, &Overlay> = HashMap::new();
         for overlay in overlays.iter() {
             if wanted.insert(overlay.tag.as_str(), overlay).is_some() {
@@ -290,25 +379,167 @@ pub(crate) fn sync_overlays(
             }
         }
         index.0.retain(|tag, (entity, drawn)| {
-            let keep = wanted.get(tag.as_str()) == Some(&&*drawn);
-            if !keep {
+            let Some(&overlay) = wanted.get(tag.as_str()) else {
+                commands.entity(*entity).despawn();
+                return false;
+            };
+            if overlay == drawn {
+                return true;
+            }
+            let updated = update_in_place(
+                &mut commands,
+                *entity,
+                drawn,
+                overlay,
+                &mut parts,
+                &mut assets,
+            );
+            if updated {
+                *drawn = overlay.clone();
+            } else {
                 commands.entity(*entity).despawn();
             }
-            keep
+            updated
         });
         for (tag, overlay) in wanted {
             if !index.0.contains_key(tag) {
-                let entity = spawn(&mut commands, view, overlay, &mut assets);
+                let entity = spawn(&mut commands, view, overlay, &scene.lighting, &mut assets);
                 index.0.insert(tag.to_string(), (entity, overlay.clone()));
             }
         }
     }
 }
 
+/// The root's pose: what moving a gizmo, marker or label changes.
+fn root_transform(kind: &OverlayKind) -> Transform {
+    match kind {
+        OverlayKind::DirectionGizmo { at, direction, .. } => {
+            let direction = Vec3::from(*direction).try_normalize().unwrap_or(Vec3::Y);
+            Transform::from_translation((*at).into())
+                .with_rotation(Quat::from_rotation_arc(Vec3::Y, direction))
+        }
+        OverlayKind::Marker { pos, yaw, .. } => {
+            Transform::from_translation((*pos).into()).with_rotation(Quat::from_rotation_y(*yaw))
+        }
+        OverlayKind::Label { at, .. } => Transform::from_translation((*at).into()),
+        _ => Transform::IDENTITY,
+    }
+}
+
+/// Updates a drawn overlay from `old` to `new` when they differ only in
+/// what can change in place; false when it must be respawned.
+fn update_in_place(
+    commands: &mut Commands,
+    root: Entity,
+    old: &Overlay,
+    new: &Overlay,
+    parts: &mut OverlayParts,
+    assets: &mut OverlayAssets,
+) -> bool {
+    use OverlayKind as K;
+    if old.pickable() != new.pickable() {
+        return false;
+    }
+    let children = parts
+        .children
+        .get(root)
+        .map(|c| c.to_vec())
+        .unwrap_or_default();
+    match (&old.kind, &new.kind) {
+        (K::Label { .. }, K::Label { text, .. }) => {
+            for label in parts.labels.get(root).into_iter().flat_map(|l| l.iter()) {
+                if let Ok(mut shown) = parts.texts.get_mut(label)
+                    && shown.0 != *text
+                {
+                    shown.0.clone_from(text);
+                }
+            }
+        }
+        (
+            K::Marker {
+                shape,
+                color,
+                selected,
+                ..
+            },
+            K::Marker {
+                shape: new_shape,
+                color: new_color,
+                selected: new_selected,
+                ..
+            },
+        ) if (shape, color, selected) == (new_shape, new_color, new_selected) => {}
+        (
+            K::DirectionGizmo { color, .. },
+            K::DirectionGizmo {
+                color: new_color, ..
+            },
+        ) if color == new_color => {}
+        (
+            K::Ghost {
+                objects,
+                opacity,
+                pulse,
+                tint,
+            },
+            K::Ghost {
+                objects: moved,
+                opacity: new_opacity,
+                pulse: new_pulse,
+                tint: new_tint,
+            },
+        ) if objects.len() == moved.len()
+            && (opacity, pulse, tint) == (new_opacity, new_pulse, new_tint) =>
+        {
+            for (&child, object) in children.iter().zip(moved) {
+                if let Ok(mut placed) = parts.placed.get_mut(child)
+                    && placed.0 != *object
+                {
+                    placed.0 = object.clone();
+                    // `attach_models` redraws it at its new place, and
+                    // `dress_ghosts` in the ghost's material.
+                    commands
+                        .entity(child)
+                        .remove::<(Mesh3d, MeshMaterial3d<ObjectMaterial>)>();
+                }
+            }
+        }
+        (
+            K::Outline { color, .. },
+            K::Outline {
+                boxes,
+                segments,
+                color: new_color,
+            },
+        ) if color == new_color => {
+            let Some(mut mesh) = children
+                .first()
+                .and_then(|&line| parts.drawn.get(line).ok())
+                .and_then(|mesh| assets.meshes.get_mut(&mesh.0))
+            else {
+                return false;
+            };
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, outline_lines(boxes, segments));
+        }
+        _ => return false,
+    }
+    if let Ok(mut transform) = parts.transforms.get_mut(root) {
+        transform.set_if_neq(root_transform(&new.kind));
+    }
+    true
+}
+
+fn outline_lines(boxes: &[WorldAabb], segments: &[[[f32; 3]; 2]]) -> Vec<Vec3> {
+    let mut lines = box_edges(boxes);
+    lines.extend(segments.iter().flatten().map(|&p| Vec3::from(p)));
+    lines
+}
+
 fn spawn(
     commands: &mut Commands,
     view: Entity,
     overlay: &Overlay,
+    lighting: &LightingConfig,
     assets: &mut OverlayAssets,
 ) -> Entity {
     let root = commands
@@ -316,23 +547,24 @@ fn spawn(
             PickTarget::Overlay {
                 tag: overlay.tag.clone(),
             },
-            Transform::default(),
+            root_transform(&overlay.kind),
             Visibility::default(),
             ChildOf(view),
         ))
         .id();
     #[cfg(feature = "picking")]
-    if !overlay.pickable {
+    if !overlay.pickable() {
         commands
             .entity(root)
             .insert(bevy::app::Propagate(bevy::picking::Pickable::IGNORE));
     }
-    let x_ray = |assets: &mut OverlayAssets, mesh: Mesh, color: Color, transform: Transform| {
+    let x_ray = |assets: &mut OverlayAssets,
+                 mesh: Mesh,
+                 material: OverlayMaterial,
+                 transform: Transform| {
         (
             Mesh3d(assets.meshes.add(mesh)),
-            MeshMaterial3d(assets.overlays.add(OverlayMaterial {
-                color: color.to_linear(),
-            })),
+            MeshMaterial3d(assets.overlays.add(material)),
             transform,
             ChildOf(root),
         )
@@ -343,11 +575,10 @@ fn spawn(
             segments,
             color,
         } => {
-            let mut lines = box_edges(boxes);
-            lines.extend(segments.iter().flatten().map(|&p| Vec3::from(p)));
             let mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::default())
-                .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, lines);
-            commands.spawn(x_ray(assets, mesh, *color, Transform::default()));
+                .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, outline_lines(boxes, segments));
+            let material = OverlayMaterial::tone_mapped(*color, ORDER_2);
+            commands.spawn(x_ray(assets, mesh, material, Transform::default()));
         }
         OverlayKind::Ghost {
             objects,
@@ -386,18 +617,9 @@ fn spawn(
                 ChildOf(root),
             ));
         }
-        OverlayKind::DirectionGizmo {
-            at,
-            direction,
-            color,
-        } => {
+        OverlayKind::DirectionGizmo { color, .. } => {
             let shaft = GIZMO_LENGTH * 0.7;
             let head = GIZMO_LENGTH * 0.3;
-            let direction = Vec3::from(*direction).try_normalize().unwrap_or(Vec3::Y);
-            commands.entity(root).insert(
-                Transform::from_translation((*at).into())
-                    .with_rotation(Quat::from_rotation_arc(Vec3::Y, direction)),
-            );
             let shaft_mesh = Cylinder::new(0.05, shaft).mesh().resolution(8).build();
             let head_mesh = Cone {
                 radius: 0.15,
@@ -406,48 +628,60 @@ fn spawn(
             .mesh()
             .resolution(8)
             .build();
+            let material = || OverlayMaterial::tone_mapped(*color, ORDER_1);
             commands.spawn(x_ray(
                 assets,
                 shaft_mesh,
-                *color,
+                material(),
                 Transform::from_xyz(0.0, shaft / 2.0, 0.0),
             ));
             commands.spawn(x_ray(
                 assets,
                 head_mesh,
-                *color,
+                material(),
                 Transform::from_xyz(0.0, shaft + head / 2.0, 0.0),
             ));
         }
         OverlayKind::Marker {
             shape: MarkerShape::SpawnCone,
-            pos,
-            yaw,
             color,
+            selected,
+            ..
         } => {
-            commands.entity(root).insert(
-                Transform::from_translation((*pos).into())
-                    .with_rotation(Quat::from_rotation_y(*yaw)),
-            );
             let cone = Cone {
                 radius: SPAWN_CONE_RADIUS,
                 height: SPAWN_CONE_HEIGHT,
             }
             .mesh()
             .resolution(8);
-            let cone_material = StandardMaterial {
-                base_color: *color,
-                emissive: color.to_linear() * 0.6,
-                ..default()
+            let glow = if *selected {
+                *color
+            } else {
+                SPAWN_EMISSIVE.into()
+            };
+            // three.js's `MeshStandardMaterial` defaults, lit as the world's objects are.
+            let cone_material = ObjectMaterial {
+                base: StandardMaterial {
+                    base_color: *color,
+                    emissive: (glow.to_linear() * 0.6).with_alpha(1.0),
+                    perceptual_roughness: 1.0,
+                    ..default()
+                },
+                extension: HemisphereFill::new(lighting),
             };
             let tip_material = StandardMaterial {
-                base_color: color.mix(&Color::WHITE, 0.75),
+                base_color: if *selected {
+                    SPAWN_TIP_SELECTED
+                } else {
+                    SPAWN_TIP
+                }
+                .into(),
                 unlit: true,
                 ..default()
             };
             commands.spawn((
                 Mesh3d(assets.meshes.add(cone)),
-                MeshMaterial3d(assets.standard.add(cone_material)),
+                MeshMaterial3d(assets.objects.add(cone_material)),
                 Transform::from_xyz(0.0, SPAWN_CONE_HEIGHT / 2.0, 0.0),
                 NotShadowCaster,
                 ChildOf(root),
@@ -473,12 +707,10 @@ fn spawn(
                         .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
                 ),
             };
-            commands.spawn(x_ray(assets, mesh, *color, transform));
+            let material = OverlayMaterial::new(*color, ORDER_1);
+            commands.spawn(x_ray(assets, mesh, material, transform));
         }
-        OverlayKind::Label { at, text } => {
-            commands
-                .entity(root)
-                .insert(Transform::from_translation((*at).into()));
+        OverlayKind::Label { text, .. } => {
             commands.spawn(world_label::label(
                 text.clone(),
                 LABEL_FONT_SIZE,
@@ -586,7 +818,10 @@ pub(crate) fn pulse_ghosts(
     for ghost in ghosts.iter().filter(|g| g.pulse) {
         for handle in ghost.materials.values() {
             if let Some(mut material) = materials.get_mut(handle) {
-                material.base.base_color.set_alpha(ghost.opacity * wave);
+                material
+                    .base
+                    .base_color
+                    .set_alpha((ghost.opacity * wave).min(1.0));
             }
         }
     }
@@ -752,8 +987,12 @@ mod tests {
             {"tag": "spawn", "kind": "marker", "shape": "spawnCone", "pos": [0, 0, 0], "yaw": 0, "color": "#22d3ee"},
         ]))
         .unwrap();
-        assert!(overlays[0].pickable);
-        assert!(!overlays[1].pickable);
+        let pickable: Vec<_> = overlays.iter().map(Overlay::pickable).collect();
+        assert_eq!(
+            pickable,
+            [false, false, false, true],
+            "only markers default on"
+        );
         assert!(matches!(
             overlays[1].kind,
             OverlayKind::Ghost { pulse: true, .. }
@@ -762,5 +1001,54 @@ mod tests {
             panic!("not a zone");
         };
         assert!((color.alpha() - 0x66 as f32 / 255.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn moving_a_label_marker_or_ghost_updates_it_in_place() {
+        let mut app = bare_app();
+        let (id, view) = view(&mut app);
+        let overlays = |x: f32, text: &str| {
+            serde_json::json!([
+                {"tag": "label", "kind": "label", "at": [x, 0, 0], "text": text},
+                {"tag": "spawn", "kind": "marker", "shape": "spawnCone", "pos": [x, 0, 0], "yaw": 0, "color": "#22d3ee"},
+                {"tag": "ghost", "kind": "ghost", "opacity": 0.5,
+                    "objects": [{"id": "g", "kindId": "__primitive_stone", "position": [x, 0, 0]}]},
+            ])
+        };
+        set(&mut app, id, overlays(0.0, "A"));
+        let before = drawn(&mut app, view);
+        let ghost = app.world().get::<Children>(before["ghost"]).unwrap()[0];
+        let label = app
+            .world()
+            .get::<Labels>(before["label"])
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap();
+        let ghost_x = |app: &App| app.world().get::<Transform>(ghost).unwrap().translation.x;
+        let at_zero = ghost_x(&app);
+        let entities = app.world().iter_entities().count();
+
+        set(&mut app, id, overlays(4.0, "B"));
+        assert_eq!(drawn(&mut app, view), before);
+        assert_eq!(app.world().iter_entities().count(), entities);
+        for tag in ["label", "spawn"] {
+            let root = app.world().get::<Transform>(before[tag]).unwrap();
+            assert_eq!(root.translation.x, 4.0, "{tag}");
+        }
+        assert_eq!(app.world().get::<Text>(label).unwrap().0, "B");
+        // Four voxels along.
+        assert_eq!(ghost_x(&app) - at_zero, 2.0);
+        let handle = app
+            .world()
+            .get::<MeshMaterial3d<ObjectMaterial>>(ghost)
+            .unwrap();
+        let material = &app
+            .world()
+            .resource::<Assets<ObjectMaterial>>()
+            .get(handle)
+            .unwrap()
+            .base;
+        assert_eq!(material.base_color.alpha(), 0.5, "still dressed as a ghost");
     }
 }
