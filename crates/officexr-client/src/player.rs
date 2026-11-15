@@ -1,4 +1,4 @@
-//! The local player: the controls plugin's (or touch-stick) intent stepped through `officexr-sim`
+//! The local player: the controls plugin's intent stepped through `officexr-sim`
 //! each frame, as `SceneFrame.tsx` does, drawn with the peers and broadcast to them.
 
 use bevy::prelude::*;
@@ -13,7 +13,6 @@ use crate::baked_colliders::BakedColliders;
 use crate::broadcaster::{Pose, PositionBroadcaster};
 use crate::net::{Joined, Outbound};
 use crate::peers::character_for;
-use crate::touch::TouchControls;
 use crate::world::{CHAR_RADIUS, SimWorld};
 
 #[derive(Resource)]
@@ -80,7 +79,6 @@ pub fn apply_colliders(
 pub fn step_player(
     time: Res<Time>,
     controls: Res<ControlsHub>,
-    touch: Res<TouchControls>,
     world: Option<Res<SimWorld>>,
     outbound: Res<Outbound>,
     mut joined: MessageReader<Joined>,
@@ -99,7 +97,7 @@ pub fn step_player(
     let (intent, yaw) = controls.with(VIEW, |c| (c.take_intent(), c.camera_yaw()));
     let intent = match player.script.as_mut() {
         Some(script) => script.next().to_move(yaw),
-        None => or_stick(intent, touch.stick, yaw),
+        None => intent,
     };
     let dir = XZ {
         x: f64::from(intent.dir[0]),
@@ -184,19 +182,6 @@ impl Intent {
     }
 }
 
-const RUN_DEFLECTION: f32 = 0.9;
-
-/// As `moveIntent.ts`: held movement keys win over the stick (`x` strafe, `y` forward), and a
-/// near-full deflection runs.
-// ponytail: the deflection only picks walk or run; the web also scales speed by it.
-fn or_stick(keys: MoveIntent, stick: Vec2, yaw: f32) -> MoveIntent {
-    if keys.dir != [0.0; 2] {
-        return keys;
-    }
-    let run = keys.run || stick.length() >= RUN_DEFLECTION;
-    MoveIntent::from_axes(stick.y, stick.x, run, keys.jump, yaw)
-}
-
 /// Test-only scripted input for headless live checks, from `OFFICEXR_TEST_INPUT`: comma-separated
 /// `<keys>*<frames>` steps, `keys` a `+`-joined subset of `w a s d shift space` or `-` for none,
 /// e.g. `-*60,w*120,w+shift*60,space*1`. Space jumps on a step's first frame only.
@@ -259,26 +244,5 @@ impl Script {
             jump: intent.jump && first,
             ..intent
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn keys_win_over_the_stick() {
-        let keys = MoveIntent {
-            dir: [0.0, -1.0],
-            ..default()
-        };
-        assert_eq!(or_stick(keys, Vec2::new(1.0, 0.0), 0.0), keys);
-    }
-
-    #[test]
-    fn stick_steers_relative_to_the_camera_and_runs_near_full_deflection() {
-        let walk = or_stick(MoveIntent::default(), Vec2::new(0.0, 0.4), 0.0);
-        assert_eq!((walk.dir, walk.run), ([0.0, -1.0], false));
-        assert!(or_stick(MoveIntent::default(), Vec2::new(0.0, 0.95), 0.0).run);
     }
 }
