@@ -1,10 +1,11 @@
 import React, { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CameraConfig, RendererModule, ViewId } from '@officexr/render-wasm';
+import type { CameraConfig, JoystickKind, RendererModule, ViewId } from '@officexr/render-wasm';
 import type { Actions, Bus, PlayerState, RuleRegistry, SnapshotHandshake, Store, SyncEngine, Vec3, WorldConstants } from '@officexr/sdk';
 import type { BotPool } from '../bot/BotPool.ts';
 import { pickCharacterForPlayer } from '../characters/registry.ts';
 import type { CameraMode } from '../renderer/config.ts';
 import type { FrameStatsSample } from '../renderer/FrameStatsProbe.tsx';
+import type { MotionLookState } from '../renderer/motionLook.ts';
 import type { AutoWalkSource, MoveInput } from '../renderer/moveIntent.ts';
 import { placementTransform } from '../renderer/placement-transform.ts';
 import type { SeatingSource } from '../renderer/seated.ts';
@@ -38,6 +39,10 @@ export interface BevySceneProps {
   view: WorldConstants;
   worldFocused: boolean;
   moveInputRef?: React.RefObject<MoveInput>;
+  /** Which touch joystick walks: Bevy's own, or the DOM one in `moveInputRef`. */
+  joystickKind: JoystickKind;
+  onDomJoystick?: (dom: boolean) => void;
+  motionLook?: MotionLookState;
   autoWalk?: AutoWalkSource;
   seating?: SeatingSource;
   spawnPoints?: readonly Vec3[];
@@ -91,6 +96,8 @@ function roomView(wasm: RendererModule, view: ViewId): RoomView {
   return {
     takeIntent: () => wasm.takeIntent(view),
     setInputEnabled: (enabled) => wasm.setInputEnabled(view, enabled),
+    setStick: (stick) => wasm.setStick(view, stick),
+    setJoystickKind: (kind) => wasm.setJoystickKind(view, kind),
     setWorld: (diff) => void wasm.setWorld(view, JSON.stringify(diff)),
     setPlayers: (players) => wasm.setPlayers(view, players),
     setFollowTarget: (pos, yaw) => wasm.setFollowTarget(view, pos, yaw),
@@ -213,6 +220,26 @@ export function BevyScene(props: BevySceneProps) {
     bevy?.wasm.setCameraConfig(bevy.view, cameraConfig(constants, charRadius, invertLook));
   }, [bevy, constants, charRadius, invertLook]);
 
+  // ponytail: no recenter; `motionLook.recenterKey` is ignored on the Bevy view.
+  // A reading with nulls would reset the view's previous pose, so only the cleanup sends one.
+  const motionLook = props.motionLook?.enabled ?? false;
+  useEffect(() => {
+    if (!bevy || !motionLook) {
+      return;
+    }
+    const { wasm, view } = bevy;
+    const onOrientation = ({ alpha, beta, gamma }: DeviceOrientationEvent) => {
+      if (alpha !== null && beta !== null && gamma !== null) {
+        wasm.setDeviceOrientation(view, { alpha, beta, gamma });
+      }
+    };
+    window.addEventListener('deviceorientation', onOrientation);
+    return () => {
+      window.removeEventListener('deviceorientation', onOrientation);
+      wasm.setDeviceOrientation(view, { alpha: null, beta: null, gamma: null });
+    };
+  }, [bevy, motionLook]);
+
   const excludeInstance = useMemo(() => excludeLayoutInstances(bakedLayouts), [bakedLayouts]);
   const bakedLayoutDiffs = useMemo(() => (bakedLayouts ?? []).map(bakedLayoutDiff), [bakedLayouts]);
   const frame = useRef<RoomFrame | null>(null);
@@ -223,6 +250,7 @@ export function BevyScene(props: BevySceneProps) {
     selfReady: props.selfReady,
     spawnPoints: props.spawnPoints ?? NO_SPAWNS,
     moveInput: props.moveInputRef,
+    joystickKind: props.joystickKind,
     autoWalk: props.autoWalk,
     seating,
     characterOf: (p: PlayerState) => pickCharacterForPlayer(p.id, p.avatar.model, characters),
@@ -239,6 +267,7 @@ export function BevyScene(props: BevySceneProps) {
 
   const onProgress = useEffectEvent((percent: number) => props.onLoadProgress?.(percent));
   const onModelsReady = useEffectEvent(() => props.onModelsReady?.());
+  const onDomJoystick = useEffectEvent((dom: boolean) => props.onDomJoystick?.(dom));
   const onFrameStats = useEffectEvent((sample: FrameStatsSample | null) => props.onFrameStats?.(sample));
   const { actions, rules, bus, handshake, bots, viewYaw } = props;
   useEffect(() => {
@@ -255,6 +284,7 @@ export function BevyScene(props: BevySceneProps) {
         selfId,
         view: roomView(wasm, view),
         onViewYaw: (yaw) => viewYaw?.set(yaw),
+        onDomJoystick: (dom) => onDomJoystick(dom),
       },
       options,
     );

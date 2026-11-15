@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-bevy = { version = "=0.20.1", default-features = false, features = ["std", "bevy_window"] }
+bevy = { version = "=0.20.1", default-features = false, features = ["std", "bevy_window", "bevy_ui"] }
 officexr-render = { path = "../officexr-render" }
 officexr-sim = { path = "../officexr-sim" }
 serde = { version = "1", features = ["derive"] }

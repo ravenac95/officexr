@@ -9,7 +9,10 @@ pub(super) mod view_pointer;
 use std::sync::OnceLock;
 
 use bevy::prelude::*;
-use officexr_controls::{CameraConfig, CameraMode, Controls, ControlsHub, ControlsPlugin};
+use officexr_controls::motion::DeviceReading;
+use officexr_controls::{
+    CameraConfig, CameraMode, Controls, ControlsHub, ControlsPlugin, JoystickKind,
+};
 use officexr_render::views::ViewId;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -57,11 +60,13 @@ struct Intent {
     dir: [f32; 2],
     run: bool,
     jump: bool,
+    deflection: f32,
     yaw: f32,
 }
 
 /// The view's movement since the last call: a world-space XZ `dir` (unit or
-/// zero), `run`, `jump` (once per press) and the camera `yaw` it was turned by.
+/// zero), `run`, `jump` (once per press), the stick's `deflection` when it gave `dir` (else 0)
+/// and the camera `yaw` it was turned by.
 #[wasm_bindgen(js_name = takeIntent)]
 pub fn take_intent(id: ViewId) -> Result<JsValue, JsError> {
     let intent = with(id, |c| {
@@ -70,6 +75,7 @@ pub fn take_intent(id: ViewId) -> Result<JsValue, JsError> {
             dir: intent.dir,
             run: intent.run,
             jump: intent.jump,
+            deflection: intent.deflection,
             yaw: c.camera_yaw(),
         }
     })?;
@@ -160,4 +166,37 @@ pub fn set_input_enabled(id: ViewId, enabled: bool) -> Result<(), JsError> {
 #[wasm_bindgen(js_name = setKeysEnabled)]
 pub fn set_keys_enabled(id: ViewId, enabled: bool) -> Result<(), JsError> {
     with(id, |c| c.keys_enabled = enabled)
+}
+
+/// The host's on-screen stick `[x, y]`: `x` strafe (right +), `y` forward (+), within the unit
+/// circle. Held movement keys win over it.
+#[wasm_bindgen(js_name = setStick)]
+pub fn set_stick(id: ViewId, stick: JsValue) -> Result<(), JsError> {
+    let stick: [f32; 2] = from_js(stick)?;
+    finite(stick)?;
+    with(id, |c| c.stick = Vec2::from(stick).clamp_length_max(1.0))
+}
+
+/// A `deviceorientation` event's `{ alpha, beta, gamma }`; nulls forget the previous reading.
+#[wasm_bindgen(js_name = setDeviceOrientation)]
+pub fn set_device_orientation(id: ViewId, reading: JsValue) -> Result<(), JsError> {
+    let reading: DeviceReading = from_js(reading)?;
+    let angles = [reading.alpha, reading.beta, reading.gamma];
+    if !angles.into_iter().flatten().all(f64::is_finite) {
+        return Err(js_err("numbers must be finite"));
+    }
+    with(id, |c| c.orient(reading))
+}
+
+/// `'bevy'` shows the view's own touch stick; `'dom'` hides it for the host's, fed by `setStick`.
+/// Returns whether the view can show the Bevy stick at all: only the primary canvas's view can,
+/// as Bevy UI draws on the primary window; the host's stick stands in on any other.
+#[wasm_bindgen(js_name = setJoystickKind)]
+pub fn set_joystick_kind(id: ViewId, kind: JsValue) -> Result<bool, JsError> {
+    let kind: JoystickKind = from_js(kind)?;
+    with(id, |c| {
+        c.joystick = kind;
+        c.stick = Vec2::ZERO;
+    })?;
+    Ok(super::PRIMARY_VIEW.get() == Some(id))
 }
