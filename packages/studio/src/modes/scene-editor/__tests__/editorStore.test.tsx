@@ -205,4 +205,19 @@ describe('scene editor store + tools (no renderer)', () => {
     expect(positions(editor)).toEqual([[0, 0, 0], [0, 4, 0]]);
     expect(Object.keys(editor.store.current.doc.groups)).toHaveLength(1);
   });
+
+  it('move tool: a press that arrives after its release starts no drag', async () => {
+    const editor = await renderEditorStore();
+    let ids: string[] = [];
+    act(() => {
+      ids = editor.store.current.placeMany(KIND, [[0, 0, 0]]);
+    });
+    act(() => editor.store.current.setSelection(ids));
+    editor.setTool('move');
+    act(() => editor.tools.press(pickOn(ids[0]), editor.pointerAt([0, 0, 0]), false));
+    act(() => editor.tools.drag(false, editor.pointerAt([0, 0, 3])));
+    act(() => editor.tools.release());
+    expect(positions(editor)).toEqual([[0, 0, 0]]);
+    expect(editor.tools.ghosts).toEqual([]);
+  });
 });

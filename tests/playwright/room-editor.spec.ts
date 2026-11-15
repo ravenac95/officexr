@@ -34,8 +34,9 @@ test('a canvas click with the Add tool places a block', async ({ page }) => {
 
   // The orbit camera starts on the empty room's origin, so the canvas centre is floor.
   const canvas = page.locator('canvas').first();
+  // Each click places, so a retry clicks again only while nothing has been placed yet.
   await expect(async () => {
-    await canvas.click();
+    if (await page.getByText('History (0)').isVisible()) await canvas.click();
     await expect(page.getByText('History (1)')).toBeVisible({ timeout: 2_000 });
   }).toPass({ timeout: 60_000 });
 });

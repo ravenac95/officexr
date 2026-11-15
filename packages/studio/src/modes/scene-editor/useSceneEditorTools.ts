@@ -282,14 +282,18 @@ export function useSceneEditorTools(backend: SceneEditorBackend) {
       if (dy !== null) setYDelta(dy);
     },
 
-    /** A press with the Move tool: selects an unselected object, starts dragging a selected one. */
-    press(p: EditorPick, pointer: PointerProjector) {
+    /**
+     * A press with the Move tool: selects an unselected object, starts dragging a selected one while
+     * the button is still `held`.
+     */
+    press(p: EditorPick, pointer: PointerProjector, held = true) {
       if (tool !== 'move' || p.target?.type !== 'object') return;
       const { commandId } = p.target;
       if (!backend.selection.has(commandId)) {
         backend.onSelectInstance(commandId, p.modKey);
         return;
       }
+      if (!held) return;
       const originalPositions = new Map<string, Vec3>();
       for (const id of backend.selection) {
         const cmd = backend.doc.commands.find((c) => c.id === id && c.op === 'placeObject');

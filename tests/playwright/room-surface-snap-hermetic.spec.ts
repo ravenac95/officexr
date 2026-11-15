@@ -68,14 +68,18 @@ test('a block on a sub-grid surface loads, and Add stacks on its exact top', asy
   // silhouette edge, where the camera (looking down) sees its top face.
   await page.check('#room-show-layout-objects');
   await page.click('button[title="Blue block"]');
+  // Each click places, so a retry clicks again only while nothing has been placed yet.
   await expect(async () => {
-    await page.mouse.move(box.x + top.x, box.y + top.y + 6);
-    await page.mouse.down();
-    await page.mouse.up();
+    if (await page.getByText('History (0)').isVisible()) {
+      await page.mouse.move(box.x + top.x, box.y + top.y + 6);
+      await page.mouse.down();
+      await page.mouse.up();
+    }
     await expect(page.getByRole('combobox', { name: 'kind' })).toHaveText('colored_block_blue', {
-      timeout: 500,
+      timeout: 2_000,
     });
   }).toPass();
+  await expect(page.getByText('History (1)')).toBeVisible();
   // The new block rests on the seeded block's exact top: 0.3 + 4 voxels.
   await expect(axis(page, 'Y')).toHaveText('4.300');
 });

@@ -1,6 +1,7 @@
 //! The `blob` asset source: `blob://<id>.<ext>` loads the page's
 //! `blob:<origin>/<id>`, so the page can hand Bevy bytes it fetched itself,
-//! e.g. with credentials Bevy's own fetch doesn't send.
+//! e.g. with credentials Bevy's own fetch doesn't send. Only self-contained
+//! files load: a glTF's external buffer or texture URIs won't resolve.
 
 use std::borrow::Cow;
 

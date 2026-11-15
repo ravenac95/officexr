@@ -19,14 +19,13 @@ import { publishFrameStats } from '../../perf/frame-stats.ts';
 import type { SceneEditorBackend } from './SceneEditorBackend.ts';
 import { editorOverlays } from './editorOverlays.ts';
 import { editorPick, pointerProjector, roomCenter, type ScreenRay } from './editorPicks.ts';
+import { PointerGestures } from './pointerGestures.ts';
 import { useSceneEditorTools } from './useSceneEditorTools.ts';
 
 type Vec3 = [number, number, number];
 
 const LIGHTING = { ...DEFAULT_EDITOR_LIGHTING, ambientFillIntensity: 0.6 };
 const CLEAR_COLOR = '#0a0a0a';
-/** A press that moves further than this (CSS px) is a camera drag, not a click. */
-const CLICK_SLOP_PX = 4;
 
 function screenRay({ wasm, view }: BevyView, [x, y]: readonly [number, number]): ScreenRay {
   return {
@@ -157,12 +156,7 @@ export function SceneEditorView({ backend }: { backend: SceneEditorBackend }) {
   }, [bevy, overlays]);
 
   const instancesById = useMemo(() => new Map(compiled.instances.map((i) => [i.id, i])), [compiled.instances]);
-  // Bevy fires `click` after a drag on the same target, so a press that dragged is not a click.
-  const pickDragged = useRef(false);
-  // A Y-extrusion commit comes from the DOM release, which also sees releases over the sky; the
-  // pick `click` for the same press, a frame later, must not commit again.
-  const domCommitted = useRef(false);
-  const domPress = useRef<[number, number] | null>(null);
+  const gestures = useRef(new PointerGestures()).current;
 
   const handlePick = useEffectEvent((e: PickEvent) => {
     if (!bevy) return;
@@ -170,14 +164,17 @@ export function SceneEditorView({ backend }: { backend: SceneEditorBackend }) {
     const pick = editorPick(e, ray, { instancesById, footprintOf: tools.footprintOf, buildPlaneY: buildHeight * voxelSize });
     switch (e.kind) {
       case 'down':
-        pickDragged.current = false;
-        if (e.button === 0) tools.press(pick, pointerProjector(ray, voxelSize));
-        return;
-      case 'dragStart':
-        pickDragged.current = true;
+        gestures.pickDown(e.screen);
+        // A quick click's DOM release can come before Bevy's `down`; that press holds nothing to drag.
+        if (e.button === 0) tools.press(pick, pointerProjector(ray, voxelSize), gestures.leftHeld);
         return;
       case 'drag':
+        gestures.pickDrag(e.screen);
         if (e.button === 0) tools.drag(e.modifiers.shift, pointerProjector(ray, voxelSize));
+        return;
+      case 'up':
+      case 'dragEnd':
+        if (e.button === 0) tools.release();
         return;
       case 'move': {
         const camera = ray.origin();
@@ -191,12 +188,13 @@ export function SceneEditorView({ backend }: { backend: SceneEditorBackend }) {
         tools.leave();
         return;
       case 'click': {
-        if (pickDragged.current || domCommitted.current || tools.yAxis) return;
+        if (!gestures.pickClick(e.screen)) return;
         if (e.button === 2) {
           const rect = container.current?.getBoundingClientRect();
           const commandId = pick.target?.type === 'object' ? pick.target.commandId : null;
           backend.onContextMenuRequest(commandId, (rect?.left ?? 0) + e.screen[0], (rect?.top ?? 0) + e.screen[1]);
-        } else if (e.button === 0) {
+        } else if (e.button === 0 && !tools.yAxis) {
+          // A Y extrusion commits on the DOM release instead, which also sees releases over the sky.
           tools.click(pick);
         }
         return;
@@ -215,8 +213,13 @@ export function SceneEditorView({ backend }: { backend: SceneEditorBackend }) {
 
   // The Move drag ends at the real release, wherever it happens, as a window listener sees it.
   const onWindowPointer = useEffectEvent((e: PointerEvent) => {
-    if (e.type === 'pointercancel') tools.cancelDrag();
-    else if (e.button === 0) tools.release();
+    if (e.type === 'pointercancel') {
+      gestures.released();
+      tools.cancelDrag();
+    } else if (e.button === 0) {
+      gestures.released();
+      tools.release();
+    }
   });
   useEffect(() => {
     const listener = (e: PointerEvent) => onWindowPointer(e);
@@ -234,24 +237,18 @@ export function SceneEditorView({ backend }: { backend: SceneEditorBackend }) {
         ref={container}
         style={{ position: 'absolute', inset: 0, touchAction: 'none' }}
         onContextMenu={(e) => e.preventDefault()}
-        onPointerDown={(e) => {
-          if (e.button !== 0) return;
-          domPress.current = [e.clientX, e.clientY];
-          domCommitted.current = false;
-        }}
+        onPointerDown={(e) => gestures.domDown(e.button, [e.clientX, e.clientY])}
         // Picks only fire over a target; the Y extrusion follows the pointer over the sky too.
         onPointerMove={(e) => {
+          gestures.domMove([e.clientX, e.clientY]);
           const ray = tools.yAxis && domRay(e);
           if (ray) tools.trackY(pointerProjector(ray, voxelSize));
         }}
         onPointerUp={(e) => {
-          const press = domPress.current;
-          domPress.current = null;
-          if (e.button !== 0 || !press || !tools.yAxis) return;
-          if (Math.max(Math.abs(e.clientX - press[0]), Math.abs(e.clientY - press[1])) > CLICK_SLOP_PX) return;
+          if (!gestures.domUp(e.button, [e.clientX, e.clientY]) || !tools.yAxis) return;
           const ray = domRay(e);
           if (!ray) return;
-          domCommitted.current = true;
+          gestures.domCommit();
           tools.click({ target: null, hit: null, cameraY: ray.origin()[1], modKey: false, shift: false });
         }}
       />
