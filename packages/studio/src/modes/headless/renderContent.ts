@@ -1,16 +1,11 @@
 import type { WorldObjects } from '@officexr/sdk';
-import { bakedLayoutGlbUrl } from '@officexr/world/react';
-import { bakedLayoutUrl, loadMap, modelUrl, type ApplicationApi, type MapLoaderDeps } from '@officexr/world/app';
-import { paths, studioApiUrl } from '../../apiOrigin.ts';
+import { loadMap, modelUrl, type ApplicationApi, type MapLoaderDeps } from '@officexr/world/app';
+import { studioBakedLayoutUrl } from '../bakedLayoutUrl.ts';
 import { roomPlacements, type RoomPlacements } from '../map/roomPlacements.ts';
 import { unionBounds, type Bounds } from './renderFraming.ts';
 import type { RenderParams } from './renderParams.ts';
 
 export type RenderStorages = MapLoaderDeps['storages'];
-
-/** A baked layout's GLB on the studio API, which needs `studioFetch`'s credentials. */
-export const layoutUrl = (layoutName: string) =>
-  bakedLayoutGlbUrl(bakedLayoutUrl(layoutName, studioApiUrl(paths.bakedLayouts)));
 
 /** What the render page draws; `bounds` is what the camera frames. */
 export type RenderContent = { bounds: Bounds; modelUrls: string[] } & (
@@ -52,7 +47,7 @@ export async function loadRenderContent(
       throw nothingToRender(params);
     }
     // Layout instances aren't drawn as models (their GLB is), so preload only the rooms' own kinds.
-    const placed = roomPlacements(map.mapDoc, map.rooms, api.rooms, layoutUrl);
+    const placed = roomPlacements(map.mapDoc, map.rooms, api.rooms, studioBakedLayoutUrl);
     return { type: 'map', bounds, modelUrls: modelUrlsOf(placed.instances), placed };
   }
 

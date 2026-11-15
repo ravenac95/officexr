@@ -1,49 +1,43 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import * as THREE from 'three';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Html } from '@react-three/drei';
+import React, { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+import type { CameraConfig, PickEvent, Plane, WorldAabb } from '@officexr/render-wasm';
+import { DEFAULT_WORLD_CONSTANTS } from '@officexr/sdk';
+import { computeRoomVoiceZones } from '@officexr/world/app';
 import {
-  type LayoutDocument,
-  type SerializedMap,
-  type RoomDocument,
-  type RoomInstance,
-  type SpawnPoint,
-  type DeskArea,
-} from '@officexr/world/scenes';
-import { bakedLayoutUrl, computeRoomVoiceZones, deskAreaLabel } from '@officexr/world/app';
-import { useApplication, useCatalogReady } from '@officexr/world/react';
-import {
-  BakedLayout,
-  EndlessGrid,
-  LightingRig,
-  ObjectInstances,
-  SkyDome,
-  VOXEL_SIZE,
-  placementTransform,
-} from '@officexr/world/renderer';
-import { DEFAULT_WORLD_CONSTANTS, type WorldObjects } from '@officexr/sdk';
-import type { MapSelection } from './useMapDocument.ts';
-import type { MapTool } from './mapTools.ts';
-import { resolveRoomPointerAction } from './mapPointerActions.ts';
-import { computeRoomAabbs } from './roomAabbs.ts';
-import { deskAreasOf } from './deskAreaGeometry.ts';
+  blobAssetPath,
+  diffWorld,
+  frameStatsMeter,
+  setBevyReady,
+  useApplication,
+  useCatalog,
+  useCatalogReady,
+  usePrimaryBevyView,
+  type BevyView,
+  type SentWorld,
+} from '@officexr/world/react';
+import type { DeskArea, LayoutDocument, RoomDocument, SerializedMap } from '@officexr/world/scenes';
+import { publishFrameStats } from '../../perf/frame-stats.ts';
+import { studioBakedLayoutUrl } from '../bakedLayoutUrl.ts';
+import { useBakedLayoutBlobs } from '../useBakedLayoutBlobs.ts';
 import { reduceDeskAreaDrag, type DeskAreaDrag } from './deskAreaDrag.ts';
-import { assertNever } from '../../assertNever.ts';
+import { deskAreasOf } from './deskAreaGeometry.ts';
 import type { DeskAreaViolation } from './deskAreaViolations.ts';
-import { CanvasFrameStats } from '../../perf/CanvasFrameStats.tsx';
-import { paths, STUDIO_API_ORIGIN, studioApiUrl } from '../../apiOrigin.ts';
-import {
-  snapRoomToNeighbors,
-  type RoomAABBVoxel,
-} from './roomBoundarySnap.ts';
+import { mapOverlays } from './mapOverlays.ts';
+import { resolveMapPick } from './mapPointerActions.ts';
+import type { MapTool } from './mapTools.ts';
+import { computeRoomAabbs } from './roomAabbs.ts';
+import { dragRoomTo } from './roomBoundarySnap.ts';
+import { roomPlacements } from './roomPlacements.ts';
+import type { MapSelection } from './useMapDocument.ts';
 
-/**
- * Snap threshold (in voxels) for room-to-room boundary alignment
- * during a Move-tool drag. 2 voxels = 4 m at the default
- * VOXEL_SIZE=2 — comfortable but not aggressive. See
- * `roomBoundarySnap.ts` for the candidate algebra.
- */
+type Vec3 = [number, number, number];
+
+/** Room-to-room boundary snap during a Move drag; see `roomBoundarySnap.ts`. */
 const ROOM_SNAP_THRESHOLD_VOXELS = 2;
+const FLOOR: Plane = { normal: [0, 1, 0], constant: 0 };
+
+/** The old `FlyCamera`: right-drag orbits, shift+right- and middle-drag pan, WASD/QE move the target. */
+const CAMERA: CameraConfig = { orbit: { moveKeys: true, minDistance: 4, maxDistance: 500 } };
+const START_ORBIT = { target: [0, 0, 0] as Vec3, azimuth: -0.55, elevation: 0.7, distance: 60 };
 
 // ponytail: shows the default world lighting, not the saved world settings
 const { lighting, background } = DEFAULT_WORLD_CONSTANTS;
@@ -54,881 +48,226 @@ interface MapEditorCanvasProps {
   layouts: ReadonlyMap<string, LayoutDocument>;
   selection: MapSelection;
   onSelect: (sel: MapSelection) => void;
-  onMoveRoom: (id: string, position: [number, number, number]) => void;
-  onPlaceSpawn: (position: [number, number, number]) => void;
+  onMoveRoom: (id: string, position: Vec3) => void;
+  onPlaceSpawn: (position: Vec3) => void;
   onCommitDeskArea: (bounds: Pick<DeskArea, 'min' | 'max'>) => void;
   deskAreaViolations: readonly DeskAreaViolation[];
-  /** Active map-editor tool — Select / Move / Spawn / Desk area. Determines what
-   * a pointer-down on a room or on the floor does. */
+  /** Decides what a press on a room or the floor does. */
   tool: MapTool;
 }
 
+/** A floor point under `(x, y)` in CSS pixels from the view's top left. */
+function floorAt({ wasm, view }: BevyView, x: number, y: number): { x: number; z: number } | null {
+  const hit = wasm.intersectPlane(view, x, y, FLOOR);
+  return hit ? { x: hit[0], z: hit[2] } : null;
+}
+
 /**
- * R3F canvas for the Map editor. Composes:
- *   - a free-fly camera (orbit + WASD pan + scroll zoom)
- *   - per-`RoomInstance` group with the compiled cubes rendered as an
- *     InstancedMesh (one mesh per kind)
- *   - per-instance AABB outline that shows the selected room
- *   - draggable handle on the selected room (left-drag on the cube
- *     mesh) that moves the room across the y=0 grid
- *   - spawn marker glyphs at every `SpawnPoint`
- *   - an invisible floor that catches "Add spawn" clicks
- *
- * The whole thing uses the `useCubeCatalog` hook so material edits
- * from the Object editor show up live.
+ * The Map editor's 3D view: a Bevy world view on the page's primary canvas under the game's sky and
+ * lighting, with the placed rooms as their objects and baked layouts, and voice zones, desk areas,
+ * spawns and the selected room as overlays. Presses route through `resolveMapPick`; room drags and
+ * desk-area drawing follow the pointer on the floor plane.
  */
 export function MapEditorCanvas(props: MapEditorCanvasProps) {
-  return (
-    <Canvas
-      camera={{ position: [30, 30, 30], fov: 50, near: 0.1, far: 1000 }}
-      style={{ width: '100%', height: '100%', display: 'block' }}
-      shadows={false}
-    >
-      <CanvasFrameStats />
-      <LightingRig lighting={lighting} />
-      <SkyDome
-        topColor={background.topColor}
-        horizonColor={background.horizonColor}
-        bottomColor={background.bottomColor}
-        sun={
-          lighting.showSunDisc
-            ? {
-                position: lighting.sunPosition,
-                color: lighting.sunColor,
-                discRadius: lighting.sunDiscRadius,
-                glow: lighting.sunDiscIntensity,
-              }
-            : null
-        }
-      />
-      <EndlessGrid />
-      <FloorPicker
-        onPlaceSpawn={props.onPlaceSpawn}
-        onDeselect={() => props.onSelect(null)}
-        tool={props.tool}
-      />
-      <RoomsLayer
-        doc={props.doc}
-        rooms={props.rooms}
-        layouts={props.layouts}
-        selection={props.selection}
-        onSelect={props.onSelect}
-        onMove={props.onMoveRoom}
-        tool={props.tool}
-        onPlaceSpawn={props.onPlaceSpawn}
-      />
-      <VoiceZoneLayer doc={props.doc} rooms={props.rooms} layouts={props.layouts} />
-      <DeskAreaLayer
-        areas={deskAreasOf(props.doc)}
-        violations={props.deskAreaViolations}
-        selection={props.selection}
-        onSelect={props.onSelect}
-        onCommit={props.onCommitDeskArea}
-        tool={props.tool}
-      />
-      <SpawnLayer
-        spawns={props.doc.spawnPoints}
-        selection={props.selection}
-        onSelect={props.onSelect}
-      />
-      <FlyCamera />
-    </Canvas>
-  );
-}
-
-// --- Floor (invisible spawn picker + click-to-deselect) ----------
-
-interface FloorPickerProps {
-  onPlaceSpawn: (position: [number, number, number]) => void;
-  onDeselect: () => void;
-  tool: MapTool;
-}
-
-/**
- * A 1000×1000 invisible plane at y=0 that catches click events the
- * cubes / spawn markers didn't consume. Behavior depends on the tool:
- *   - **select / move**: clear the selection (matches the
- *     "click empty space to deselect" convention from the Room editor).
- *   - **spawn**: NO-OP. Spawns must land on a room surface, so a click
- *     that fell all the way through to the floor (no room beneath the
- *     cursor) is rejected.
- *   - **desk-area**: NO-OP. The drawing layer handles the drag itself.
- *
- * The plane has to be large enough that a wide-FOV fly camera always
- * has it in frame; 1000 units = 500 voxels = bigger than any realistic
- * map.
- */
-function FloorPicker({ onPlaceSpawn: _onPlaceSpawn, onDeselect, tool }: FloorPickerProps) {
-  return (
-    <mesh
-      rotation={[-Math.PI / 2, 0, 0]}
-      position={[0, 0, 0]}
-      onPointerDown={(e) => {
-        if (e.button !== 0) {
-          return;
-        }
-        e.stopPropagation();
-        // Spawn tool: spawns are room-surface-only, so ignore empty ground.
-        // Desk-area tool: the drawing layer owns the gesture.
-        if (tool === 'spawn' || tool === 'desk-area') {
-          return;
-        }
-        onDeselect();
-      }}
-    >
-      <planeGeometry args={[1000, 1000]} />
-      <meshBasicMaterial visible={false} />
-    </mesh>
-  );
-}
-
-// --- Rooms ------------------------------------------------------
-
-export interface RoomsLayerProps {
-  doc: SerializedMap;
-  rooms: ReadonlyMap<string, RoomDocument>;
-  layouts: ReadonlyMap<string, LayoutDocument>;
-  selection: MapSelection;
-  onSelect: (sel: MapSelection) => void;
-  onMove: (id: string, position: [number, number, number]) => void;
-  tool: MapTool;
-  /** Spawn-tool drop callback. Receives the raw raycast world-space
-   *  hit point — Y is the surface Y, so spawn markers land on cube
-   *  tops or on a baked-layout surface naturally. */
-  onPlaceSpawn: (position: [number, number, number]) => void;
-}
-
-/**
- * Renders one `<RoomInstanceMesh>` per placed room. Exported (alongside
- * the component itself) so editor-scenario tests can mount the room
- * scene subtree under `@react-three/test-renderer` without the DOM
- * chrome — `MapEditorCanvas` returns a `<Canvas>`, which the test
- * renderer can't host.
- */
-export function RoomsLayer(props: RoomsLayerProps) {
-  const { geometry: geomService, rooms: roomService } = useApplication();
-  const catalogReady = useCatalogReady();
-
-  const { doc, rooms, layouts } = props;
-  // Recomputed when placements, the library or layouts change, not on spawn edits. v1 docs get none.
-  const allAabbs = useMemo<readonly RoomAABBVoxel[]>(
-    () =>
-      catalogReady && doc.schemaVersion === 2
-        ? computeRoomAabbs(doc, rooms, layouts, roomService, geomService)
-        : [],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [catalogReady, doc.rooms, doc.schemaVersion, rooms, layouts, roomService, geomService],
-  );
-
-  return (
-    <>
-      {doc.rooms.map((ri) => {
-        const room = rooms.get(ri.roomName);
-        const isSelected =
-          props.selection !== null &&
-          props.selection.kind === 'room' &&
-          props.selection.id === ri.id;
-        const selfAabb = allAabbs.find((a) => a.id === ri.id) ?? null;
-        const neighborAabbs = allAabbs.filter((a) => a.id !== ri.id);
-        return (
-          <RoomInstanceMesh
-            key={ri.id}
-            instance={ri}
-            room={room}
-            selected={isSelected}
-            onSelect={() => props.onSelect({ kind: 'room', id: ri.id })}
-            onMove={(pos) => props.onMove(ri.id, pos)}
-            tool={props.tool}
-            onPlaceSpawn={props.onPlaceSpawn}
-            selfAabb={selfAabb}
-            neighborAabbs={neighborAabbs}
-          />
-        );
-      })}
-    </>
-  );
-}
-
-interface RoomInstanceMeshProps {
-  instance: RoomInstance;
-  room: RoomDocument | undefined;
-  selected: boolean;
-  onSelect: () => void;
-  onMove: (position: [number, number, number]) => void;
-  tool: MapTool;
-  onPlaceSpawn: (position: [number, number, number]) => void;
-  /** Room's own world voxel AABB at its current position (null until
-   *  the catalog is ready, for v1 docs, and for rooms with no compiled
-   *  geometry). The Move tool re-bases this each drag
-   *  frame against the cursor's proposed voxel position. */
-  selfAabb: RoomAABBVoxel | null;
-  /** Every other room's world voxel AABB. Used by the Move tool to
-   *  snap the moving room's faces to a neighbor's. */
-  neighborAabbs: readonly RoomAABBVoxel[];
-}
-
-/**
- * Renders one `RoomInstance` as a translated/rotated group around the
- * shared `<ObjectInstances>` renderer. Click handlers dispatch
- * selection; drag (left-pointer-down → move) translates the room
- * across the y=0 grid snapping each dragged frame to integer voxel
- * coords.
- *
- * The room's `compileScene` output is converted to a `WorldObjects`
- * snapshot and fed to `<ObjectInstances worldObjects={…} />`. The
- * editor no longer owns the per-kind InstancedMesh allocation, the
- * geometry/material extraction, or the per-instance matrix
- * composition — that's all in the renderer package now and shared
- * with Debug/Mugshot/Room.
- *
- * Why per-room mount instead of one flat snapshot for the whole map:
- * each `RoomInstance` carries its own `rotationY` (0/90/180/270°).
- * KayKit cubes have orientation-specific bevels, so the rotation has
- * to live on a parent `<group>` rather than be pre-baked into per-
- * instance positions. Cross-room kind batching is a future
- * optimization (mesh merging of contiguous same-kind runs); not in
- * scope for the unification.
- */
-function RoomInstanceMesh({
-  instance,
-  room,
-  selected,
-  onSelect,
-  onMove,
-  tool,
-  onPlaceSpawn,
-  selfAabb,
-  neighborAabbs,
-}: RoomInstanceMeshProps) {
-  // Wait for the catalog bootstrap before compiling. Without this gate,
-  // getKindStride falls back to [1,1,1] for every kind on the first
-  // paint — and any extrude or per-kind-stride placement compiles into
-  // overlapping cubes (most visibly on the platform / long_corridor).
-  const catalogReady = useCatalogReady();
-  const { rooms: roomService, geometry: geomService } = useApplication();
-  const compiled = useMemo(() => {
-    if (!room || !catalogReady) return null;
-    return roomService.compileScene(room);
-  }, [room, catalogReady, roomService]);
-
-  const worldObjects: WorldObjects | null = useMemo(() => {
-    if (!compiled) return null;
-    return {
-      cubeSize: VOXEL_SIZE,
-      instances: compiled.instances,
-    };
-  }, [compiled]);
-
-  // Drag state. Move tool only — Select/Spawn tools never enter
-  // drag mode. The drag starts on the room's group pointer-down and
-  // tracks the cursor on a y=0 plane, snapping the room's anchor to
-  // integer voxel coords. After the grid snap we additionally try to
-  // align the moving room's voxel AABB to any neighbor AABB face
-  // within `ROOM_SNAP_THRESHOLD_VOXELS` — that's what gives the
-  // "rooms click together" feel the Map editor wants.
-  const { camera, gl, raycaster, pointer } = useThree();
-  const dragging = useRef(false);
-  const dragStartOffset = useRef<[number, number, number]>([0, 0, 0]);
-
-  // Refs so the pointer-move handler always reads the latest props
-  // without re-binding listeners on every render.
-  const selfAabbRef = useRef(selfAabb);
-  const neighborAabbsRef = useRef(neighborAabbs);
-  const instancePosRef = useRef(instance.position);
-  selfAabbRef.current = selfAabb;
-  neighborAabbsRef.current = neighborAabbs;
-  instancePosRef.current = instance.position;
-
-  useEffect(() => {
-    const handlePointerMove = () => {
-      if (!dragging.current) return;
-      raycaster.setFromCamera(pointer, camera);
-      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-      const point = new THREE.Vector3();
-      if (!raycaster.ray.intersectPlane(plane, point)) return;
-      // Step 1: grid-snap the proposed room anchor so cubes stay on
-      // integer voxel coords after the cursor offset is applied.
-      let vx = Math.round((point.x - dragStartOffset.current[0]) / VOXEL_SIZE);
-      let vz = Math.round((point.z - dragStartOffset.current[2]) / VOXEL_SIZE);
-
-      // Step 2: AABB snap to neighbors. Translate the room's selfAabb
-      // by the proposed (vx, vz) - currentPosition delta, then ask
-      // snapRoomToNeighbors for a corrective (dx, dz) within
-      // threshold.
-      const self = selfAabbRef.current;
-      const neighbors = neighborAabbsRef.current;
-      if (self && neighbors.length > 0) {
-        const curPos = instancePosRef.current;
-        const tx = vx - curPos[0];
-        const tz = vz - curPos[2];
-        const proposed: RoomAABBVoxel = {
-          id: self.id,
-          min: [self.min[0] + tx, self.min[1], self.min[2] + tz],
-          max: [self.max[0] + tx, self.max[1], self.max[2] + tz],
-        };
-        const { dx, dz } = snapRoomToNeighbors(
-          proposed,
-          neighbors,
-          ROOM_SNAP_THRESHOLD_VOXELS,
-        );
-        vx += dx;
-        vz += dz;
-      }
-
-      const curPos = instancePosRef.current;
-      if (vx === curPos[0] && vz === curPos[2]) {
-        return;
-      }
-      onMove([vx, curPos[1], vz]);
-    };
-    const handlePointerUp = () => {
-      dragging.current = false;
-    };
-    const dom = gl.domElement;
-    dom.addEventListener('pointermove', handlePointerMove);
-    dom.addEventListener('pointerup', handlePointerUp);
-    return () => {
-      dom.removeEventListener('pointermove', handlePointerMove);
-      dom.removeEventListener('pointerup', handlePointerUp);
-    };
-  }, [camera, gl, instance.position, onMove, pointer, raycaster]);
-
-  // Local-space AABB for the selection outline. Computed in voxel
-  // space then converted to world units; only depends on the room's
-  // own cubes, not the placement.
-  //
-  // Previously this used voxelSize/2 half-extents and a +vs/2 Y
-  // offset — the legacy "1 cube = 1 voxel" math that produced
-  // mis-sized selection boxes for any kind larger than one voxel.
-  // Now driven by `geomService.worldAABB` so the room's bounds match
-  // the rendered mesh AABB union exactly.
-  const bounds = useMemo(() => {
-    if (!compiled || compiled.instances.length === 0) return null;
-    const min: [number, number, number] = [Infinity, Infinity, Infinity];
-    const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
-    for (const inst of compiled.instances) {
-      const aabb = geomService.worldAABB(inst.position, inst.kindId, inst.yawDeg);
-      for (let a = 0; a < 3; a++) {
-        if (aabb.min[a] < min[a]) min[a] = aabb.min[a];
-        if (aabb.max[a] > max[a]) max[a] = aabb.max[a];
-      }
-    }
-    return { min, max };
-  }, [compiled, geomService]);
-
-  const { position: groupPos, rotation } = placementTransform(instance);
-
-  if (!room) {
-    // Missing room — render a placeholder box so the author can see
-    // the instance and either delete it or save the missing room.
-    return (
-      <group position={groupPos}>
-        <mesh
-          onPointerDown={(e) => {
-            if (e.button !== 0) return;
-            e.stopPropagation();
-            // Missing-room placeholder: no drag (we have no compiled
-            // AABB), but spawn + select still route via the shared
-            // decision so behavior matches a real room.
-            const action = resolveRoomPointerAction(tool);
-            switch (action) {
-              case 'place-spawn':
-                // Raw raycast hit Y: baked layouts may have non-voxel-aligned surfaces.
-                onPlaceSpawn([e.point.x, e.point.y, e.point.z]);
-                return;
-              case 'ignore':
-                return;
-              case 'select':
-              case 'select-drag':
-                onSelect();
-                return;
-              default:
-                assertNever(action);
-            }
-          }}
-        >
-          <boxGeometry args={[VOXEL_SIZE * 2, VOXEL_SIZE, VOXEL_SIZE * 2]} />
-          <meshStandardMaterial color="#7c2d12" wireframe />
-        </mesh>
-      </group>
-    );
-  }
-
-  // Wrap <ObjectInstances> in a <group> that:
-  //   - applies the room's world transform (position + rotationY)
-  //   - catches pointer events from any of the rendered
-  //     InstancedMeshes (R3F bubbles pointer events up the scene
-  //     graph). Without the wrapper group, we'd need to wire
-  //     per-kind onPointerDown handlers through ObjectInstances'
-  //     prop surface — leakier and editor-specific.
-  // Derive baked-layout path from the room's layoutName (if set). The
-  // Map view renders full room geometry, so each room instance should
-  // also show its structural GLB at the same world transform.
-  const bakedLayoutPath = room.layoutName
-    ? bakedLayoutUrl(room.layoutName, studioApiUrl(paths.bakedLayouts))
-    : undefined;
-
-  return (
-    <group
-      position={groupPos}
-      rotation={rotation}
-      onPointerDown={(e) => {
-        if (e.button !== 0) return;
-        // Any pointer-down on a descendant of this group counts —
-        // cube InstancedMesh OR a BakedLayout mesh. The previous
-        // gate that required `userData.isObjectInstanceMesh` broke
-        // drag + spawn the moment a room started rendering its baked
-        // layout in front of the raw cubes.
-        e.stopPropagation();
-        const action = resolveRoomPointerAction(tool);
-        switch (action) {
-          case 'place-spawn':
-            // `e.point.y` is the actual surface Y from R3F's raycaster — works
-            // for both cube tops and baked-layout surfaces.
-            onPlaceSpawn([e.point.x, e.point.y, e.point.z]);
-            return;
-          case 'ignore':
-            return;
-          case 'select':
-            onSelect();
-            return;
-          case 'select-drag':
-            onSelect();
-            // Capture the raycast hit's offset from the room anchor so
-            // the room doesn't jump its centre to the cursor on drag.
-            dragStartOffset.current = [
-              e.point.x - groupPos[0],
-              0,
-              e.point.z - groupPos[2],
-            ];
-            dragging.current = true;
-            return;
-          default:
-            assertNever(action);
-        }
-      }}
-    >
-      {bakedLayoutPath && room.layoutName ? (
-        <BakedLayout
-          gltfPath={bakedLayoutPath}
-          layoutName={room.layoutName}
-          withCredentials={Boolean(STUDIO_API_ORIGIN)}
-        />
-      ) : null}
-      {worldObjects ? <ObjectInstances worldObjects={worldObjects} /> : null}
-      {selected && bounds ? <SelectionOutline min={bounds.min} max={bounds.max} /> : null}
-    </group>
-  );
-}
-
-// --- Selection outline (yellow wireframe AABB) ------------------
-
-function SelectionOutline({
-  min,
-  max,
-}: {
-  min: [number, number, number];
-  max: [number, number, number];
-}) {
-  const size: [number, number, number] = [
-    max[0] - min[0],
-    max[1] - min[1],
-    max[2] - min[2],
-  ];
-  const center: [number, number, number] = [
-    (max[0] + min[0]) / 2,
-    (max[1] + min[1]) / 2,
-    (max[2] + min[2]) / 2,
-  ];
-  const geom = useMemo(() => {
-    const box = new THREE.BoxGeometry(size[0], size[1], size[2]);
-    const edges = new THREE.EdgesGeometry(box);
-    box.dispose();
-    return edges;
-  }, [size[0], size[1], size[2]]);
-  return (
-    <lineSegments position={center} geometry={geom}>
-      <lineBasicMaterial color="#fde047" linewidth={2} />
-    </lineSegments>
-  );
-}
-
-// --- Voice zone footprints ---------------------------------------
-
-const VOICE_ZONE_Y = 0.05;
-const VOICE_ZONE_COLOR = '#ff00ff';
-
-function VoiceZoneLayer({
-  doc,
-  rooms,
-  layouts,
-}: {
-  doc: SerializedMap;
-  rooms: ReadonlyMap<string, RoomDocument>;
-  layouts: ReadonlyMap<string, LayoutDocument>;
-}) {
   const { geometry, rooms: roomService } = useApplication();
+  const kinds = useCatalog();
   const catalogReady = useCatalogReady();
-  // v1 docs (only the LocalStorage fallback can hand the editor one) show no overlay.
-  // Keyed on rooms, not the whole doc, so spawn edits don't recompile the map.
-  const zones = useMemo(
-    () =>
-      catalogReady && doc.schemaVersion === 2
-        ? computeRoomVoiceZones(doc, rooms, layouts, roomService, geometry)
-        : [],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [catalogReady, doc.rooms, doc.schemaVersion, rooms, layouts, roomService, geometry],
-  );
-  return (
-    <>
-      {zones.map((z) => (
-        <mesh
-          key={z.id}
-          rotation={[-Math.PI / 2, 0, 0]}
-          position={[(z.min.x + z.max.x) / 2, VOICE_ZONE_Y, (z.min.z + z.max.z) / 2]}
-          renderOrder={1}
-        >
-          <planeGeometry args={[z.max.x - z.min.x, z.max.z - z.min.z]} />
-          {/* No depth test: floors and room cubes at y=0 would otherwise hide the footprint. */}
-          <meshBasicMaterial
-            color={VOICE_ZONE_COLOR}
-            transparent
-            opacity={0.4}
-            depthTest={false}
-            depthWrite={false}
-            toneMapped={false}
-          />
-        </mesh>
-      ))}
-    </>
-  );
-}
-
-// --- Desk areas ---------------------------------------------------
-
-const DESK_AREA_Y = 0.06;
-
-function deskAreaColor(invalid: boolean, selected: boolean): string {
-  return invalid ? '#ef4444' : selected ? '#fde047' : '#22d3ee';
-}
-
-interface DeskAreaLayerProps {
-  areas: readonly DeskArea[];
-  violations: readonly DeskAreaViolation[];
-  selection: MapSelection;
-  onSelect: (sel: MapSelection) => void;
-  onCommit: (bounds: Pick<DeskArea, 'min' | 'max'>) => void;
-  tool: MapTool;
-}
-
-function DeskAreaRect({
-  bounds,
-  color,
-  label,
-  onPointerDown,
-}: {
-  bounds: Pick<DeskArea, 'min' | 'max'>;
-  color: string;
-  label?: string;
-  onPointerDown?: (e: { button: number; stopPropagation: () => void }) => void;
-}) {
-  const { min, max } = bounds;
-  return (
-    <mesh
-      rotation={[-Math.PI / 2, 0, 0]}
-      position={[(min.x + max.x) / 2, DESK_AREA_Y, (min.z + max.z) / 2]}
-      renderOrder={1}
-      onPointerDown={onPointerDown}
-    >
-      <planeGeometry args={[max.x - min.x, max.z - min.z]} />
-      <meshBasicMaterial
-        color={color}
-        transparent
-        opacity={0.35}
-        depthTest={false}
-        depthWrite={false}
-        toneMapped={false}
-      />
-      {label ? (
-        <Html center pointerEvents="none" zIndexRange={[4, 0]}>
-          <div style={{ color: '#fff', font: '12px system-ui, sans-serif', whiteSpace: 'nowrap' }}>
-            {label}
-          </div>
-        </Html>
-      ) : null}
-    </mesh>
-  );
-}
-
-/**
- * Renders desk-area rectangles and, while the Desk area tool is active,
- * owns the press-drag-release gesture on the y=0 plane. It listens on the
- * canvas element directly because the gesture must start over rooms too.
- * In the Select tool a rectangle can be clicked on bare floor; where a room
- * stands on it, the room's own handler wins and the side-panel list selects it.
- */
-function DeskAreaLayer({ areas, violations, selection, onSelect, onCommit, tool }: DeskAreaLayerProps) {
-  const { camera, gl } = useThree();
-  const [draft, setDraft] = useState<Pick<DeskArea, 'min' | 'max'> | null>(null);
+  const container = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const bevy = usePrimaryBevyView(container, (e) => setError(e.message));
+  const { rooms, layouts, tool } = props;
+  // Only the LocalStorage fallback can hand the editor a v1 document; it draws empty.
+  const doc = catalogReady && props.doc.schemaVersion === 2 ? props.doc : null;
 
   useEffect(() => {
-    if (tool !== 'desk-area') {
+    if (!bevy) return;
+    bevy.wasm.setCameraMode(bevy.view, 'orbit');
+    bevy.wasm.setCameraConfig(bevy.view, CAMERA);
+    bevy.wasm.setOrbit(bevy.view, START_ORBIT);
+    const meter = frameStatsMeter(() => bevy.wasm.frameStats(bevy.view), publishFrameStats);
+    let frame = requestAnimationFrame(function tick(nowMs: number) {
+      meter(nowMs);
+      setBevyReady(bevy.wasm.isReady(bevy.view).ready);
+      frame = requestAnimationFrame(tick);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      publishFrameStats(null);
+    };
+  }, [bevy]);
+
+  const placed = useMemo(
+    () => (doc ? roomPlacements(doc, rooms, roomService, studioBakedLayoutUrl) : null),
+    // Keyed on the placements, not the whole document, so spawn and desk edits don't recompile the map.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [doc?.rooms, rooms, roomService],
+  );
+  const blobs = useBakedLayoutBlobs(placed?.bakedLayouts.map((b) => b.gltfPath) ?? []);
+  const bakedLayouts = useMemo(
+    () =>
+      (placed?.bakedLayouts ?? []).flatMap((b) => {
+        const blob = blobs.get(b.gltfPath);
+        return blob ? [{ ...b, gltfPath: blobAssetPath(blob, 'glb') }] : [];
+      }),
+    [placed, blobs],
+  );
+  const sentWorld = useRef<SentWorld | null>(null);
+  useEffect(() => {
+    if (!bevy) return;
+    const { diff, sent } = diffWorld(sentWorld.current, {
+      instances: placed?.instances ?? [],
+      kinds,
+      lighting,
+      background,
+      bakedLayouts,
+    });
+    if (!diff) return;
+    bevy.wasm.setWorld(bevy.view, JSON.stringify(diff));
+    sentWorld.current = sent;
+  }, [bevy, placed, kinds, bakedLayouts]);
+
+  // The rooms with their linked layouts' objects, which bound the baked GLBs; compiled once for the
+  // helpers below, which each take a room service.
+  const compiled = useMemo(
+    () => (doc ? roomService.compileMap(doc, rooms, layouts) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [doc?.rooms, rooms, layouts, roomService],
+  );
+  const { roomAabbs, voiceZones } = useMemo(() => {
+    if (!doc || !compiled) return { roomAabbs: [], voiceZones: [] };
+    const precompiled = { compileMap: () => compiled };
+    return {
+      roomAabbs: computeRoomAabbs(doc, rooms, layouts, precompiled, geometry),
+      voiceZones: computeRoomVoiceZones(doc, rooms, layouts, precompiled, geometry),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compiled, geometry]);
+  const selectedRoomId = props.selection?.kind === 'room' ? props.selection.id : null;
+  const selectedRoom = useMemo((): WorldAabb | null => {
+    const prefix = `${selectedRoomId}/`;
+    const boxes = (compiled?.instances ?? []).filter((i) => i.id.startsWith(prefix)).map((i) => geometry.worldAABBOfInstance(i));
+    if (boxes.length === 0) return null;
+    const min = [0, 1, 2].map((a) => Math.min(...boxes.map((b) => b.min[a]))) as Vec3;
+    const max = [0, 1, 2].map((a) => Math.max(...boxes.map((b) => b.max[a]))) as Vec3;
+    return { min, max };
+  }, [compiled, selectedRoomId, geometry]);
+
+  const [draft, setDraft] = useState<Pick<DeskArea, 'min' | 'max'> | null>(null);
+  const overlays = useMemo(
+    () =>
+      mapOverlays({
+        voiceZones,
+        deskAreas: deskAreasOf(props.doc),
+        violations: props.deskAreaViolations,
+        spawns: props.doc.spawnPoints,
+        selection: props.selection,
+        selectedRoom,
+        draft,
+        deskAreasPickable: tool === 'select',
+      }),
+    [voiceZones, props.doc, props.deskAreaViolations, props.selection, selectedRoom, draft, tool],
+  );
+  useEffect(() => {
+    bevy?.wasm.setOverlays(bevy.view, overlays);
+  }, [bevy, overlays]);
+
+  /** The room being moved, and the press's floor offset from its anchor. */
+  const roomDrag = useRef<{ id: string; offset: { x: number; z: number } } | null>(null);
+  const handlePick = useEffectEvent((e: PickEvent) => {
+    if (!bevy || e.button !== 0) return;
+    if (e.kind === 'up' || e.kind === 'dragEnd') {
+      roomDrag.current = null;
       return;
     }
-    const dom = gl.domElement;
-    const raycaster = new THREE.Raycaster();
-    const floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    const floorPoint = (e: PointerEvent) => {
-      const rect = dom.getBoundingClientRect();
-      const ndc = new THREE.Vector2(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+    if (e.kind === 'drag' && roomDrag.current && doc) {
+      const { id, offset } = roomDrag.current;
+      const placement = doc.rooms.find((r) => r.id === id);
+      const point = floorAt(bevy, e.screen[0], e.screen[1]);
+      if (!placement || !point) return;
+      const next = dragRoomTo(
+        point,
+        offset,
+        placement.position,
+        roomAabbs.find((a) => a.id === id) ?? null,
+        roomAabbs.filter((a) => a.id !== id),
+        geometry.voxelSize,
+        ROOM_SNAP_THRESHOLD_VOXELS,
       );
-      raycaster.setFromCamera(ndc, camera);
-      const hit = raycaster.ray.intersectPlane(floor, new THREE.Vector3());
-      return hit ? { x: hit.x, z: hit.z } : null;
-    };
-    let drag: DeskAreaDrag = { type: 'idle' };
-    const apply = (type: 'down' | 'move' | 'up', e: PointerEvent) => {
-      const result = reduceDeskAreaDrag(drag, { type, point: floorPoint(e) });
-      drag = result.drag;
-      setDraft(drag.type === 'dragging' ? drag.draft : null);
-      if (result.commit) {
-        onCommit(result.commit);
-      }
-    };
-    const onDown = (e: PointerEvent) => {
-      if (e.button === 0) {
-        apply('down', e);
-      }
-    };
-    const onMove = (e: PointerEvent) => {
-      if (drag.type === 'dragging') {
-        apply('move', e);
-      }
-    };
-    const onUp = (e: PointerEvent) => {
-      if (drag.type === 'dragging') {
-        apply('up', e);
-      }
-    };
-    dom.addEventListener('pointerdown', onDown);
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    return () => {
-      dom.removeEventListener('pointerdown', onDown);
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      setDraft(null);
-    };
-  }, [tool, camera, gl, onCommit]);
-
-  return (
-    <>
-      {areas.map((a) => (
-        <DeskAreaRect
-          key={a.id}
-          bounds={a}
-          label={deskAreaLabel(a)}
-          color={deskAreaColor(
-            violations.some((v) => v.areaId === a.id),
-            selection !== null && selection.kind === 'desk-area' && selection.id === a.id,
-          )}
-          onPointerDown={
-            tool === 'select'
-              ? (e) => {
-                  if (e.button !== 0) {
-                    return;
-                  }
-                  e.stopPropagation();
-                  onSelect({ kind: 'desk-area', id: a.id });
-                }
-              : undefined
-          }
-        />
-      ))}
-      {draft ? <DeskAreaRect bounds={draft} color="#fde047" /> : null}
-    </>
-  );
-}
-
-// --- Spawn markers ----------------------------------------------
-
-interface SpawnLayerProps {
-  spawns: readonly SpawnPoint[];
-  selection: MapSelection;
-  onSelect: (sel: MapSelection) => void;
-}
-
-// Marker geometry — cone is `SPAWN_CONE_HEIGHT` tall. The cone's
-// origin in three.js is its centroid (height/2 above the base), so
-// the marker is positioned with `y = SPAWN_CONE_HEIGHT/2` to put the
-// base flush with `s.position`. The spawn position represents the
-// player's foot, so the marker must visually rest *on* that point
-// rather than be centered through the surface.
-const SPAWN_CONE_HEIGHT = 1.6;
-const SPAWN_CONE_RADIUS = 0.6;
-const SPAWN_SPHERE_OFFSET = SPAWN_CONE_HEIGHT + 0.1; // tip sphere
-
-function SpawnLayer({ spawns, selection, onSelect }: SpawnLayerProps) {
-  return (
-    <>
-      {spawns.map((s) => {
-        const isSelected =
-          selection !== null && selection.kind === 'spawn' && selection.id === s.id;
-        return (
-          <group key={s.id} position={s.position}>
-            <mesh
-              position={[0, SPAWN_CONE_HEIGHT / 2, 0]}
-              onPointerDown={(e) => {
-                if (e.button !== 0) return;
-                e.stopPropagation();
-                onSelect({ kind: 'spawn', id: s.id });
-              }}
-            >
-              <coneGeometry args={[SPAWN_CONE_RADIUS, SPAWN_CONE_HEIGHT, 8]} />
-              <meshStandardMaterial
-                color={isSelected ? '#fde047' : '#22d3ee'}
-                emissive={isSelected ? '#fde047' : '#0e7490'}
-                emissiveIntensity={0.6}
-              />
-            </mesh>
-            <mesh position={[0, SPAWN_SPHERE_OFFSET, 0]}>
-              <sphereGeometry args={[0.18, 8, 8]} />
-              <meshBasicMaterial color={isSelected ? '#fef9c3' : '#cffafe'} />
-            </mesh>
-          </group>
-        );
-      })}
-    </>
-  );
-}
-
-// --- Fly camera --------------------------------------------------
-
-function FlyCamera() {
-  const { camera, gl } = useThree();
-  const persp = camera as THREE.PerspectiveCamera;
-
-  // Orbit-style camera with WASD pan + scroll dolly. Anchor point is
-  // a `target` in world coords; right-drag rotates around it; WASD
-  // moves the target across the y=0 plane in the camera's local
-  // forward/right.
-  const orbit = useRef({ azimuth: -0.55, elevation: 0.7, distance: 60 });
-  const target = useRef(new THREE.Vector3(0, 0, 0));
-  const dragMode = useRef<'none' | 'orbit' | 'pan'>('none');
-  const dragLast = useRef({ x: 0, y: 0 });
-  const keys = useRef<Record<string, boolean>>({});
-
-  useEffect(() => {
-    const dom = gl.domElement;
-    const onDown = (e: PointerEvent) => {
-      if (e.button === 1) {
-        dragMode.current = 'pan';
-      } else if (e.button === 2) {
-        dragMode.current = e.shiftKey ? 'pan' : 'orbit';
-      } else {
+      if (next) props.onMoveRoom(id, next);
+      return;
+    }
+    if (e.kind !== 'down') return;
+    // A press that left the canvas ends without an `up` or `dragEnd`, so each press starts afresh.
+    roomDrag.current = null;
+    const action = resolveMapPick(e.target, e.point, tool);
+    switch (action?.type) {
+      case 'select':
+        props.onSelect(action.selection);
+        return;
+      case 'deselect':
+        props.onSelect(null);
+        return;
+      case 'place-spawn':
+        props.onPlaceSpawn(action.at);
+        return;
+      case 'drag-room': {
+        props.onSelect({ kind: 'room', id: action.id });
+        const placement = doc?.rooms.find((r) => r.id === action.id);
+        if (placement) {
+          const v = geometry.voxelSize;
+          roomDrag.current = {
+            id: action.id,
+            offset: { x: action.at[0] - placement.position[0] * v, z: action.at[2] - placement.position[2] * v },
+          };
+        }
         return;
       }
-      dragLast.current = { x: e.clientX, y: e.clientY };
-    };
-    const onMove = (e: PointerEvent) => {
-      if (dragMode.current === 'none') return;
-      const dx = e.clientX - dragLast.current.x;
-      const dy = e.clientY - dragLast.current.y;
-      dragLast.current = { x: e.clientX, y: e.clientY };
-      if (dragMode.current === 'orbit') {
-        const sens = 0.005;
-        orbit.current.azimuth -= dx * sens;
-        orbit.current.elevation = THREE.MathUtils.clamp(
-          orbit.current.elevation - dy * sens,
-          -Math.PI / 2 + 0.05,
-          Math.PI / 2 - 0.05,
-        );
-      } else {
-        const speed = orbit.current.distance * 0.0015;
-        const dir = new THREE.Vector3()
-          .subVectors(persp.position, target.current)
-          .normalize();
-        const right = new THREE.Vector3().crossVectors(persp.up, dir).normalize();
-        const up = new THREE.Vector3().crossVectors(dir, right).normalize();
-        target.current.addScaledVector(right, -dx * speed);
-        target.current.addScaledVector(up, dy * speed);
-      }
-    };
-    const onUp = (e: PointerEvent) => {
-      if (e.button !== 1 && e.button !== 2) return;
-      dragMode.current = 'none';
-    };
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const factor = Math.exp(e.deltaY * 0.001);
-      orbit.current.distance = THREE.MathUtils.clamp(
-        orbit.current.distance * factor,
-        4,
-        500,
-      );
-    };
-    const onContext = (e: MouseEvent) => e.preventDefault();
-    const onKeyDown = (e: KeyboardEvent) => {
-      // Skip when typing into an input/textarea/leva.
-      const t = e.target as HTMLElement | null;
-      if (
-        t &&
-        (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
-      )
-        return;
-      keys.current[e.key.toLowerCase()] = true;
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      keys.current[e.key.toLowerCase()] = false;
-    };
-
-    dom.addEventListener('pointerdown', onDown);
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    dom.addEventListener('wheel', onWheel, { passive: false });
-    dom.addEventListener('contextmenu', onContext);
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    return () => {
-      dom.removeEventListener('pointerdown', onDown);
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      dom.removeEventListener('wheel', onWheel);
-      dom.removeEventListener('contextmenu', onContext);
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-    };
-  }, [gl, persp]);
-
-  useFrame((_, dt) => {
-    // WASD: move the target across the y=0 plane in the camera's
-    // local forward/right. Scaled by the orbit distance so the same
-    // keypress feels right at both zoom-in and zoom-out.
-    const speed = orbit.current.distance * dt * 1.2;
-    const forward = new THREE.Vector3()
-      .subVectors(target.current, persp.position);
-    forward.y = 0;
-    if (forward.lengthSq() > 0) forward.normalize();
-    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0));
-    if (right.lengthSq() > 0) right.normalize();
-    if (keys.current['w']) target.current.addScaledVector(forward, speed);
-    if (keys.current['s']) target.current.addScaledVector(forward, -speed);
-    if (keys.current['a']) target.current.addScaledVector(right, -speed);
-    if (keys.current['d']) target.current.addScaledVector(right, speed);
-    if (keys.current['q']) target.current.y -= speed;
-    if (keys.current['e']) target.current.y += speed;
-
-    const { azimuth, elevation, distance } = orbit.current;
-    const cosE = Math.cos(elevation);
-    persp.position.set(
-      target.current.x + distance * cosE * Math.sin(azimuth),
-      target.current.y + distance * Math.sin(elevation),
-      target.current.z + distance * cosE * Math.cos(azimuth),
-    );
-    persp.lookAt(target.current);
+    }
   });
+  useEffect(() => {
+    // Destroying the view drops its callback.
+    bevy?.wasm.onPick(bevy.view, (e) => handlePick(e));
+  }, [bevy]);
 
-  return null;
+  // The Desk area tool draws on the floor from any press on the canvas, over rooms too, so it reads
+  // the DOM's pointer rather than picks.
+  const deskDrag = useRef<DeskAreaDrag>({ type: 'idle' });
+  const onDeskPointer = useEffectEvent((type: 'down' | 'move' | 'up', e: PointerEvent | React.PointerEvent) => {
+    const rect = container.current?.getBoundingClientRect();
+    if (!bevy || !rect || tool !== 'desk-area') return;
+    const result = reduceDeskAreaDrag(deskDrag.current, { type, point: floorAt(bevy, e.clientX - rect.left, e.clientY - rect.top) });
+    deskDrag.current = result.drag;
+    setDraft(result.drag.type === 'dragging' ? result.drag.draft : null);
+    if (result.commit) props.onCommitDeskArea(result.commit);
+  });
+  useEffect(() => {
+    const move = (e: PointerEvent) => deskDrag.current.type === 'dragging' && onDeskPointer('move', e);
+    const up = (e: PointerEvent) => deskDrag.current.type === 'dragging' && onDeskPointer('up', e);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+  }, []);
+  useEffect(() => {
+    deskDrag.current = { type: 'idle' };
+    setDraft(null);
+  }, [tool]);
+
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div
+        ref={container}
+        style={{ position: 'absolute', inset: 0, touchAction: 'none' }}
+        onContextMenu={(e) => e.preventDefault()}
+        onPointerDown={(e) => e.button === 0 && onDeskPointer('down', e)}
+      />
+      {error && (
+        <p role="alert" style={{ position: 'absolute', top: 8, left: 8, margin: 0, color: '#fff', font: '13px sans-serif' }}>
+          {error}
+        </p>
+      )}
+    </div>
+  );
 }

@@ -1,113 +1,105 @@
-import { describe, expect, it, vi } from 'vitest';
-import { RoomsLayer } from '../MapEditorCanvas.tsx';
-import { renderEditorScene } from './renderEditorScene.tsx';
-import {
-  emptyMapDocument,
-  emptyRoomDocument,
-  newPlaceObject,
-  type RoomDocument,
-} from '@officexr/world/scenes';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import type { PickTarget } from '@officexr/render-wasm';
+import { InMemoryMapStorage, emptyMapDocument } from '@officexr/world/scenes';
+import { createTestApi } from '../../../test-harness/createTestApi.ts';
+import { resolveMapPick } from '../mapPointerActions.ts';
+import type { MapTool } from '../mapTools.ts';
+import { dragRoomTo } from '../roomBoundarySnap.ts';
+import { useMapDocument } from '../useMapDocument.ts';
 
 /**
- * Tier 3: mount the Map editor's room-scene subtree under
- * @react-three/test-renderer and drive synthetic pointer events.
- * Validates the c606f10 class end-to-end (spawn/select routing on a
- * room group, regardless of which descendant mesh was hit).
- *
- * Uses the `__primitive_blue` magic kind, which renders as a plain
- * BoxGeometry InstancedMesh — no GLTF fetch, so the scene mounts
- * hermetically with no network.
+ * The Map editor's press routing against the real document store, with picks as data: what the
+ * Bevy view reports for a press on a room's baked layout, one of its objects, a spawn marker, a
+ * desk area or bare ground. Catches the c606f10 class (spawn and select routing on a room,
+ * whichever of its meshes was hit) without a renderer.
  */
 
-const ROOM_NAME = 'test-room';
+type Vec3 = [number, number, number];
+const VOXEL = createTestApi().geometry.voxelSize;
 
-function roomLibrary(): ReadonlyMap<string, RoomDocument> {
-  const doc = emptyRoomDocument(ROOM_NAME, ROOM_NAME);
-  doc.commands = [
-    newPlaceObject({ kindId: '__primitive_blue', position: [0, 0, 0] }),
-    newPlaceObject({ kindId: '__primitive_blue', position: [1, 0, 0] }),
-  ];
-  return new Map([[ROOM_NAME, doc]]);
-}
+beforeEach(() => globalThis.localStorage?.clear());
 
-const doc = {
-  ...emptyMapDocument('m'),
-  rooms: [
-    { id: 'r1', roomName: ROOM_NAME, position: [0, 0, 0] as [number, number, number], rotationY: 0 as const },
-  ],
-};
-
-async function settle(ms = 50) {
-  await new Promise((r) => setTimeout(r, ms));
-}
-
-/** Find the room group that carries the pointer handler. */
-function findRoomGroup(renderer: Awaited<ReturnType<typeof renderEditorScene>>) {
-  const groups = renderer.scene.findAll(
-    (n) =>
-      n.type === 'Group' &&
-      typeof (n.props as { onPointerDown?: unknown }).onPointerDown === 'function',
-  );
-  return groups[0];
+async function mapEditor() {
+  const doc = { ...emptyMapDocument('default', 'Default'), deskAreas: [{ id: 'd1', min: { x: 0, z: 0 }, max: { x: 2, z: 2 } }] };
+  const storage = new InMemoryMapStorage({ seed: [{ name: 'default', doc }] });
+  const { result } = renderHook(() => useMapDocument({ storage }));
+  await waitFor(() => expect(result.current.doc.name).toBe('default'));
+  let room = '';
+  act(() => {
+    room = result.current.addRoom('snap-room', [4, 0, 0]);
+    result.current.setSelection(null);
+  });
+  /** A left press as the canvas applies it. */
+  const press = (target: PickTarget, point: Vec3 | null, tool: MapTool) => {
+    const action = resolveMapPick(target, point, tool);
+    act(() => {
+      const map = result.current;
+      if (action?.type === 'select') map.setSelection(action.selection);
+      if (action?.type === 'deselect') map.setSelection(null);
+      if (action?.type === 'place-spawn') map.addSpawn(action.at);
+      if (action?.type === 'drag-room') map.setSelection({ kind: 'room', id: action.id });
+    });
+    return action;
+  };
+  return { map: () => result.current, room, press };
 }
 
 describe('Map editor scenarios', () => {
-  it('Spawn tool: pointer-down on a room drops a spawn at the hit point (taxonomy A/C/F)', async () => {
-    const onPlaceSpawn = vi.fn();
-    const onSelect = vi.fn();
-    const renderer = await renderEditorScene(
-      <RoomsLayer
-        doc={doc}
-        rooms={roomLibrary()}
-        layouts={new Map()}
-        selection={null}
-        onSelect={onSelect}
-        onMove={vi.fn()}
-        tool="spawn"
-        onPlaceSpawn={onPlaceSpawn}
-      />,
-    );
-    await settle();
-
-    const group = findRoomGroup(renderer);
-    expect(group).toBeDefined();
-    await renderer.fireEvent(group, 'pointerDown', {
-      button: 0,
-      point: { x: 1.5, y: 2.25, z: -3 },
-      stopPropagation: () => {},
-    });
-
-    // Exact hit point preserved (no y=0 fallback, no voxel rounding).
-    expect(onPlaceSpawn).toHaveBeenCalledTimes(1);
-    expect(onPlaceSpawn.mock.calls[0][0]).toEqual([1.5, 2.25, -3]);
-    expect(onSelect).not.toHaveBeenCalled();
+  it('Spawn tool: a press on a room drops a spawn at the exact hit, whichever mesh was hit', async () => {
+    const { map, room, press } = await mapEditor();
+    press({ type: 'layout', name: 'wing', roomInstanceId: room }, [1.5, 2.25, -3], 'spawn');
+    press({ type: 'object', id: `${room}/c1` }, [2, 1, 0], 'spawn');
+    expect(map().doc.spawnPoints.map((s) => s.position)).toEqual([
+      [1.5, 2.25, -3],
+      [2, 1, 0],
+    ]);
   });
 
-  it('Select tool: pointer-down on a room selects it, no spawn (taxonomy F)', async () => {
-    const onPlaceSpawn = vi.fn();
-    const onSelect = vi.fn();
-    const renderer = await renderEditorScene(
-      <RoomsLayer
-        doc={doc}
-        rooms={roomLibrary()}
-        layouts={new Map()}
-        selection={null}
-        onSelect={onSelect}
-        onMove={vi.fn()}
-        tool="select"
-        onPlaceSpawn={onPlaceSpawn}
-      />,
-    );
-    await settle();
+  it('Spawn tool: bare ground places nothing and keeps the selection', async () => {
+    const { map, room, press } = await mapEditor();
+    act(() => map().setSelection({ kind: 'room', id: room }));
+    press({ type: 'ground' }, [1, 0, 1], 'spawn');
+    expect(map().doc.spawnPoints).toEqual([]);
+    expect(map().selection).toEqual({ kind: 'room', id: room });
+  });
 
-    const group = findRoomGroup(renderer);
-    await renderer.fireEvent(group, 'pointerDown', {
-      button: 0,
-      point: { x: 0, y: 0, z: 0 },
-      stopPropagation: () => {},
+  it('Select tool: a press on a room selects it, and bare ground clears the selection', async () => {
+    const { map, room, press } = await mapEditor();
+    press({ type: 'object', id: `${room}/c1` }, [0, 0, 0], 'select');
+    expect(map().selection).toEqual({ kind: 'room', id: room });
+    expect(map().doc.spawnPoints).toEqual([]);
+    press({ type: 'ground' }, [9, 0, 9], 'select');
+    expect(map().selection).toBeNull();
+  });
+
+  it('selects spawn markers and, in the Select tool, desk areas', async () => {
+    const { map, press } = await mapEditor();
+    press({ type: 'overlay', tag: 'desk:d1' }, [1, 0, 1], 'select');
+    expect(map().selection).toEqual({ kind: 'desk-area', id: 'd1' });
+    let spawn = '';
+    act(() => {
+      spawn = map().addSpawn([0, 1, 0]);
     });
+    press({ type: 'overlay', tag: `spawn:${spawn}` }, null, 'move');
+    expect(map().selection).toEqual({ kind: 'spawn', id: spawn });
+  });
 
-    expect(onSelect).toHaveBeenCalledTimes(1);
-    expect(onPlaceSpawn).not.toHaveBeenCalled();
+  it('Move tool: a press selects the room and its drag moves it on the voxel grid', async () => {
+    const { map, room, press } = await mapEditor();
+    const action = press({ type: 'object', id: `${room}/c1` }, [4 * VOXEL + 0.2, 1, 0.1], 'move');
+    expect(map().selection).toEqual({ kind: 'room', id: room });
+    expect(action).toEqual({ type: 'drag-room', id: room, at: [4 * VOXEL + 0.2, 1, 0.1] });
+    const offset = { x: 0.2, z: 0.1 };
+    const next = dragRoomTo({ x: 10 * VOXEL + 0.2, z: 3 * VOXEL + 0.1 }, offset, [4, 0, 0], null, [], VOXEL, 2);
+    act(() => map().setRoomPosition(room, next!));
+    expect(map().doc.rooms[0].position).toEqual([10, 0, 3]);
+  });
+
+  it('Desk area tool: a press on a room is left to the drawing gesture', async () => {
+    const { map, room, press } = await mapEditor();
+    expect(press({ type: 'object', id: `${room}/c1` }, [0, 0, 0], 'desk-area')).toBeNull();
+    expect(press({ type: 'ground' }, [0, 0, 0], 'desk-area')).toBeNull();
+    expect(map().selection).toBeNull();
   });
 });
