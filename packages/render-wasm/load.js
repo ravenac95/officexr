@@ -1,21 +1,74 @@
 // The loader's logic, free of imports from the generated pkg/ so it can be tested without a wasm build.
 
-/** WebGPU when the browser hands out an adapter, else WebGL2. */
-export async function pickBackend(gpu) {
+const BACKENDS = ['webgpu', 'webgl2'];
+const STORAGE_KEY = 'officexr:renderer';
+
+/**
+ * The backend the user forced: `?renderer=webgl2|webgpu` wins and is remembered in `storage`, so it
+ * survives navigating to a URL without it; `?renderer=auto` forgets it. Else the remembered one, if any.
+ */
+export function rendererOverride(search, storage) {
+  const asked = new URLSearchParams(search ?? '').get('renderer');
   try {
-    return (await gpu?.requestAdapter()) ? 'webgpu' : 'webgl2';
+    if (asked === 'auto') {
+      storage?.removeItem(STORAGE_KEY);
+      return undefined;
+    }
+    if (BACKENDS.includes(asked)) {
+      storage?.setItem(STORAGE_KEY, asked);
+      return asked;
+    }
+    const stored = storage?.getItem(STORAGE_KEY);
+    return BACKENDS.includes(stored) ? stored : undefined;
+  } catch {
+    // Storage blocked (private mode, sandboxed frame): only the URL counts.
+    return BACKENDS.includes(asked) ? asked : undefined;
+  }
+}
+
+/**
+ * True on iPhone/iPad, where every browser (Chrome included) runs WebKit, and WebKit's WebGPU
+ * canvas flickers on iOS 26 before 26.4. iPadOS reports a Mac UA, so touch tells it apart.
+ */
+export function isIosWebKit(nav) {
+  const ua = nav?.userAgent ?? '';
+  return /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && (nav?.maxTouchPoints ?? 0) > 1);
+}
+
+/** The backend to use without probing: the user's override, else WebGL2 on iOS WebKit, else none. */
+export function preferredBackend(override, nav) {
+  // ponytail: iOS defaults to WebGL2 on every version; lift once iOS 26.4+ is the floor (`?renderer=webgpu` tests it).
+  return override ?? (isIosWebKit(nav) ? 'webgl2' : undefined);
+}
+
+/**
+ * `override` when given, else WebGPU when the browser hands out an adapter that opens a device,
+ * else WebGL2. The probe device is destroyed at once; Bevy makes its own.
+ */
+export async function pickBackend(gpu, override) {
+  if (override) {
+    return override;
+  }
+  try {
+    const adapter = await gpu?.requestAdapter();
+    if (!adapter) {
+      return 'webgl2';
+    }
+    const device = await adapter.requestDevice();
+    device.destroy?.();
+    return 'webgpu';
   } catch {
     return 'webgl2';
   }
 }
 
 /**
- * Instantiates the renderer for the best backend: from `<baseUrl>/<hash>/<backend>/` when `baseUrl`
- * is set, else from the bundled `bundled[backend]()` import.
+ * Instantiates the renderer for the best backend (or `override`): from `<baseUrl>/<hash>/<backend>/`
+ * when `baseUrl` is set, else from the bundled `bundled[backend]()` import.
  */
-export async function loadRendererFrom({ gpu, baseUrl, hash, importModule, bundled }) {
-  const backend = await pickBackend(gpu);
-  // ponytail: a device-level WebGPU failure after an adapter is returned does not fall back to WebGL2.
+export async function loadRendererFrom({ gpu, override, baseUrl, hash, importModule, bundled }) {
+  const backend = await pickBackend(gpu, override);
+  // ponytail: WebGPU failing only once Bevy runs (its own device's limits, a lost device) does not fall back to WebGL2.
   globalThis.__officexrRenderBackend = backend;
   if (!baseUrl) {
     const renderer = await bundled[backend]();
