@@ -208,7 +208,7 @@
       ],
       "moves": [
         {
-          "frames": 60
+          "frames": 170
         }
       ]
     },
@@ -222,7 +222,7 @@
       ],
       "moves": [
         {
-          "frames": 60
+          "frames": 170
         }
       ]
     },
@@ -236,7 +236,7 @@
       ],
       "moves": [
         {
-          "frames": 60
+          "frames": 170
         }
       ]
     }
@@ -293,13 +293,70 @@
     }
   ],
   "captures": [
-    59
+    59,
+    169
   ],
   "assert": [
     {
       "type": "feetOn",
-      "frame": 59,
+      "frame": 169,
       "surfaceY": 0
+    },
+    {
+      "type": "tint",
+      "frame": 169,
+      "against": 59,
+      "camera": "top",
+      "at": [
+        304,
+        216
+      ],
+      "color": "#ffd24a"
+    },
+    {
+      "type": "tint",
+      "frame": 169,
+      "against": 59,
+      "camera": "top",
+      "at": [
+        432,
+        256
+      ],
+      "color": "#7be67b"
+    },
+    {
+      "type": "tint",
+      "frame": 169,
+      "against": 59,
+      "camera": "top",
+      "at": [
+        440,
+        190
+      ],
+      "color": "#7be67b"
+    },
+    {
+      "type": "tint",
+      "frame": 169,
+      "against": 59,
+      "camera": "front",
+      "at": [
+        280,
+        212
+      ],
+      "color": "#ffd24a"
+    },
+    {
+      "type": "tint",
+      "frame": 169,
+      "against": 59,
+      "camera": "front",
+      "at": [
+        468,
+        260
+      ],
+      "color": "#7be67b"
     }
-  ]
+  ],
+  "proximityFrom": 60
 }

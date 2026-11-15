@@ -75,6 +75,9 @@ struct Scenario {
     /// As `setProximity` takes it; players are `p<character index>`.
     #[serde(default)]
     proximity: Option<Value>,
+    /// The sim frame `proximity` is sent on.
+    #[serde(default)]
+    proximity_from: usize,
 }
 
 #[derive(Deserialize, Clone)]
@@ -149,13 +152,13 @@ enum Assertion {
         position: [f32; 3],
         tolerance: f32,
     },
-    /// The keyframe's pixel at `at` is the one at `reference` plus some of
-    /// `color`, as an additive glow over the same floor adds it.
+    /// The keyframe's pixel at `at` is the same pixel of keyframe `against`
+    /// plus some of `color`, as an additive glow adds it.
     Tint {
         frame: usize,
+        against: usize,
         camera: String,
         at: [u32; 2],
-        reference: [u32; 2],
         color: String,
     },
 }
@@ -459,22 +462,29 @@ fn drive(
 #[derive(Resource)]
 struct ScenarioOverlays(Vec<Overlay>);
 
+/// The scenario's proximity output and the sim frame it's sent on.
 #[derive(Resource)]
-struct ScenarioProximity(Option<Proximity>);
+struct ScenarioProximity(Option<Proximity>, usize);
 
-/// Gives the primary view the scenario's proximity output once it exists.
+/// Gives the primary view the scenario's proximity output from its frame.
 fn add_proximity(
     mut commands: Commands,
     proximity: Res<ScenarioProximity>,
+    timeline: Res<Timeline>,
     views: Query<Entity, (With<View>, Without<ViewProximity>)>,
 ) {
-    let Some(proximity) = &proximity.0 else {
+    let (Some(output), from) = (&proximity.0, proximity.1) else {
         return;
     };
+    if timeline
+        .steps
+        .get(timeline.next)
+        .is_none_or(|s| s.frame < from)
+    {
+        return;
+    }
     for view in &views {
-        commands
-            .entity(view)
-            .insert(ViewProximity(proximity.clone()));
+        commands.entity(view).insert(ViewProximity(output.clone()));
     }
 }
 
@@ -533,9 +543,13 @@ fn render(
         .insert_resource(ScenarioOverlays(
             serde_json::from_value(Value::from(scenario.overlays.clone())).expect("overlays"),
         ))
-        .insert_resource(ScenarioProximity(scenario.proximity.clone().map(|p| {
-            serde_json::from_value(p).expect("proximity")
-        })))
+        .insert_resource(ScenarioProximity(
+            scenario
+                .proximity
+                .clone()
+                .map(|p| serde_json::from_value(p).expect("proximity")),
+            scenario.proximity_from,
+        ))
         .add_systems(PreUpdate, (drive, add_overlays, add_proximity));
     app.run();
     let failed = failed.lock().unwrap();
@@ -624,27 +638,27 @@ fn check_tints(scenario: &Scenario, out: &Path) -> Vec<String> {
     for a in &scenario.assert {
         let Assertion::Tint {
             frame,
+            against,
             camera,
             at,
-            reference,
             color,
         } = a
         else {
             continue;
         };
         let file = out.join(format!("{frame:04}-{camera}.png"));
-        let (size, data) = rgba(&file);
-        let pixel = |[x, y]: [u32; 2]| {
-            let i = ((y * size.x + x) * 4) as usize;
+        let pixel = |frame: usize| {
+            let (size, data) = rgba(&out.join(format!("{frame:04}-{camera}.png")));
+            let i = ((at[1] * size.x + at[0]) * 4) as usize;
             Vec3::new(data[i].into(), data[i + 1].into(), data[i + 2].into())
         };
-        let added = pixel(*at) - pixel(*reference);
+        let added = pixel(*frame) - pixel(*against);
         let want = Srgba::hex(color).expect("tint colour");
         let want = Vec3::new(want.red, want.green, want.blue);
         let alike = added.normalize_or_zero().dot(want.normalize());
         if added.length() < MIN_TINT || alike < MIN_TINT_ALIKE {
             failures.push(format!(
-                "{}: {at:?} adds {added:.0} to {reference:?}, not {color}",
+                "{}: {at:?} adds {added:.0} to frame {against}'s, not {color}",
                 file.display()
             ));
         }
