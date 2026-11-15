@@ -8,15 +8,13 @@ use officexr_sim::physics::character_movement::XZ;
 use officexr_sim::physics::rules::SPAWN_DROP_HEIGHT;
 use officexr_sim::{SimCore, SimInput, SimPeer, Vec3 as SimVec3};
 
+use crate::VIEW;
 use crate::baked_colliders::BakedColliders;
 use crate::broadcaster::{Pose, PositionBroadcaster};
 use crate::net::{Joined, Outbound};
 use crate::peers::character_for;
 use crate::touch::TouchControls;
 use crate::world::{CHAR_RADIUS, SimWorld};
-
-/// The only view the client draws into.
-pub const VIEW: u32 = 0;
 
 #[derive(Resource)]
 pub struct LocalPlayer {
@@ -182,13 +180,7 @@ struct Intent {
 
 impl Intent {
     fn to_move(self, yaw: f32) -> MoveIntent {
-        let dir = Vec2::new(-yaw.sin(), -yaw.cos()) * self.fwd
-            + Vec2::new(yaw.cos(), -yaw.sin()) * self.strafe;
-        MoveIntent {
-            dir: dir.normalize_or_zero().into(),
-            run: self.run,
-            jump: self.jump,
-        }
+        MoveIntent::from_axes(self.fwd, self.strafe, self.run, self.jump, yaw)
     }
 }
 
@@ -201,16 +193,8 @@ fn or_stick(keys: MoveIntent, stick: Vec2, yaw: f32) -> MoveIntent {
     if keys.dir != [0.0; 2] {
         return keys;
     }
-    let steer = Intent {
-        fwd: stick.y,
-        strafe: stick.x,
-        ..default()
-    };
-    MoveIntent {
-        run: keys.run || stick.length() >= RUN_DEFLECTION,
-        jump: keys.jump,
-        ..steer.to_move(yaw)
-    }
+    let run = keys.run || stick.length() >= RUN_DEFLECTION;
+    MoveIntent::from_axes(stick.y, stick.x, run, keys.jump, yaw)
 }
 
 /// Test-only scripted input for headless live checks, from `OFFICEXR_TEST_INPUT`: comma-separated

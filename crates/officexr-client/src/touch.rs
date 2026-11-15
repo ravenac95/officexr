@@ -6,7 +6,7 @@ use bevy::window::PrimaryWindow;
 
 use officexr_controls::ControlsHub;
 
-use crate::player::VIEW;
+use crate::VIEW;
 
 const BASE_SIZE: f32 = 110.0;
 const KNOB_SIZE: f32 = 46.0;

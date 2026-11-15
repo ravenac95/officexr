@@ -5,8 +5,8 @@
 //!
 //! Each flag falls back to an env var: `OFFICEXR_WEB_URL`, `OFFICEXR_REALTIME_URL`,
 //! `OFFICEXR_OFFICE_ID`, `OFFICEXR_SESSION_COOKIE` (prefer it to `--cookie`, which `ps`
-//! shows). WASD or the arrows walk, shift runs, space jumps, Alt+P cycles the camera; on a touch screen the bottom-left
-//! stick walks and dragging elsewhere looks. On iOS the env vars come from the Xcode scheme, with
+//! shows). WASD or the arrows walk, shift runs, space jumps, Alt+P cycles the camera; on a touch
+//! screen the bottom-left stick walks and dragging elsewhere looks. On iOS the env vars come from the Xcode scheme, with
 //! an in-app screen as the fallback (see `ios/README.md`). With `OFFICEXR_SCREENSHOT=out.png` it
 //! saves one frame after `OFFICEXR_SCREENSHOT_FRAME` (default 600) frames, then exits.
 
@@ -25,10 +25,22 @@ use bevy::asset::AssetMetaCheck;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use officexr_controls::{CameraMode, ControlsHub, ControlsPlugin, ControlsSystems};
-use officexr_render::{AssetBase, OfficeXrRenderPlugin, Players};
+use officexr_render::{AssetBase, OfficeXrRenderPlugin, Players, SceneCamera};
 
 #[cfg(target_os = "ios")]
 use ios::{connect_failed, load_config};
+
+/// The only view the client draws into.
+const VIEW: u32 = 0;
+
+/// What view 0 shows until the player spawns: the old orbit's eye, looking at the origin.
+const LOADING_CAMERA: SceneCamera = SceneCamera {
+    position: [0.0, 3.8, 7.0],
+    look_at: [0.0; 3],
+    fov_deg: 60.0,
+    near: 0.1,
+    far: 2000.0,
+};
 
 #[bevy_main]
 pub fn main() {
@@ -51,6 +63,7 @@ pub fn main() {
         OfficeXrRenderPlugin,
         ControlsPlugin,
     ))
+    .insert_resource(LOADING_CAMERA)
     .insert_resource(inbound)
     .insert_resource(outbound)
     .init_resource::<player::LocalPlayer>()
@@ -81,7 +94,7 @@ pub fn main() {
 }
 
 fn third_person(hub: Res<ControlsHub>) {
-    hub.with(player::VIEW, |c| c.mode = CameraMode::ThirdPerson);
+    hub.with(VIEW, |c| c.mode = CameraMode::ThirdPerson);
 }
 
 /// Alt+P cycles the gameplay camera modes, as on the web.
@@ -93,7 +106,7 @@ fn cycle_camera_mode(keys: Res<ButtonInput<KeyCode>>, hub: Res<ControlsHub>) {
     ];
     let alt = keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
     if alt && keys.just_pressed(KeyCode::KeyP) {
-        hub.with(player::VIEW, |c| {
+        hub.with(VIEW, |c| {
             let at = MODES.iter().position(|m| *m == c.mode).unwrap_or(0);
             c.mode = MODES[(at + 1) % MODES.len()];
         });
