@@ -98,7 +98,7 @@ const errorSentinel = (page: Page) =>
   page.evaluate(() => (window as unknown as { __officexrRenderError?: string }).__officexrRenderError);
 
 /** The render target, which the page pins to the top left at the requested size. */
-async function canvasPixels(page: Page): Promise<PNG> {
+async function renderTargetPng(page: Page): Promise<PNG> {
   const box = (await page.locator('[data-render-target]').boundingBox())!;
   return PNG.sync.read(await page.screenshot({ clip: box, timeout: 120_000 }));
 }
@@ -141,7 +141,7 @@ for (const [targetLabel, targetQuery] of TARGETS) {
       const ready = await readySentinel(page);
       expect(ready.bounds.max[0]).toBeGreaterThan(ready.bounds.min[0]);
       expect(ready.metresPerPixel !== undefined).toBe(cameraLabel === 'top');
-      const png = await canvasPixels(page);
+      const png = await renderTargetPng(page);
       expect([png.width, png.height]).toEqual([400, 300]);
       expect(distinctColors(png)).toBeGreaterThan(1);
       expect(matching(png, targetLabel === 'layout' ? isBlue : isGreen).count).toBeGreaterThan(50);
@@ -151,7 +151,7 @@ for (const [targetLabel, targetQuery] of TARGETS) {
 
 test('draws both placements of a room, and rotates the other one', async ({ page }) => {
   expect(await render(page, 'target=map&name=office&camera=top')).toBe('ready');
-  const png = await canvasPixels(page);
+  const png = await renderTargetPng(page);
 
   // wing-a and wing-b are one layout placed twice, 4 m apart: two separate green runs along X.
   const greenColumns = new Array<boolean>(png.width).fill(false);

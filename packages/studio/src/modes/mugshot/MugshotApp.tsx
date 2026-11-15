@@ -161,30 +161,36 @@ export function MugshotApp() {
     };
   }, [catalog]);
 
+  // The scene, settled under gravity unless the slider has pinned the body.
   useEffect(() => {
     if (!bevy || !catalogReady) return;
     const world = mugshotWorld(catalog.getCatalog().kinds, cubeMode, lighting, background);
     const json = JSON.stringify(world);
-    let rootY: number;
-    if (manualPlacement) {
-      bevy.wasm.setWorld(bevy.view, json);
-      bevy.wasm.setPlayers(bevy.view, {
-        players: [{ id: SELF_ID, character, pos: [0, yOffset, 0], yaw: 0, vel: [0, 0, 0], name: '', airborne: false }],
-        charRadius: CHAR_RADIUS,
-        playerSpeed: 0,
-        runSpeed: 0,
-        paused: true,
-      });
-      rootY = yOffset;
-    } else {
-      const feetY = bevy.wasm.setWorld(bevy.view, json, character) ?? NaN;
-      bevySentinels().__officexrBevyMugshotFeetY = feetY;
-      rootY = bodyPosition({ x: 0, y: feetY, z: 0 }, CHAR_RADIUS).y;
-    }
     local.actions.setWorldObjects(world.objects as Parameters<typeof local.actions.setWorldObjects>[0]);
     local.actions.upsertPlayer({ id: SELF_ID, avatar: { model: character } });
+    if (manualPlacement) {
+      bevy.wasm.setWorld(bevy.view, json);
+      delete bevySentinels().__officexrBevyMugshotFeetY;
+      return;
+    }
+    const feetY = bevy.wasm.setWorld(bevy.view, json, character) ?? NaN;
+    bevySentinels().__officexrBevyMugshotFeetY = feetY;
+    const rootY = bodyPosition({ x: 0, y: feetY, z: 0 }, CHAR_RADIUS).y;
     local.actions.setSelfPosition({ x: 0, y: rootY, z: 0 }, { x: 0, y: 0, z: 0 }, 0, false);
-  }, [bevy, catalogReady, catalog, local, character, cubeMode, lighting, background, manualPlacement, yOffset]);
+  }, [bevy, catalogReady, catalog, local, character, cubeMode, lighting, background, manualPlacement]);
+
+  // The slider's pin, sent on its own so dragging doesn't resend the scene.
+  useEffect(() => {
+    if (!bevy || !catalogReady || !manualPlacement) return;
+    bevy.wasm.setPlayers(bevy.view, {
+      players: [{ id: SELF_ID, character, pos: [0, yOffset, 0], yaw: 0, vel: [0, 0, 0], name: '', airborne: false }],
+      charRadius: CHAR_RADIUS,
+      playerSpeed: 0,
+      runSpeed: 0,
+      paused: true,
+    });
+    local.actions.setSelfPosition({ x: 0, y: yOffset, z: 0 }, { x: 0, y: 0, z: 0 }, 0, false);
+  }, [bevy, catalogReady, local, character, manualPlacement, yOffset]);
 
   useEffect(() => {
     bevy?.wasm.setCamera(bevy.view, mugshotCamera({ azimuthDeg, distanceM, height: cameraHeight }));
@@ -253,6 +259,8 @@ export function MugshotApp() {
       for (const mode of ['gltf', 'primitive'] as const) {
         setCubeMode(mode);
         await waitFrames(2);
+        // A capture resolves on a drawn frame, so readiness is read after Bevy applied the new cubes.
+        await bevy.wasm.captureView(bevy.view);
         await waitReady(bevy);
         for (const angle of angles) {
           setAzimuthDeg(angle);

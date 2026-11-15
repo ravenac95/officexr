@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Overlay, RendererModule, ViewId, WorldDiff } from '@officexr/render-wasm';
 import { DEFAULT_WORLD_CONSTANTS } from '@officexr/sdk';
-import { bakedLayoutUrl, DEFAULT_EDITOR_LIGHTING, type ApplicationApi } from '@officexr/world/app';
+import { DEFAULT_EDITOR_LIGHTING, type ApplicationApi } from '@officexr/world/app';
 import { useApplication } from '@officexr/world/react';
 import {
   FilesystemLayoutStorage,
@@ -9,12 +9,12 @@ import {
   FilesystemRoomStorage,
 } from '@officexr/world/scenes';
 import { useTestStorages } from '../../test-harness/TestStorageContext.tsx';
-import { roomPlacements, type RoomPlacements } from '../map/roomPlacements.ts';
-import { BevyCanvas, useReadySentinel } from './BevyCanvas.tsx';
-import { loadRenderContent, type RenderContent, type RenderStorages } from './renderContent.ts';
+import type { RoomPlacements } from '../map/roomPlacements.ts';
+import { BevyCanvas } from './BevyCanvas.tsx';
+import { layoutUrl, loadRenderContent, type RenderContent, type RenderStorages } from './renderContent.ts';
 import { cameraPose, frameCamera, type Bounds, type CameraSetup } from './renderFraming.ts';
 import { parseRenderParams, type RenderParams } from './renderParams.ts';
-import { paths, studioApiOptions, studioApiUrl } from '../../apiOrigin.ts';
+import { paths, studioApiOptions } from '../../apiOrigin.ts';
 
 interface RenderSentinels {
   __officexrRenderReady?: { bounds: Bounds; metresPerPixel?: number };
@@ -107,22 +107,16 @@ function RenderView({
   onError: (message: string) => void;
 }) {
   const api = useApplication();
-  useReadySentinel();
   const setup = useMemo(() => frameCamera(params.camera, content.bounds, params), [params, content.bounds]);
 
   const onView = (wasm: RendererModule, view: ViewId) => {
     let cancelled = false;
     const world = renderWorld(api, content);
-    const glbUrls = [...world.bakedLayouts.map((b) => b.gltfPath), ...content.modelUrls];
+    const glbUrls = [...(world.bakedLayouts ?? []).map((b) => b.gltfPath), ...content.modelUrls];
     void (async () => {
-      // Bevy never reports a model that fails to load, so a missing one is caught here first.
-      for (const url of glbUrls) {
-        const response = await fetch(url).catch((err: unknown) => err);
-        if (!(response instanceof Response) || !response.ok) {
-          const why = response instanceof Response ? `HTTP ${response.status}` : errorMessage(response);
-          throw new Error(`failed to load asset: ${url} (${why})`);
-        }
-      }
+      // Bevy never reports a model that fails to load, so a missing one is caught here first;
+      // the browser cache then serves Bevy's own fetch.
+      await Promise.all(glbUrls.map(assertFetchable));
       if (cancelled) {
         return;
       }
@@ -155,15 +149,19 @@ function RenderView({
   );
 }
 
-// ponytail: baked layouts load without credentials; fine while headless render only runs same-origin.
-const layoutUrl = (layoutName: string) =>
-  new URL(`${bakedLayoutUrl(layoutName, studioApiUrl(paths.bakedLayouts))}.glb`, window.location.href).href;
+async function assertFetchable(url: string): Promise<void> {
+  const response = await fetch(url).catch((err: unknown) => err);
+  if (!(response instanceof Response) || !response.ok) {
+    const why = response instanceof Response ? `HTTP ${response.status}` : errorMessage(response);
+    throw new Error(`failed to load asset: ${url} (${why})`);
+  }
+}
 
 /** The content as one world diff, under the editors' lighting on a flat backdrop. */
-function renderWorld(api: ApplicationApi, content: RenderContent) {
+function renderWorld(api: ApplicationApi, content: RenderContent): WorldDiff {
   const placed: RoomPlacements =
     content.type === 'map'
-      ? roomPlacements(content.doc, content.rooms, api.rooms, layoutUrl)
+      ? content.placed
       : {
           instances: content.worldObjects.instances,
           bakedLayouts:
@@ -172,7 +170,7 @@ function renderWorld(api: ApplicationApi, content: RenderContent) {
               : [],
         };
   const kindIds = new Set(placed.instances.map((i) => i.kindId));
-  const diff: WorldDiff = {
+  return {
     replace: true,
     kinds: api.catalog.getCatalog().kinds.filter((k) => kindIds.has(k.id)),
     objects: { instances: placed.instances },
@@ -181,7 +179,6 @@ function renderWorld(api: ApplicationApi, content: RenderContent) {
     background: DEFAULT_WORLD_CONSTANTS.background,
     clearColor: BACKDROP,
   };
-  return { ...diff, bakedLayouts: placed.bakedLayouts };
 }
 
 function reportReady(bounds: Bounds, setup: CameraSetup) {

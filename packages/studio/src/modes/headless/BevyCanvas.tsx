@@ -32,7 +32,7 @@ export function BevyCanvas({
   /** Draws into Bevy's primary window when Bevy boots here; mount it before the page's other canvases. */
   primary?: boolean;
   onView: (wasm: RendererModule, view: ViewId) => (() => void) | void;
-  /** The renderer failed to load. */
+  /** The renderer failed to load, or the view to start. */
   onError?: (message: string) => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -40,8 +40,8 @@ export function BevyCanvas({
     let cancelled = false;
     let cleanup: (() => void) | void;
     let view: ViewId | null = null;
-    bootBevy(primary && canvas.current ? canvas.current : undefined).then(
-      (wasm) => {
+    bootBevy(primary && canvas.current ? canvas.current : undefined)
+      .then((wasm) => {
         if (cancelled || !canvas.current) {
           return;
         }
@@ -50,9 +50,12 @@ export function BevyCanvas({
         s.__officexrBevy = wasm;
         s.__officexrBevyViews = [...(s.__officexrBevyViews ?? []), view];
         cleanup = onView(wasm, view);
-      },
-      (e: unknown) => !cancelled && onError?.(e instanceof Error ? e.message : String(e)),
-    );
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          onError?.(e instanceof Error ? e.message : String(e));
+        }
+      });
     return () => {
       cancelled = true;
       cleanup?.();

@@ -40,6 +40,19 @@ export interface MapLayoutPlacements {
   missingRooms: string[];
 }
 
+/** Which baked layout each placement of `mapDoc` uses: one per placed room that is linked to a layout. */
+export function layoutPlacements(
+  mapDoc: MapDocumentV2,
+  rooms: ReadonlyMap<string, RoomDocument>,
+): BakedLayoutPlacement[] {
+  return mapDoc.rooms.flatMap((ri): BakedLayoutPlacement[] => {
+    const layoutName = rooms.get(ri.roomName)?.layoutName;
+    return layoutName === undefined
+      ? []
+      : [{ roomInstanceId: ri.id, layoutName, position: ri.position, rotationY: ri.rotationY ?? 0 }];
+  });
+}
+
 /** Loads the rooms a map places and derives which baked layout each placement uses. */
 export async function mapLayoutPlacements(
   map: SerializedMap,
@@ -54,12 +67,7 @@ export async function mapLayoutPlacements(
           return room !== undefined && isBakedRoom(room);
         })
       : map;
-  const placements = mapDoc.rooms.flatMap((ri): BakedLayoutPlacement[] => {
-    const layoutName = rooms.get(ri.roomName)?.layoutName;
-    return layoutName === undefined
-      ? []
-      : [{ roomInstanceId: ri.id, layoutName, position: ri.position, rotationY: ri.rotationY ?? 0 }];
-  });
+  const placements = layoutPlacements(mapDoc, rooms);
   const missingRooms = [...roomNames].filter((name) => !rooms.has(name));
   return { mapDoc, rooms, placements, missingRooms };
 }

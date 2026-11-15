@@ -108,8 +108,13 @@ export function frameCamera(spec: CameraSpec, bounds: Bounds, size: FrameSize): 
   };
 }
 
-/** The near-orthographic stand-in's field of view, for Bevy's perspective-only view cameras. */
+/** The near-orthographic stand-in's widest-allowed narrow field of view. */
 const TOP_FOV_DEG = 1;
+/**
+ * Its farthest height above the ground: the Bevy sun's shadow cascade ends 2000 m from the camera,
+ * so a farther camera would draw the frame without shadows.
+ */
+const TOP_MAX_DISTANCE = 1000;
 /** Leans the top camera off vertical so `looking_at`'s Y up resolves to -Z at the top of the image. */
 const TOP_LEAN = 1e-3;
 
@@ -117,19 +122,19 @@ const TOP_LEAN = 1e-3;
  * `setup` as a Bevy view camera. The top camera becomes a narrow perspective from far overhead that
  * shows the same ground area as the orthographic one.
  */
-// ponytail: a 1° perspective stands in for ortho; things H m up draw D/(D-H) larger, under 1% for a room-sized frame.
+// ponytail: a perspective stands in for ortho; things H m up draw D/(D-H) larger: under 1% for frames up to ~35 m, then the FOV widens.
 export function cameraPose(setup: CameraSetup, size: FrameSize): CameraPose {
   if (setup.type === 'perspective') {
     return { position: [...setup.position], lookAt: [...setup.target], fovDeg: setup.fov, near: setup.near, far: setup.far };
   }
   const halfHeightM = size.height / setup.zoom / 2;
-  const distance = halfHeightM / Math.tan(((TOP_FOV_DEG / 2) * Math.PI) / 180);
+  const distance = Math.min(halfHeightM / Math.tan(((TOP_FOV_DEG / 2) * Math.PI) / 180), TOP_MAX_DISTANCE);
   const [x, eyeY, z] = setup.position;
   const groundY = setup.target[1];
   return {
     position: [x, groundY + distance, z + distance * TOP_LEAN],
     lookAt: [...setup.target],
-    fovDeg: TOP_FOV_DEG,
+    fovDeg: (2 * Math.atan(halfHeightM / distance) * 180) / Math.PI,
     near: Math.max(setup.near, distance - (eyeY - groundY)),
     far: distance + (setup.far - (eyeY - groundY)),
   };

@@ -1,18 +1,20 @@
 import type { WorldObjects } from '@officexr/sdk';
-import { loadMap, modelUrl, type ApplicationApi, type MapLoaderDeps } from '@officexr/world/app';
-import type { MapDocumentV2, RoomDocument } from '@officexr/world/scenes';
+import { bakedLayoutUrl, loadMap, modelUrl, type ApplicationApi, type MapLoaderDeps } from '@officexr/world/app';
+import { paths, studioApiUrl } from '../../apiOrigin.ts';
+import { roomPlacements, type RoomPlacements } from '../map/roomPlacements.ts';
 import { unionBounds, type Bounds } from './renderFraming.ts';
 import type { RenderParams } from './renderParams.ts';
 
 export type RenderStorages = MapLoaderDeps['storages'];
 
+// ponytail: baked layouts load without credentials; fine while headless render only runs same-origin.
+/** A baked layout's GLB, absolute (Bevy resolves relative paths against the model origin) and `.glb` (Bevy picks loaders by extension). */
+export const layoutUrl = (layoutName: string) =>
+  new URL(`${bakedLayoutUrl(layoutName, studioApiUrl(paths.bakedLayouts))}.glb`, window.location.href).href;
+
 /** What the render page draws; `bounds` is what the camera frames. */
 export type RenderContent = { bounds: Bounds; modelUrls: string[] } & (
-  | {
-      type: 'map';
-      doc: MapDocumentV2;
-      rooms: ReadonlyMap<string, RoomDocument>;
-    }
+  | { type: 'map'; placed: RoomPlacements }
   | { type: 'room'; worldObjects: WorldObjects; layoutName?: string }
   | { type: 'layout'; worldObjects: WorldObjects }
 );
@@ -50,14 +52,8 @@ export async function loadRenderContent(
       throw nothingToRender(params);
     }
     // Layout instances aren't drawn as models (their GLB is), so preload only the rooms' own kinds.
-    const roomObjects = api.rooms.compileMap(map.mapDoc, map.rooms);
-    return {
-      type: 'map',
-      bounds,
-      modelUrls: modelUrlsOf(roomObjects.instances),
-      doc: map.mapDoc,
-      rooms: map.rooms,
-    };
+    const placed = roomPlacements(map.mapDoc, map.rooms, api.rooms, layoutUrl);
+    return { type: 'map', bounds, modelUrls: modelUrlsOf(placed.instances), placed };
   }
 
   // Kind strides are only correct once the catalog has landed.

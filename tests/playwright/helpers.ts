@@ -237,3 +237,18 @@ export async function canvasPixels(page: Page, selectors: string[], fromTop = 0)
     return out;
   });
 }
+
+/** A PNG of the page's `index`th Bevy view (`__officexrBevyViews`), through `captureView`. */
+export async function captureBevyView(page: Page, index = 0): Promise<Buffer> {
+  const base64 = await page.evaluate(async (i) => {
+    const w = window as unknown as {
+      __officexrBevy: { captureView(view: number): Promise<Blob> };
+      __officexrBevyViews: number[];
+    };
+    const bytes = new Uint8Array(await (await w.__officexrBevy.captureView(w.__officexrBevyViews[i])).arrayBuffer());
+    let binary = '';
+    for (const b of bytes) binary += String.fromCharCode(b);
+    return btoa(binary);
+  }, index);
+  return Buffer.from(base64, 'base64');
+}

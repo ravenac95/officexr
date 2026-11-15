@@ -167,4 +167,14 @@ describe('cameraPose', () => {
     expect(pose.near).toBeLessThan(y - BOUNDS.max[1]);
     expect(pose.far).toBeGreaterThan(height);
   });
+
+  it('stays within the sun shadow cascade for a large map, widening its view instead', () => {
+    const big: Bounds = { min: [0, 0, 0], max: [400, 3, 300] };
+    const setup = frameCamera({ type: 'top' }, big, SIZE);
+    if (setup.type !== 'orthographic') throw new Error('expected orthographic');
+    const pose = cameraPose(setup, SIZE);
+    const height = pose.position[1] - setup.target[1];
+    expect(height).toBeLessThanOrEqual(1000);
+    expect(2 * height * Math.tan((pose.fovDeg * Math.PI) / 360)).toBeCloseTo(SIZE.height * setup.metresPerPixel, 6);
+  });
 });

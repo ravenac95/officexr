@@ -69,7 +69,7 @@ export function mugshotWorld(
 
 /**
  * The fixed camera `distanceM` from the origin toward `azimuthDeg` (0 looks from -Z, 180 from +Z),
- * `height` up, pitched `MUGSHOT_PITCH_DEG`: CameraRig's fixed leash around `lookAt: [0, 0, 0]`.
+ * `height` up, pitched `MUGSHOT_PITCH_DEG`: the fixed camera mode's leash around `lookAt: [0, 0, 0]`.
  */
 export function mugshotCamera({ azimuthDeg, distanceM, height }: { azimuthDeg: number; distanceM: number; height: number }): CameraPose {
   const az = (azimuthDeg * Math.PI) / 180;
