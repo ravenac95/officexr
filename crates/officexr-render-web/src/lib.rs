@@ -37,6 +37,7 @@ mod capture;
 mod controls;
 mod overlays;
 mod picking;
+mod proximity;
 
 static HUB: OnceLock<ViewHub> = OnceLock::new();
 

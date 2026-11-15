@@ -95,6 +95,7 @@ function roomView(wasm: RendererModule, view: ViewId): RoomView {
     setPlayers: (players) => wasm.setPlayers(view, players),
     setFollowTarget: (pos, yaw) => wasm.setFollowTarget(view, pos, yaw),
     setConversationFocus: (point) => wasm.setConversationFocus(view, point),
+    setProximity: (proximity) => wasm.setProximity(view, proximity),
   };
 }
 
