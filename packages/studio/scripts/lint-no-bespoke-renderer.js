@@ -113,7 +113,7 @@ if (leaked.trim()) {
   console.error(
     '\nFix: import from `@officexr/world/renderer` — <ObjectInstances>,',
   );
-  console.error('<LightingRig>, <EditorCamera>, etc. See `CLAUDE.md`.');
+  console.error('<LightingRig>, etc., or `<BevyPreview>` from `@officexr/world/react`. See `CLAUDE.md`.');
   process.exit(1);
 }
 console.log(

@@ -278,6 +278,8 @@ export interface RendererModule {
   frameBounds(id: ViewId, aabb: { min: [number, number, number]; max: [number, number, number] }): void;
   /** Drive from `useWorldFocus` and `isTypingTarget`: off, keys and the mouse are ignored. */
   setInputEnabled(id: ViewId, enabled: boolean): void;
+  /** Off, keys are ignored but drags and the wheel still move the camera, as while typing in a field beside a preview. */
+  setKeysEnabled(id: ViewId, enabled: boolean): void;
 }
 
 export type Gpu = { requestAdapter(): Promise<unknown> };

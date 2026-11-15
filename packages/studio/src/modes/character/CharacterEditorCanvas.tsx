@@ -42,7 +42,7 @@ export function CharacterEditorCanvas(props: CharacterEditorCanvasProps) {
 
   const onFrame = ({ wasm, view }: PreviewView, dtSec: number) => {
     // The controls hear the whole page's keys; typing in the panel mustn't walk the character.
-    wasm.setInputEnabled(view, !(props.inControl && isTypingTarget(document.activeElement)));
+    wasm.setKeysEnabled(view, !isTypingTarget(document.activeElement));
     if (props.inControl) {
       const intent = wasm.takeIntent(view);
       const [dx, dz] = intent.dir;

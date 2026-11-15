@@ -43,7 +43,13 @@ export function ObjectPreviewCanvas({ kind }: ObjectPreviewCanvasProps) {
         return preview.current.wasm.captureView(preview.current.view);
       },
     };
-    (window as { __officexrThumbnail?: ThumbnailSentinel }).__officexrThumbnail = sentinel;
+    const w = window as { __officexrThumbnail?: ThumbnailSentinel };
+    w.__officexrThumbnail = sentinel;
+    return () => {
+      if (w.__officexrThumbnail === sentinel) {
+        delete w.__officexrThumbnail;
+      }
+    };
   }, [thumbnailMode, kind]);
 
   return (
@@ -57,8 +63,8 @@ export function ObjectPreviewCanvas({ kind }: ObjectPreviewCanvasProps) {
       onFrameStats={thumbnailMode ? undefined : publishFrameStats}
       style={
         thumbnailMode
-          ? { display: 'block', width: THUMBNAIL_PX, height: THUMBNAIL_PX }
-          : { display: 'block', width: '100%', height: '100%' }
+          ? { width: THUMBNAIL_PX, height: THUMBNAIL_PX }
+          : { width: '100%', height: '100%' }
       }
     />
   );

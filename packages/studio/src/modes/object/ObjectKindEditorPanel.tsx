@@ -8,6 +8,7 @@ import {
 } from '@officexr/world';
 
 import { Button } from '../../components/ui/button.tsx';
+import { bakedSize, type KindSize } from './bakedSize.ts';
 import {
   ColorInput,
   NullableField,
@@ -264,29 +265,36 @@ interface KindDimensionsEditorProps {
   applyPatch: (partial: Partial<WorldObjectKind>) => void;
 }
 
-type Dimensions = NonNullable<WorldObjectKind['dimensions']>;
-
-function boundsSize({ min, max }: NonNullable<WorldObjectKind['localAABB']>): Dimensions {
-  return { width: max.x - min.x, height: max.y - min.y, depth: max.z - min.z };
-}
-
 /**
  * Width / height / depth editor backed by the kind's `dimensions` in the catalog. Unset, it shows the
- * size of the bounds `pnpm --filter @officexr/world bake:dimensions` measured (`localAABB`) without
- * writing them; "Reset to baked bounds" commits that size.
+ * size of the bounds `pnpm --filter @officexr/world bake:dimensions` measured without writing it;
+ * "Reset to baked bounds" commits that size. A kind with neither has nothing to edit from.
  */
 function KindDimensionsEditor({ kind, applyPatch }: KindDimensionsEditorProps) {
-  const baked = kind.localAABB ? boundsSize(kind.localAABB) : undefined;
-  const effective = kind.dimensions ?? baked ?? { width: 0, height: 0, depth: 0 };
+  const baked = bakedSize(kind);
+  const effective = kind.dimensions ?? baked;
+  const axes = ['width', 'height', 'depth'] as const;
+  if (!effective) {
+    return (
+      <div>
+        {axes.map((axis) => (
+          <Readonly key={axis} label={axis} value="—" />
+        ))}
+        <p className="px-3 py-1 text-xs text-muted-foreground">
+          Not baked: run <code>pnpm --filter @officexr/world bake:dimensions</code>.
+        </p>
+      </div>
+    );
+  }
 
-  const update = (axis: keyof Dimensions, value: number) => {
+  const update = (axis: keyof KindSize, value: number) => {
     if (value <= 0) return;
     applyPatch({ dimensions: { ...effective, [axis]: value } });
   };
 
   return (
     <div>
-      {(['width', 'height', 'depth'] as const).map((axis) => (
+      {axes.map((axis) => (
         <NumberInput
           key={axis}
           label={axis}
@@ -299,14 +307,14 @@ function KindDimensionsEditor({ kind, applyPatch }: KindDimensionsEditorProps) {
       ))}
       <div className="flex items-center justify-between gap-2 px-3 py-1">
         <span className="text-xs text-muted-foreground">
-          {kind.dimensions ? 'set' : baked ? 'unset (showing the baked bounds)' : 'not baked yet'}
+          {kind.dimensions ? 'set' : 'unset (showing the baked bounds)'}
         </span>
         <Button
           variant="secondary"
           size="sm"
           disabled={!baked}
           onClick={() => baked && applyPatch({ dimensions: baked })}
-          title="Overwrite width/height/depth with the size of the baked bounds."
+          title="Overwrite width/height/depth with the size of the baked bounds, at the current scale."
         >
           Reset to baked bounds
         </Button>

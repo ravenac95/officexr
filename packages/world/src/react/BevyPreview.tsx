@@ -150,6 +150,7 @@ export function BevyPreview(props: BevyPreviewProps) {
   const { subject, transparent = false, orbit = true } = props;
   const canvas = useRef<HTMLCanvasElement>(null);
   const [preview, setPreview] = useState<PreviewView | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const announce = useEffectEvent((p: PreviewView | null) => props.onView?.(p));
 
   useEffect(() => {
@@ -163,6 +164,10 @@ export function BevyPreview(props: BevyPreviewProps) {
       wasm.setCameraMode(mounted.view, 'orbit');
       setPreview(mounted);
       announce(mounted);
+    }, (e: unknown) => {
+      if (!cancelled) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     });
     return () => {
       cancelled = true;
@@ -207,10 +212,17 @@ export function BevyPreview(props: BevyPreviewProps) {
   }, [preview, subjectType, kind, transparent]);
 
   const hovered = useRef(false);
+  /** What `setPlayers` last sent, so a still character isn't sent again every frame. */
+  const sentPlayers = useRef('');
   const feed = useEffectEvent((p: PreviewView, dtSec: number) => {
     props.onFrame?.(p, dtSec);
     if (subject.type === 'character') {
-      p.wasm.setPlayers(p.view, previewPlayers(subject));
+      const players = previewPlayers(subject);
+      const sent = JSON.stringify(players);
+      if (sent !== sentPlayers.current) {
+        sentPlayers.current = sent;
+        p.wasm.setPlayers(p.view, players);
+      }
     } else if (subject.type === 'kind') {
       if (subject.kind && subject.spin && !hovered.current) {
         yaw.current += dtSec * SPIN_RAD_PER_SEC;
@@ -250,15 +262,22 @@ export function BevyPreview(props: BevyPreviewProps) {
   }, [preview]);
 
   return (
-    <canvas
-      ref={canvas}
-      style={props.style ?? { display: 'block', width: '100%', height: '100%' }}
-      onPointerEnter={() => {
-        hovered.current = true;
-      }}
-      onPointerLeave={() => {
-        hovered.current = false;
-      }}
-    />
+    <div style={{ position: 'relative', ...(props.style ?? { width: '100%', height: '100%' }) }}>
+      <canvas
+        ref={canvas}
+        style={{ display: 'block', width: '100%', height: '100%' }}
+        onPointerEnter={() => {
+          hovered.current = true;
+        }}
+        onPointerLeave={() => {
+          hovered.current = false;
+        }}
+      />
+      {error && (
+        <p role="alert" style={{ position: 'absolute', inset: 0, margin: 0, padding: 8, color: '#fca5a5', font: '12px sans-serif' }}>
+          The 3D preview couldn't start: {error}
+        </p>
+      )}
+    </div>
   );
 }

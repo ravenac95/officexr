@@ -184,7 +184,12 @@ test('Character editor draws its character in a Bevy preview', async ({ page }) 
   await forceWebgl2(page);
   await goToMode(page, 'character');
   await expect(page.locator(PREVIEW)).toBeVisible({ timeout: 60_000 });
-  await expect
-    .poll(async () => new Set((await canvasPixels(page, [PREVIEW]))[0]).size, { timeout: 200_000, intervals: [2_000] })
-    .toBeGreaterThan(16);
+  // The backdrop (#0a0a0a) and the grid's lines are all darker than 60 in every channel; the
+  // character is not. The top fifth, under the HUD's text, is left out.
+  const bright = async () => {
+    const pixels = (await canvasPixels(page, [PREVIEW], 0.2))[0];
+    const lit = pixels.filter((p) => Math.max(p >>> 24, (p >>> 16) & 0xff, (p >>> 8) & 0xff) > 60);
+    return lit.length / pixels.length;
+  };
+  await expect.poll(bright, { timeout: 200_000, intervals: [2_000] }).toBeGreaterThan(0.02);
 });

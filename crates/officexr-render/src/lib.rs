@@ -46,7 +46,7 @@ pub use lighting::{HemisphereFill, ObjectMaterial, snap_to_shadow_texel};
 #[cfg(feature = "mugshot")]
 pub use mugshot::{mugshot_player, scene_sim, sim_input};
 pub use objects::{ObjectIndex, ObjectKinds, apply_overrides};
-pub use offscreen::{OffscreenTarget, offscreen_app};
+pub use offscreen::{OffscreenTarget, offscreen_app, straight_rgba};
 pub use scene::*;
 pub use sky::{SkyMaterial, sun_sky_params};
 use views::{View, ViewCamera, ViewScene};

@@ -5,8 +5,8 @@ use std::collections::HashMap;
 
 use bevy::camera::RenderTarget;
 use bevy::prelude::*;
-use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
+use officexr_render::straight_rgba;
 use officexr_render::views::{View, ViewId};
 use wasm_bindgen::Clamped;
 use wasm_bindgen::prelude::*;
@@ -44,6 +44,8 @@ extern "C" {
 
 struct Pending {
     view: ViewId,
+    /// Its screenshot is on its way.
+    taken: bool,
     resolve: Settle,
     reject: Settle,
 }
@@ -70,6 +72,7 @@ pub fn capture_view(id: ViewId) -> Result<JsPromise, JsError> {
     Ok(JsPromise::new(&mut |resolve, reject| {
         let pending = Pending {
             view: id,
+            taken: false,
             resolve: resolve.unchecked_into(),
             reject: reject.unchecked_into(),
         };
@@ -87,22 +90,43 @@ fn settle(request: u32, outcome: Result<JsValue, JsValue>) {
     };
 }
 
-/// Spawns a screenshot of each requested view's target, once.
-fn take_screenshots(mut commands: Commands, views: Query<&View>, mut taken: Local<Vec<u32>>) {
+/// Rejects the view's captures still pending: it is going, and its
+/// screenshots with it.
+pub(super) fn forget(id: ViewId) {
+    let gone: Vec<u32> = REQUESTS.with(|r| {
+        r.borrow()
+            .iter()
+            .filter(|(_, p)| p.view == id)
+            .map(|(n, _)| *n)
+            .collect()
+    });
+    for request in gone {
+        settle(
+            request,
+            Err(js_err(format!("view {id} was destroyed")).into()),
+        );
+    }
+}
+
+/// Spawns a screenshot of each requested view's target, once its view is drawn.
+fn take_screenshots(mut commands: Commands, views: Query<&View>) {
     let requests: Vec<(u32, ViewId)> = REQUESTS.with(|r| {
         r.borrow()
             .iter()
-            .filter(|(n, _)| !taken.contains(n))
+            .filter(|(_, p)| !p.taken)
             .map(|(n, p)| (*n, p.view))
             .collect()
     });
-    taken.retain(|n| REQUESTS.with(|r| r.borrow().contains_key(n)));
     for (request, id) in requests {
-        taken.push(request);
+        // A view made this frame has no entity yet.
         let Some(view) = views.iter().find(|v| v.id == id) else {
-            settle(request, Err(js_err(format!("no view {id}")).into()));
             continue;
         };
+        REQUESTS.with(|r| {
+            if let Some(p) = r.borrow_mut().get_mut(&request) {
+                p.taken = true;
+            }
+        });
         let screenshot = match view.target() {
             RenderTarget::Image(image) => Screenshot::image(image.handle.clone()),
             target => Screenshot(target.clone()),
@@ -117,23 +141,8 @@ fn take_screenshots(mut commands: Commands, views: Query<&View>, mut taken: Loca
 
 /// A `Promise<Blob>` of the image as a PNG.
 fn png_blob(image: &Image) -> Result<JsValue, JsValue> {
+    let rgba = straight_rgba(image).map_err(|e| JsValue::from(js_err(e)))?;
     let (width, height) = (image.width(), image.height());
-    let mut rgba = image
-        .data
-        .clone()
-        .ok_or_else(|| JsValue::from(js_err("the screenshot has no pixels")))?;
-    match image.texture_descriptor.format {
-        TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb => {}
-        // Swap chains are often BGRA.
-        TextureFormat::Bgra8Unorm | TextureFormat::Bgra8UnormSrgb => {
-            for px in rgba.as_chunks_mut::<4>().0 {
-                px.swap(0, 2);
-            }
-        }
-        format => {
-            return Err(js_err(format!("can't capture a {format:?} target")).into());
-        }
-    }
     let data = ImageData::new(Clamped(&rgba), width, height)?;
     let canvas = OffscreenCanvas::new(width, height);
     canvas.get_context("2d").put_image_data(&data, 0.0, 0.0);

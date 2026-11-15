@@ -70,6 +70,9 @@ pub struct Controls {
     pub config: CameraConfig,
     /// Off, keys and the mouse are ignored and the intent is still.
     pub input_enabled: bool,
+    /// Off, keys are ignored but the mouse still drives the camera, as while
+    /// typing in a field beside a preview.
+    pub keys_enabled: bool,
     /// The point the camera blends toward while the player is in a conversation.
     pub focus: Option<Vec3>,
     follow: Option<Vec3>,
@@ -88,6 +91,7 @@ impl Default for Controls {
             mode: CameraMode::default(),
             config: CameraConfig::default(),
             input_enabled: true,
+            keys_enabled: true,
             focus: None,
             follow: None,
             look: Look::default(),
@@ -189,6 +193,29 @@ pub enum ViewPointer {
     Wheel(f32, MouseScrollUnit),
     /// The host lost the pointer mid-press: every button lets go.
     Lost,
+}
+
+impl ViewPointer {
+    /// The presses and releases that take the DOM's `MouseEvent.buttons` from
+    /// `before` to `now`. Read on every pointer event, it catches a button
+    /// pressed or let go while another is held, which the DOM reports only as
+    /// a `pointermove`.
+    pub fn button_changes(before: u16, now: u16) -> impl Iterator<Item = ViewPointer> {
+        const BITS: [(u16, MouseButton); 3] = [
+            (1, MouseButton::Left),
+            (2, MouseButton::Right),
+            (4, MouseButton::Middle),
+        ];
+        BITS.into_iter()
+            .filter(move |(bit, _)| (before ^ now) & bit != 0)
+            .map(move |(bit, button)| {
+                if now & bit != 0 {
+                    ViewPointer::Press(button)
+                } else {
+                    ViewPointer::Release(button)
+                }
+            })
+    }
 }
 
 /// Reads input and moves the views' cameras, before [`SceneSystems`] draws them.
@@ -478,12 +505,17 @@ fn steer(
             continue;
         };
         let window = inputs.of(view, primary).unwrap_or(&empty);
+        let keys_on = controls.input_enabled && controls.keys_enabled;
         if controls.input_enabled {
             let held = Modifiers {
-                shift: keys.any(&SHIFT),
-                ctrl: keys.any(&CTRL),
+                shift: keys_on && keys.any(&SHIFT),
+                ctrl: keys_on && keys.any(&CTRL),
             };
             mouse(controls, window, held);
+        } else {
+            controls.drag = None;
+        }
+        if keys_on {
             match controls.mode {
                 CameraMode::FreeFly => controls.rig.free_fly.fly(fly_keys(&keys), dt),
                 CameraMode::Orbit if controls.config.orbit.move_keys => {
@@ -491,8 +523,6 @@ fn steer(
                 }
                 _ => {}
             }
-        } else {
-            controls.drag = None;
         }
         controls.yaw = match controls.mode {
             CameraMode::Fixed => fixed_movement_yaw(
@@ -506,7 +536,7 @@ fn steer(
         // The orbit's move keys are WASD too: moving the player as well would move both.
         let keys_move_player =
             !(controls.mode == CameraMode::Orbit && controls.config.orbit.move_keys);
-        controls.intent = if controls.input_enabled && keys_move_player {
+        controls.intent = if keys_on && keys_move_player {
             let untaken_jump = controls.intent.jump;
             let mut intent = intent(&keys, controls.yaw);
             intent.jump |= untaken_jump;
@@ -1004,6 +1034,50 @@ mod tests {
         feed(&mut app, ViewPointer::Wheel(1.0, MouseScrollUnit::Line));
         app.update();
         assert!(orbit(&app, id).distance < expected.distance);
+    }
+
+    #[test]
+    fn dom_button_masks_turn_into_presses_and_releases_even_when_chorded() {
+        use MouseButton::{Left, Right};
+        let changes = |before, now| ViewPointer::button_changes(before, now).collect::<Vec<_>>();
+        // Left-drag, then right down, left up, right up: the middle two arrive as moves.
+        assert_eq!(changes(0, 1), [ViewPointer::Press(Left)]);
+        assert_eq!(changes(1, 3), [ViewPointer::Press(Right)]);
+        assert_eq!(changes(3, 2), [ViewPointer::Release(Left)]);
+        assert_eq!(changes(2, 0), [ViewPointer::Release(Right)]);
+        assert_eq!(changes(3, 3), []);
+        assert_eq!(
+            changes(0, 5),
+            [
+                ViewPointer::Press(Left),
+                ViewPointer::Press(MouseButton::Middle)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_view_with_keys_off_still_orbits_on_the_mouse() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| {
+            c.mode = CameraMode::Orbit;
+            c.keys_enabled = false;
+        });
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyW);
+        press(&mut app, MouseButton::Right, ButtonState::Pressed);
+        app.world_mut().write_message(MouseMotion {
+            delta: Vec2::new(40.0, 0.0),
+        });
+        app.update();
+        assert_ne!(
+            controls(&app, id, |c| c.rig.orbit_goal),
+            look::Orbit::default()
+        );
+        assert_eq!(
+            controls(&app, id, Controls::take_intent),
+            MoveIntent::default()
+        );
     }
 
     #[test]

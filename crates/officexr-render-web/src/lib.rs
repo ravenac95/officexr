@@ -258,6 +258,7 @@ pub fn destroy_view(id: ViewId) -> Result<(), JsError> {
         controls::view_pointer::forget(id);
     }
     picking::forget(id);
+    capture::forget(id);
     // So the id finds no canvas: `onPick` and the ray queries on it then fail.
     if let Ok(canvas) =
         query_selector(&format!("canvas[data-officexr-view=\"{id}\"]")).dyn_into::<Canvas>()

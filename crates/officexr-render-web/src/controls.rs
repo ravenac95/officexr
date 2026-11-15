@@ -154,3 +154,10 @@ pub fn frame_bounds(id: ViewId, aabb: JsValue) -> Result<(), JsError> {
 pub fn set_input_enabled(id: ViewId, enabled: bool) -> Result<(), JsError> {
     with(id, |c| c.input_enabled = enabled)
 }
+
+/// Off while a text field beside the view has focus: keys are ignored, but
+/// drags and the wheel still move the camera.
+#[wasm_bindgen(js_name = setKeysEnabled)]
+pub fn set_keys_enabled(id: ViewId, enabled: bool) -> Result<(), JsError> {
+    with(id, |c| c.keys_enabled = enabled)
+}

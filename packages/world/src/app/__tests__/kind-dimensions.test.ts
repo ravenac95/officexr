@@ -62,6 +62,7 @@ describe('mergeKindMeasurement', () => {
     localAABB: { min: { x: 0, y: 0, z: 0 }, max: { x: size, y: size, z: size } },
   });
   const kind = (extra: Record<string, unknown> = {}) => ({
+    scale: 1.5,
     dimensions: { width: 2, height: 2, depth: 2 },
     localAABB: box(2).localAABB,
     ...extra,
@@ -72,6 +73,7 @@ describe('mergeKindMeasurement', () => {
     expect(mergeKindMeasurement(k, box(2.02))).toEqual({ pinnedDrift: false });
     expect(k.dimensions).toEqual({ width: 2.02, height: 2.02, depth: 2.02 });
     expect(k.localAABB).toEqual(box(2.02).localAABB);
+    expect(k).toMatchObject({ bakedScale: 1.5 });
   });
 
   it('leaves a pinned kind alone and reports drift', () => {
