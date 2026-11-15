@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  dragRoomTo,
   snapRoomToNeighbors,
   type RoomAABBVoxel,
 } from '../roomBoundarySnap.ts';
@@ -106,5 +107,26 @@ describe('snapRoomToNeighbors', () => {
     const moving = room('m', [5, 0, 0], [8, 4, 4]);
     const self = room('m', [0, 0, 0], [3, 4, 4]);
     expect(snapRoomToNeighbors(moving, [self], 2)).toEqual({ dx: 0, dz: 0 });
+  });
+});
+
+describe('dragRoomTo', () => {
+  const VOXEL = 0.5;
+  // A 4×4 room at voxel (0, 0, 0), dragged by a point 1 m into it.
+  const self: RoomAABBVoxel = { id: 'a', min: [0, 0, 0], max: [3, 0, 3] };
+  const offset = { x: 1, z: 1 };
+
+  it('follows the pointer on the voxel grid', () => {
+    expect(dragRoomTo({ x: 6.2, z: 1 }, offset, [0, 0, 0], self, [], VOXEL, 2)).toEqual([10, 0, 0]);
+  });
+
+  it('snaps flush against a neighbour within the threshold', () => {
+    // A neighbour from x 12; flush puts this room's min x at 8, one voxel short of where the pointer took it.
+    const neighbor: RoomAABBVoxel = { id: 'b', min: [12, 0, 0], max: [15, 0, 3] };
+    expect(dragRoomTo({ x: 5.5, z: 1 }, offset, [0, 0, 0], self, [neighbor], VOXEL, 2)).toEqual([8, 0, 0]);
+  });
+
+  it('is null while the room stays on its voxel', () => {
+    expect(dragRoomTo({ x: 1.1, z: 0.9 }, offset, [0, 0, 0], self, [], VOXEL, 2)).toBeNull();
   });
 });

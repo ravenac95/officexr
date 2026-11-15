@@ -1,6 +1,6 @@
 import type { WorldObjects } from '@officexr/sdk';
 import { loadMap, modelUrl, type ApplicationApi, type MapLoaderDeps } from '@officexr/world/app';
-import { studioBakedLayoutUrl } from '../useBakedLayoutBlobs.ts';
+import { studioBakedLayoutUrl } from '../bakedLayoutUrl.ts';
 import { roomPlacements, type RoomPlacements } from '../map/roomPlacements.ts';
 import { unionBounds, type Bounds } from './renderFraming.ts';
 import type { RenderParams } from './renderParams.ts';

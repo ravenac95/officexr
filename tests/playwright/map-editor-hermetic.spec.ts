@@ -11,16 +11,6 @@
  * real renderer, no backend.
  */
 
-test.setTimeout(240_000);
-
-/** The map editor on the seeded `default` map, once Bevy has loaded it. */
-async function openMap(page: Page): Promise<Locator> {
-  await forceWebgl2(page);
-  await goToModeHermetic(page, 'map', SEED);
-  await waitForBevyReady(page);
-  return page.locator('main canvas');
-}
-
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
 import { distinctColorsInCanvas, forceWebgl2, goToModeHermetic, waitForBevyReady } from './helpers.ts';
@@ -108,6 +98,16 @@ const SEED = {
     },
   ],
 };
+
+test.setTimeout(240_000);
+
+/** The map editor on the seeded `default` map, once Bevy has loaded it. */
+async function openMap(page: Page): Promise<Locator> {
+  await forceWebgl2(page);
+  await goToModeHermetic(page, 'map', SEED);
+  await waitForBevyReady(page);
+  return page.locator('main canvas');
+}
 
 /** Pixel count and centroid of the voice-zone overlay (translucent magenta) on the canvas. */
 async function voiceZoneOverlay(page: Page, canvas: Locator) {

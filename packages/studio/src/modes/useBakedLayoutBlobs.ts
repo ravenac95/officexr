@@ -1,11 +1,5 @@
 import { useEffect, useState } from 'react';
-import { bakedLayoutUrl } from '@officexr/world/app';
-import { bakedLayoutGlbUrl } from '@officexr/world/react';
-import { paths, studioApiUrl, studioFetch } from '../apiOrigin.ts';
-
-/** A baked layout's GLB on the studio API, which wants `studioFetch`'s credentials. */
-export const studioBakedLayoutUrl = (layoutName: string) =>
-  bakedLayoutGlbUrl(bakedLayoutUrl(layoutName, studioApiUrl(paths.bakedLayouts)));
+import { studioFetch } from '../apiOrigin.ts';
 
 /**
  * Each baked layout GLB at `urls` as a `blob:` URL Bevy can load, by URL, once it has arrived: the
@@ -14,7 +8,7 @@ export const studioBakedLayoutUrl = (layoutName: string) =>
  */
 export function useBakedLayoutBlobs(urls: readonly string[]): ReadonlyMap<string, string> {
   const [blobs, setBlobs] = useState<ReadonlyMap<string, string>>(new Map());
-  // ponytail: any change to the set refetches every GLB (the browser cache serves the repeats).
+  // ponytail: any change to the set refetches every GLB, and the layouts blink out until it lands.
   const key = [...new Set(urls)].sort().join('\n');
   useEffect(() => {
     if (!key) return;

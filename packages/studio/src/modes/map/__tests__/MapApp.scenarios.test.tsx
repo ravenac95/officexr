@@ -57,9 +57,11 @@ describe('Map editor scenarios', () => {
   });
 
   it('Spawn tool: bare ground places nothing and keeps the selection', async () => {
-    const { map, press } = await mapEditor();
+    const { map, room, press } = await mapEditor();
+    act(() => map().setSelection({ kind: 'room', id: room }));
     press({ type: 'ground' }, [1, 0, 1], 'spawn');
     expect(map().doc.spawnPoints).toEqual([]);
+    expect(map().selection).toEqual({ kind: 'room', id: room });
   });
 
   it('Select tool: a press on a room selects it, and bare ground clears the selection', async () => {

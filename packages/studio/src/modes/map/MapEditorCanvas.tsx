@@ -16,7 +16,8 @@ import {
 } from '@officexr/world/react';
 import type { DeskArea, LayoutDocument, RoomDocument, SerializedMap } from '@officexr/world/scenes';
 import { publishFrameStats } from '../../perf/frame-stats.ts';
-import { studioBakedLayoutUrl, useBakedLayoutBlobs } from '../useBakedLayoutBlobs.ts';
+import { studioBakedLayoutUrl } from '../bakedLayoutUrl.ts';
+import { useBakedLayoutBlobs } from '../useBakedLayoutBlobs.ts';
 import { reduceDeskAreaDrag, type DeskAreaDrag } from './deskAreaDrag.ts';
 import { deskAreasOf } from './deskAreaGeometry.ts';
 import type { DeskAreaViolation } from './deskAreaViolations.ts';
@@ -125,26 +126,26 @@ export function MapEditorCanvas(props: MapEditorCanvasProps) {
     sentWorld.current = sent;
   }, [bevy, placed, kinds, bakedLayouts]);
 
-  // The rooms with their linked layouts' objects, which bound the baked GLBs.
+  // The rooms with their linked layouts' objects, which bound the baked GLBs; compiled once for the
+  // helpers below, which each take a room service.
   const compiled = useMemo(
-    () => (doc ? roomService.compileMap(doc, rooms, layouts).instances : []),
+    () => (doc ? roomService.compileMap(doc, rooms, layouts) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [doc?.rooms, rooms, layouts, roomService],
   );
-  const roomAabbs = useMemo(
-    () => (doc ? computeRoomAabbs(doc, rooms, layouts, roomService, geometry) : []),
+  const { roomAabbs, voiceZones } = useMemo(() => {
+    if (!doc || !compiled) return { roomAabbs: [], voiceZones: [] };
+    const precompiled = { compileMap: () => compiled };
+    return {
+      roomAabbs: computeRoomAabbs(doc, rooms, layouts, precompiled, geometry),
+      voiceZones: computeRoomVoiceZones(doc, rooms, layouts, precompiled, geometry),
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [doc?.rooms, rooms, layouts, roomService, geometry],
-  );
-  const voiceZones = useMemo(
-    () => (doc ? computeRoomVoiceZones(doc, rooms, layouts, roomService, geometry) : []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [doc?.rooms, rooms, layouts, roomService, geometry],
-  );
+  }, [compiled, geometry]);
   const selectedRoomId = props.selection?.kind === 'room' ? props.selection.id : null;
   const selectedRoom = useMemo((): WorldAabb | null => {
     const prefix = `${selectedRoomId}/`;
-    const boxes = compiled.filter((i) => i.id.startsWith(prefix)).map((i) => geometry.worldAABBOfInstance(i));
+    const boxes = (compiled?.instances ?? []).filter((i) => i.id.startsWith(prefix)).map((i) => geometry.worldAABBOfInstance(i));
     if (boxes.length === 0) return null;
     const min = [0, 1, 2].map((a) => Math.min(...boxes.map((b) => b.min[a]))) as Vec3;
     const max = [0, 1, 2].map((a) => Math.max(...boxes.map((b) => b.max[a]))) as Vec3;
@@ -196,6 +197,8 @@ export function MapEditorCanvas(props: MapEditorCanvasProps) {
       return;
     }
     if (e.kind !== 'down') return;
+    // A press that left the canvas ends without an `up` or `dragEnd`, so each press starts afresh.
+    roomDrag.current = null;
     const action = resolveMapPick(e.target, e.point, tool);
     switch (action?.type) {
       case 'select':
