@@ -26,13 +26,22 @@ export function rendererOverride(search, storage) {
   }
 }
 
-/** `override` when given, else WebGPU when the browser hands out an adapter, else WebGL2. */
+/**
+ * `override` when given, else WebGPU when the browser hands out an adapter that opens a device,
+ * else WebGL2. The probe device is destroyed at once; Bevy makes its own.
+ */
 export async function pickBackend(gpu, override) {
   if (override) {
     return override;
   }
   try {
-    return (await gpu?.requestAdapter()) ? 'webgpu' : 'webgl2';
+    const adapter = await gpu?.requestAdapter();
+    if (!adapter) {
+      return 'webgl2';
+    }
+    const device = await adapter.requestDevice();
+    device.destroy?.();
+    return 'webgpu';
   } catch {
     return 'webgl2';
   }
@@ -44,7 +53,7 @@ export async function pickBackend(gpu, override) {
  */
 export async function loadRendererFrom({ gpu, override, baseUrl, hash, importModule, bundled }) {
   const backend = await pickBackend(gpu, override);
-  // ponytail: a device-level WebGPU failure after an adapter is returned does not fall back to WebGL2.
+  // ponytail: WebGPU failing only once Bevy runs (its own device's limits, a lost device) does not fall back to WebGL2.
   globalThis.__officexrRenderBackend = backend;
   if (!baseUrl) {
     const renderer = await bundled[backend]();

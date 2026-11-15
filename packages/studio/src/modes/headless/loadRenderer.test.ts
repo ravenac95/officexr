@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { loadRendererFrom, pickBackend, rendererOverride } from '@officexr/render-wasm/load';
 
-const adapter = { requestAdapter: async () => ({}) };
+const destroyed: unknown[] = [];
+const device = { destroy: () => void destroyed.push(device) };
+const adapter = { requestAdapter: async () => ({ requestDevice: async () => device }) };
 const bundled = {
   webgpu: async () => ({ default: async (_arg?: unknown) => {}, backend: 'webgpu' }),
   webgl2: async () => ({ default: async (_arg?: unknown) => {}, backend: 'webgl2' }),
@@ -14,6 +16,14 @@ describe('pickBackend', () => {
     expect(await pickBackend(noAdapter)).toBe('webgl2');
     expect(await pickBackend(undefined)).toBe('webgl2');
     expect(await pickBackend({ requestAdapter: async () => Promise.reject(new Error('lost')) })).toBe('webgl2');
+  });
+
+  it('falls back to WebGL2 when the adapter cannot open a device, and frees the probe device', async () => {
+    const noDevice = { requestAdapter: async () => ({ requestDevice: () => Promise.reject(new Error('OperationError')) }) };
+    expect(await pickBackend(noDevice)).toBe('webgl2');
+    destroyed.length = 0;
+    expect(await pickBackend(adapter)).toBe('webgpu');
+    expect(destroyed).toEqual([device]);
   });
 
   it('takes an override over what the adapter says, without asking for one', async () => {

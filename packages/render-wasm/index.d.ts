@@ -332,11 +332,13 @@ export interface RendererModule {
 
 export type JoystickKind = 'bevy' | 'dom';
 
-export type Gpu = { requestAdapter(): Promise<unknown> };
+export type Gpu = {
+  requestAdapter(): Promise<{ requestDevice(): Promise<{ destroy?(): void }> } | null>;
+};
 
 export type RenderBackend = 'webgpu' | 'webgl2';
 
-/** `override` when given, else WebGPU when an adapter comes back, else WebGL2. */
+/** `override` when given, else WebGPU when an adapter comes back and opens a device, else WebGL2. */
 export function pickBackend(gpu?: Gpu | null, override?: RenderBackend): Promise<RenderBackend>;
 
 /**
