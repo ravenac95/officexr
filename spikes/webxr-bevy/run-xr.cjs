@@ -1,0 +1,26 @@
+const { chromium } = require('playwright');
+(async () => {
+  const S = process.argv[2];
+  const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  const page = await browser.newPage({ viewport: { width: 1600, height: 800 } });
+  const logs = [];
+  page.on('console', (m) => logs.push(m.type() + ': ' + m.text()));
+  page.on('pageerror', (e) => logs.push('pageerror: ' + e));
+  await page.goto('http://localhost:8765/index.html?emulate' + (process.argv[3] || ''));
+  await page.waitForFunction(() => window.__xr?.ready || window.__xr?.errors.length, null, { timeout: 120000 });
+  await page.waitForTimeout(8000);
+  await page.screenshot({ path: S + '/flat.png' });
+  await page.evaluate(() => { window.__xr.oneEye = new URLSearchParams(location.search).has("one"); return window.enterVR(); });
+  await page.waitForTimeout(25000);
+  console.log('inFrame', JSON.stringify(await page.evaluate(() => [window.__xr.inFrame, window.__xr.eyes])));
+  console.log('t', JSON.stringify(await page.evaluate(() => window.__xr.t)));
+  console.log('debug\n' + await page.evaluate(() => window.__xrr.xrDebug()));
+  console.log('probe', JSON.stringify(await page.evaluate(() => window.__xr.probe)));
+  console.log('xr frames', await page.evaluate(() => window.__xr.frames), 'errors', await page.evaluate(() => window.__xr.errors));
+  await page.screenshot({ path: S + '/xr.png' });
+  await page.evaluate(() => window.__xr.session.end());
+  await page.waitForTimeout(3000);
+  await page.screenshot({ path: S + '/after.png' });
+  console.log(logs.filter(l => !/^debug/.test(l)).slice(-40).join('\n'));
+  await browser.close();
+})();

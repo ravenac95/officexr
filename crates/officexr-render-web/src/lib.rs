@@ -34,6 +34,7 @@ use wasm_bindgen::prelude::*;
 mod controls;
 mod overlays;
 mod picking;
+mod xr;
 
 static HUB: OnceLock<ViewHub> = OnceLock::new();
 
@@ -184,6 +185,7 @@ pub fn init(origin: String, primary_canvas: JsValue) -> Result<(), JsError> {
     #[cfg(feature = "webgl2")]
     image_views::add(&mut app);
     controls::add(&mut app);
+    xr::add(&mut app);
     let _ = HUB.set(app.world().resource::<ViewHub>().clone());
     app.run();
     Ok(())
