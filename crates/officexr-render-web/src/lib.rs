@@ -81,6 +81,9 @@ struct PlayersInput {
     char_radius: f32,
     player_speed: f32,
     run_speed: f32,
+    /// Draws the players in their bind pose, as a `setWorld` mugshot does.
+    #[serde(default)]
+    paused: bool,
 }
 
 #[derive(Deserialize)]
@@ -327,6 +330,7 @@ pub fn set_players(id: ViewId, players: JsValue) -> Result<(), JsError> {
         char_radius: input.char_radius,
         player_speed: input.player_speed,
         run_speed: input.run_speed,
+        paused: input.paused,
         ..default()
     };
     send(id, ViewMsg::Players(players))

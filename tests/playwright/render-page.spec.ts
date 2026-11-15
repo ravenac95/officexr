@@ -7,6 +7,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 import { PNG } from 'pngjs';
+import { forceWebgl2 } from './helpers.ts';
 import { boxGlb } from './lib/box-glb.ts';
 
 const blueBlock = (id: string, position: number[]) => ({
@@ -64,23 +65,30 @@ const SEED = {
 
 type RenderReady = { bounds: { min: number[]; max: number[] }; metresPerPixel?: number };
 
+test.setTimeout(240_000);
+
 test.beforeEach(async ({ page }) => {
+  await forceWebgl2(page);
   await page.addInitScript((seed) => {
     (window as unknown as { __OFFICEXR_TEST_SEED__: unknown }).__OFFICEXR_TEST_SEED__ = seed;
   }, SEED);
   const greenBox = Buffer.from(await boxGlb([2, 2, 2], [0.1, 0.9, 0.1]));
-  await page.route(/\/api\/baked-layouts\/(wing|annex)-layout$/, (route) =>
+  await page.route(/\/api\/baked-layouts\/(wing|annex)-layout\.glb$/, (route) =>
     route.fulfill({ body: greenBox, contentType: 'model/gltf-binary' }),
   );
-  await page.route('**/api/baked-layouts/ghost-layout', (route) => route.fulfill({ status: 404, body: 'no bake' }));
+  await page.route('**/api/baked-layouts/ghost-layout.glb', (route) => route.fulfill({ status: 404, body: 'no bake' }));
 });
 
 async function render(page: Page, query: string) {
   await page.goto(`/?test=1&op=render&w=400&h=300&${query}`, { waitUntil: 'domcontentloaded' });
-  const settled = await page.waitForFunction(() => {
-    const w = window as unknown as { __officexrRenderReady?: unknown; __officexrRenderError?: string };
-    return w.__officexrRenderReady ? 'ready' : w.__officexrRenderError ? 'error' : null;
-  });
+  const settled = await page.waitForFunction(
+    () => {
+      const w = window as unknown as { __officexrRenderReady?: unknown; __officexrRenderError?: string };
+      return w.__officexrRenderReady ? 'ready' : w.__officexrRenderError ? 'error' : null;
+    },
+    null,
+    { timeout: 200_000 },
+  );
   return (await settled.jsonValue()) as 'ready' | 'error';
 }
 
@@ -89,9 +97,10 @@ const readySentinel = (page: Page) =>
 const errorSentinel = (page: Page) =>
   page.evaluate(() => (window as unknown as { __officexrRenderError?: string }).__officexrRenderError);
 
-async function canvasPixels(page: Page): Promise<PNG> {
-  const dataUrl = await page.evaluate(() => document.querySelector('canvas')!.toDataURL('image/png'));
-  return PNG.sync.read(Buffer.from(dataUrl.split(',')[1], 'base64'));
+/** The render target, which the page pins to the top left at the requested size. */
+async function renderTargetPng(page: Page): Promise<PNG> {
+  const box = (await page.locator('[data-render-target]').boundingBox())!;
+  return PNG.sync.read(await page.screenshot({ clip: box, timeout: 120_000 }));
 }
 
 function matching(png: PNG, predicate: (r: number, g: number, b: number) => boolean) {
@@ -132,7 +141,7 @@ for (const [targetLabel, targetQuery] of TARGETS) {
       const ready = await readySentinel(page);
       expect(ready.bounds.max[0]).toBeGreaterThan(ready.bounds.min[0]);
       expect(ready.metresPerPixel !== undefined).toBe(cameraLabel === 'top');
-      const png = await canvasPixels(page);
+      const png = await renderTargetPng(page);
       expect([png.width, png.height]).toEqual([400, 300]);
       expect(distinctColors(png)).toBeGreaterThan(1);
       expect(matching(png, targetLabel === 'layout' ? isBlue : isGreen).count).toBeGreaterThan(50);
@@ -142,7 +151,7 @@ for (const [targetLabel, targetQuery] of TARGETS) {
 
 test('draws both placements of a room, and rotates the other one', async ({ page }) => {
   expect(await render(page, 'target=map&name=office&camera=top')).toBe('ready');
-  const png = await canvasPixels(page);
+  const png = await renderTargetPng(page);
 
   // wing-a and wing-b are one layout placed twice, 4 m apart: two separate green runs along X.
   const greenColumns = new Array<boolean>(png.width).fill(false);

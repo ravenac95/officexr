@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boundsCentre, frameCamera, unionBounds, type Bounds, type CameraSetup } from './renderFraming.ts';
+import { boundsCentre, cameraPose, frameCamera, unionBounds, type Bounds, type CameraSetup } from './renderFraming.ts';
 import type { Vec3 } from './renderParams.ts';
 
 const SIZE = { width: 800, height: 600 };
@@ -134,5 +134,47 @@ describe('unionBounds', () => {
     ];
     expect(unionBounds(boxes, (b) => b)).toEqual({ min: [-2, 0, 0], max: [1, 4, 5] });
     expect(unionBounds([], (b: Bounds) => b)).toBeNull();
+  });
+});
+
+describe('cameraPose', () => {
+  it('passes a perspective setup through', () => {
+    const setup = frameCamera({ type: 'iso' }, BOUNDS, SIZE);
+    if (setup.type !== 'perspective') throw new Error('expected perspective');
+    expect(cameraPose(setup, SIZE)).toEqual({
+      position: setup.position,
+      lookAt: setup.target,
+      fovDeg: setup.fov,
+      near: setup.near,
+      far: setup.far,
+    });
+  });
+
+  it('shows the top camera’s ground area, -Z up, from a narrow perspective overhead', () => {
+    const setup = frameCamera({ type: 'top' }, BOUNDS, SIZE);
+    if (setup.type !== 'orthographic') throw new Error('expected orthographic');
+    const pose = cameraPose(setup, SIZE);
+    const [x, y, z] = pose.position;
+    const height = y - setup.target[1];
+    // The ground strip in view is the ortho frame's height in metres.
+    const groundSpan = 2 * height * Math.tan((pose.fovDeg * Math.PI) / 360);
+    expect(groundSpan).toBeCloseTo(SIZE.height * setup.metresPerPixel, 6);
+    expect([x, pose.lookAt[0]]).toEqual([setup.target[0], setup.target[0]]);
+    // Leaning just past vertical from +Z puts -Z at the top of the image.
+    expect(z - setup.target[2]).toBeGreaterThan(0);
+    expect((z - setup.target[2]) / height).toBeLessThan(0.01);
+    // The near plane clears the tallest object, the far plane the ground.
+    expect(pose.near).toBeLessThan(y - BOUNDS.max[1]);
+    expect(pose.far).toBeGreaterThan(height);
+  });
+
+  it('stays within the sun shadow cascade for a large map, widening its view instead', () => {
+    const big: Bounds = { min: [0, 0, 0], max: [400, 3, 300] };
+    const setup = frameCamera({ type: 'top' }, big, SIZE);
+    if (setup.type !== 'orthographic') throw new Error('expected orthographic');
+    const pose = cameraPose(setup, SIZE);
+    const height = pose.position[1] - setup.target[1];
+    expect(height).toBeLessThanOrEqual(1000);
+    expect(2 * height * Math.tan((pose.fovDeg * Math.PI) / 360)).toBeCloseTo(SIZE.height * setup.metresPerPixel, 6);
   });
 });

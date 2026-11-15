@@ -16,7 +16,7 @@
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { waitForCanvasReady } from './helpers.ts';
+import { captureBevyView, waitForCanvasReady } from './helpers.ts';
 
 const ANGLES = [
   { name: 'north', deg: 0 },
@@ -102,12 +102,7 @@ test('generate Barbarian mugshot baselines (generated/ subdir)', async ({ page }
       }, angle.deg);
       await page.waitForTimeout(200);
 
-      const dataUrl = await page.evaluate(() => {
-        const c = document.querySelector('canvas') as HTMLCanvasElement | null;
-        return c?.toDataURL('image/png') ?? null;
-      });
-      expect(dataUrl, `capture for ${mode} ${angle.name} returned null`).not.toBeNull();
-      const buf = Buffer.from((dataUrl as string).split(',')[1] ?? '', 'base64');
+      const buf = await captureBevyView(page);
       const fileName =
         mode === 'gltf'
           ? `${angle.name}.png`

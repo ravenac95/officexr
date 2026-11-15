@@ -1,36 +1,23 @@
 import type { WorldObjects } from '@officexr/sdk';
-import { loadMap, modelUrl, type ApplicationApi, type MapLoaderDeps } from '@officexr/world/app';
-import type { LayoutDocument, MapDocumentV2, RoomDocument } from '@officexr/world/scenes';
+import { bakedLayoutGlbUrl } from '@officexr/world/react';
+import { bakedLayoutUrl, loadMap, modelUrl, type ApplicationApi, type MapLoaderDeps } from '@officexr/world/app';
+import { paths, studioApiUrl } from '../../apiOrigin.ts';
+import { roomPlacements, type RoomPlacements } from '../map/roomPlacements.ts';
 import { unionBounds, type Bounds } from './renderFraming.ts';
 import type { RenderParams } from './renderParams.ts';
 
 export type RenderStorages = MapLoaderDeps['storages'];
 
+/** A baked layout's GLB on the studio API, which needs `studioFetch`'s credentials. */
+export const layoutUrl = (layoutName: string) =>
+  bakedLayoutGlbUrl(bakedLayoutUrl(layoutName, studioApiUrl(paths.bakedLayouts)));
+
 /** What the render page draws; `bounds` is what the camera frames. */
 export type RenderContent = { bounds: Bounds; modelUrls: string[] } & (
-  | {
-      type: 'map';
-      doc: MapDocumentV2;
-      rooms: ReadonlyMap<string, RoomDocument>;
-      layouts: ReadonlyMap<string, LayoutDocument>;
-    }
+  | { type: 'map'; placed: RoomPlacements }
   | { type: 'room'; worldObjects: WorldObjects; layoutName?: string }
   | { type: 'layout'; worldObjects: WorldObjects }
 );
-
-/** Names of the baked layouts whose GLBs the content draws. */
-export function bakedLayoutNames(content: RenderContent): string[] {
-  if (content.type === 'map') {
-    const names = new Set<string>();
-    for (const room of content.rooms.values()) {
-      if (room.layoutName) {
-        names.add(room.layoutName);
-      }
-    }
-    return [...names];
-  }
-  return content.type === 'room' && content.layoutName ? [content.layoutName] : [];
-}
 
 function nothingToRender({ target, name }: RenderParams): Error {
   return new Error(`${target} "${name}" has nothing to render`);
@@ -64,26 +51,9 @@ export async function loadRenderContent(
     if (!bounds) {
       throw nothingToRender(params);
     }
-    // Only for RoomsLayer's editor-side AABBs; loadMap doesn't hand back the documents.
-    const layouts = new Map<string, LayoutDocument>();
-    await Promise.all(
-      [...new Set(map.bakedLayouts.map((b) => b.layoutName))].map(async (layoutName) => {
-        const layout = await storages.layouts.load(layoutName);
-        if (layout) {
-          layouts.set(layoutName, layout);
-        }
-      }),
-    );
     // Layout instances aren't drawn as models (their GLB is), so preload only the rooms' own kinds.
-    const roomObjects = api.rooms.compileMap(map.mapDoc, map.rooms);
-    return {
-      type: 'map',
-      bounds,
-      modelUrls: modelUrlsOf(roomObjects.instances),
-      doc: map.mapDoc,
-      rooms: map.rooms,
-      layouts,
-    };
+    const placed = roomPlacements(map.mapDoc, map.rooms, api.rooms, layoutUrl);
+    return { type: 'map', bounds, modelUrls: modelUrlsOf(placed.instances), placed };
   }
 
   // Kind strides are only correct once the catalog has landed.

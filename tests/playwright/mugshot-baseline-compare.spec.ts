@@ -24,7 +24,7 @@ import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { PNG } from 'pngjs';
-import { pixelDiffCount, waitForCanvasReady } from './helpers.ts';
+import { captureBevyView, pixelDiffCount, waitForCanvasReady } from './helpers.ts';
 
 const BASELINE_ROOT = path.join(__dirname, 'mugshot-baselines');
 
@@ -144,15 +144,7 @@ for (const character of CHARACTERS) {
         }, angle.deg);
         await page.waitForTimeout(150);
 
-        const dataUrl = await page.evaluate(() => {
-          const c = document.querySelector('canvas') as HTMLCanvasElement | null;
-          return c?.toDataURL('image/png') ?? null;
-        });
-        expect(dataUrl, 'canvas.toDataURL() returned null').not.toBeNull();
-        const capturedBuf = Buffer.from(
-          (dataUrl as string).split(',')[1] ?? '',
-          'base64',
-        );
+        const capturedBuf = await captureBevyView(page);
 
         const baselinePng = PNG.sync.read(expected as Buffer);
         const capturedPng = PNG.sync.read(capturedBuf);
