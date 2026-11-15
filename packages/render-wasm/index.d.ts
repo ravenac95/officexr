@@ -104,6 +104,24 @@ export type ZoneShape =
   | { type: 'polygon'; points: [number, number][] }
   | { type: 'circle'; center: [number, number]; radius: number };
 
+/** One frame's `TrackerOutput`, as `setProximity` takes it. */
+export interface ProximityInput {
+  /** Each player's disc state; a player left out shows no disc. */
+  players: Record<string, 'entering' | 'entered' | 'exiting'>;
+  areas: { id: string; center: [number, number]; radius: number; members: string[] }[];
+  /** The feet of players `setPlayers` left out, as the first-person local player. */
+  undrawn?: Record<string, [number, number, number]>;
+  /** The world constants' `proximity` tunables; each defaults to `DEFAULT_WORLD_CONSTANTS`'. */
+  style?: {
+    discRadius?: number;
+    pulseSpeed?: number;
+    intensity?: number;
+    enteringColor?: HexColor;
+    enteredColor?: HexColor;
+    exitingColor?: HexColor;
+  };
+}
+
 /** An object instance as `WorldDiff.objects.instances` holds it. */
 export interface OverlayObject {
   id: string;
@@ -244,6 +262,11 @@ export interface RendererModule {
    * text, moving a ghost's objects or an outline's lines updates it in place; any other change redraws it.
    */
   setOverlays(id: ViewId, overlays: Overlay[]): void;
+  /**
+   * Replaces the view's proximity output, drawn as `ProximityGlow`'s ground discs under the view's
+   * players and its meeting-area glow. The glow eases toward it, so send it every frame.
+   */
+  setProximity(id: ViewId, proximity: ProximityInput): void;
 
   // Controls: once any of these is called on a view, its controls drive its camera, overriding
   // `setCamera`, in every frame its mode has something to frame. Top-down, free-fly and orbit always do;
