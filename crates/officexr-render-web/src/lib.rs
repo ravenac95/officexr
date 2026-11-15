@@ -363,9 +363,11 @@ mod image_views {
     use std::cell::RefCell;
     use std::collections::HashMap;
 
+    use bevy::camera::RenderTarget;
     use bevy::prelude::*;
     use bevy::render::gpu_readback::ReadbackComplete;
     use bevy::render::renderer::RenderDevice;
+    use bevy::window::WindowRef;
     use officexr_render::views::{View, ViewId, ViewMsg};
     use wasm_bindgen::Clamped;
     use wasm_bindgen::prelude::*;
@@ -445,7 +447,8 @@ mod image_views {
         host.set_attribute("id", HOST_ID);
         host.set_attribute(
             "style",
-            "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none",
+            // Not `opacity:0`: the browser skips compositing a transparent element (see `host_camera`).
+            "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0.01;pointer-events:none",
         );
         append_to_body(&host);
         format!("#{HOST_ID}")
@@ -499,6 +502,35 @@ mod image_views {
 
     pub(super) fn add(app: &mut App) {
         app.add_observer(paint);
+        let world = app.world_mut();
+        let selector = format!("#{HOST_ID}");
+        let on_host = world
+            .query::<&Window>()
+            .iter(world)
+            .any(|w| w.canvas.as_deref() == Some(selector.as_str()));
+        if on_host {
+            world.spawn(host_camera());
+        }
+    }
+
+    /// Clears the host canvas every frame, so the browser composites the
+    /// WebGL2 context's frames.
+    ///
+    /// Bevy presents only windows a camera draws into, and image views draw
+    /// into none. The browser advances the context's fences, and so completes
+    /// the image views' readbacks, only as its canvas makes composited frames;
+    /// without them each readback is painted dozens of frames after it was
+    /// drawn, so a camera move alone shows up seconds late.
+    fn host_camera() -> impl Bundle {
+        (
+            Camera2d,
+            Camera {
+                order: isize::MIN,
+                clear_color: ClearColorConfig::Custom(Color::NONE),
+                ..default()
+            },
+            RenderTarget::Window(WindowRef::Primary),
+        )
     }
 
     /// Paints a view's read-back image into its canvas.

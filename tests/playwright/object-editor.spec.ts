@@ -179,6 +179,46 @@ test('Object editor preview orbits on a left-drag and holds still under the poin
   expect(changed).toBeGreaterThan(0.05);
 });
 
+test('Object editor preview paints an orbit within a few frames of the drag', async ({ page }) => {
+  test.setTimeout(300_000);
+  await forceWebgl2(page);
+  await goToMode(page, 'object');
+  await expect(page.locator(PREVIEW)).toBeVisible({ timeout: 60_000 });
+  const box = await page.evaluate((s) => document.querySelector(s)!.getBoundingClientRect().toJSON() as DOMRect, PREVIEW);
+  const [cx, cy] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(cx, cy);
+  await settledPreview(page);
+
+  // Counts animation frames until the preview's pixels change. Only the camera moves, so a readback
+  // that trails the frames drawn shows up as a long count.
+  const frames = page.evaluate((s) => new Promise<number>((resolve) => {
+    const canvas = document.querySelector<HTMLCanvasElement>(s)!;
+    const context = canvas.getContext('2d')!;
+    const hash = () => {
+      const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let h = 0;
+      for (let i = 0; i < data.length; i += 61) {
+        h = (h * 31 + data[i]) | 0;
+      }
+      return h;
+    };
+    const start = hash();
+    let count = 0;
+    requestAnimationFrame(function tick() {
+      count += 1;
+      if (hash() !== start || count >= 120) {
+        resolve(count);
+      } else {
+        requestAnimationFrame(tick);
+      }
+    });
+  }), PREVIEW);
+  await page.mouse.down();
+  await page.mouse.move(cx + 200, cy + 40, { steps: 10 });
+  await page.mouse.up();
+  expect(await frames).toBeLessThan(12);
+});
+
 test('Character editor draws its character in a Bevy preview', async ({ page }) => {
   test.setTimeout(300_000);
   await forceWebgl2(page);
