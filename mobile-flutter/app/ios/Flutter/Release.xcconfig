@@ -1,1 +1,3 @@
 #include "Generated.xcconfig"
+// The Bevy XCFramework has no x86_64 simulator slice (scripts/build-ios-native.sh).
+EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64
