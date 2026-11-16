@@ -4,8 +4,18 @@ version = "0.0.0"
 edition = "2024"
 publish = false
 
+[features]
+default = ["standalone"]
+# The winit app (`main`, the iOS config screen). Embedding hosts turn it off and add
+# `OfficeRoomPlugin` to their own app.
+standalone = ["bevy/bevy_winit"]
+
+[[bin]]
+name = "officexr-client"
+required-features = ["standalone"]
+
 [dependencies]
-bevy = { version = "=0.20.1", default-features = false, features = ["bevy_winit"] }
+bevy = { version = "=0.20.1", default-features = false }
 officexr-controls = { path = "../officexr-controls" }
 officexr-protocol = { path = "../officexr-protocol" }
 officexr-render = { path = "../officexr-render" }

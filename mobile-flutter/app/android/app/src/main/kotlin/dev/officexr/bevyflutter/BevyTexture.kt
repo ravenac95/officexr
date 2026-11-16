@@ -13,17 +13,20 @@ import io.flutter.view.TextureRegistry
  * Bridges Dart to the Bevy host: a Flutter texture backed by a `SurfaceProducer`, which Bevy
  * renders into, plus channels for input, commands and events.
  *
- * Methods on `officexr/bevy`: `start {width, height, scale}` (physical size; returns the texture
- * id), `resize {width, height}`, `touch {id, phase, x, y}`, `command {json}`, `stop`.
+ * Methods on `officexr/bevy`: `start {width, height, scale, scene}` (physical size and a
+ * `SceneSpec` JSON; returns the texture id), `resize {width, height}`, `touch {id, phase, x, y}`,
+ * `command {json}`, `stop`, and `launchArguments` (the intent's `officexr_args`).
  * Events on `officexr/bevy/events` are the host's JSON strings.
  */
 class BevyTexture(
     messenger: BinaryMessenger,
     private val textures: TextureRegistry,
+    private val launchArguments: List<String>,
 ) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
     private val main = Handler(Looper.getMainLooper())
     private var producer: TextureRegistry.SurfaceProducer? = null
     private var scale = 1f
+    private var scene = "{\"type\":\"demo\"}"
     private var sink: EventChannel.EventSink? = null
 
     init {
@@ -37,6 +40,7 @@ class BevyTexture(
                 val width = call.argument<Int>("width")!!
                 val height = call.argument<Int>("height")!!
                 scale = (call.argument<Double>("scale") ?: 1.0).toFloat()
+                scene = call.argument<String>("scene") ?: scene
                 result.success(start(width, height))
             }
             "resize" -> {
@@ -67,6 +71,7 @@ class BevyTexture(
                 stop()
                 result.success(null)
             }
+            "launchArguments" -> result.success(launchArguments)
             else -> result.notImplemented()
         }
     }
@@ -85,7 +90,7 @@ class BevyTexture(
     }
 
     private fun startBevy(p: TextureRegistry.SurfaceProducer) {
-        BevyBridge.nativeStart(p.surface, p.width, p.height, scale) { json ->
+        BevyBridge.nativeStart(p.surface, p.width, p.height, scale, scene) { json ->
             // Logged so CI's emulator smoke test can see the renderer come up.
             Log.i("BevyFlutter", json)
             main.post { sink?.success(json) }

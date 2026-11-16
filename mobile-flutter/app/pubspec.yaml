@@ -13,6 +13,7 @@ dependencies:
   # The iOS platform view and channels; Android's live in android/app (BevyTexture.kt).
   bevy_host:
     path: ../bevy_host
+  flutter_secure_storage: ^11.2.0
 
 dev_dependencies:
   flutter_test:

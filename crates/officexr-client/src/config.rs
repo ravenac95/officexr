@@ -1,5 +1,5 @@
 // iOS has no command line to print usage on.
-#[cfg(not(target_os = "ios"))]
+#[cfg(all(feature = "standalone", not(target_os = "ios")))]
 pub const USAGE: &str = "usage: OFFICEXR_SESSION_COOKIE=<Cookie header> officexr-client \
 --web-url <url> --realtime-url <ws url> --office-id <id>
 (--cookie <Cookie header> also works, but shows the cookie in process listings)";
@@ -14,6 +14,8 @@ pub struct Config {
     pub session_cookie: String,
 }
 
+// Embedding hosts build a `Config` themselves; only the standalone app reads flags and env vars.
+#[cfg(feature = "standalone")]
 impl Config {
     pub fn from_env_and_args() -> Result<Self, String> {
         Self::parse(std::env::args().skip(1), |name| std::env::var(name).ok())
@@ -50,7 +52,7 @@ impl Config {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "standalone"))]
 mod tests {
     use super::*;
 

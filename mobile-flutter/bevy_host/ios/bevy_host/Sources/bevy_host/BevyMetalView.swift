@@ -11,11 +11,13 @@ final class BevyMetalView: UIView {
 
     override class var layerClass: AnyClass { CAMetalLayer.self }
 
+    private let scene: String
     private var displayLink: CADisplayLink?
     private var running = false
     private var runningSize: CGSize = .zero
 
-    override init(frame: CGRect) {
+    init(frame: CGRect, scene: String) {
+        self.scene = scene
         super.init(frame: frame)
         isMultipleTouchEnabled = true
         backgroundColor = .black
@@ -53,10 +55,11 @@ final class BevyMetalView: UIView {
     private func startBevy(width: UInt32, height: UInt32, scale: Float) {
         BevyMetalView.active?.stopBevy()
         let view = Unmanaged.passUnretained(self).toOpaque()
-        guard bevy_host_start(view, width, height, scale, bevyHostEvent, nil) else {
-            print("BevyFlutter {\"type\":\"error\",\"message\":\"bevy_host_start failed\"}")
-            return
+        // On failure, Rust has already sent an `error` event saying why.
+        let started = scene.withCString { scene in
+            bevy_host_start(view, width, height, scale, scene, bevyHostEvent, nil)
         }
+        guard started else { return }
         running = true
         BevyMetalView.active = self
         let link = CADisplayLink(target: self, selector: #selector(step))

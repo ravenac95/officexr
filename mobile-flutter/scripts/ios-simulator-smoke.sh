@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Installs a simulator build of the app on a fresh iPhone simulator, launches it, and checks
-# Bevy came up inside Flutter: the host's `ready` and `stats` events reach Swift (printed with
-# a BevyFlutter prefix) and no `error` event shows up. Leaves screenshots and the app's
-# console output in the output directory.
+# Installs a simulator build of the app on a fresh iPhone simulator, launches it into the demo
+# scene, and checks Bevy came up inside Flutter: the host's `ready` and `stats` events reach
+# Swift (printed with a BevyFlutter prefix) and no `error` event shows up. Leaves screenshots
+# and the app's console output in the output directory.
 # Usage: ios-simulator-smoke.sh <Runner.app> <out-dir>
 set -euo pipefail
 
@@ -29,7 +29,7 @@ xcrun simctl bootstatus "$udid" -b
 xcrun simctl install "$udid" "$app"
 
 console="$out/console.txt"
-xcrun simctl launch --console-pty "$udid" "$bundle" > "$console" 2>&1 &
+xcrun simctl launch --console-pty "$udid" "$bundle" demo > "$console" 2>&1 &
 launcher=$!
 
 ready=""

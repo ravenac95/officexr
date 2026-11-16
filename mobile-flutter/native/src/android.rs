@@ -18,8 +18,9 @@ use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
 };
 
-use crate::host::{self, HostInput, SurfaceTarget};
-use crate::scene::{HostEvent, SceneCommand};
+use crate::events::HostEvent;
+use crate::host::{self, HostInput, SceneSpec, SurfaceTarget};
+use crate::scene::SceneCommand;
 
 /// The `android-activity` glue Bevy links in expects this symbol. Flutter owns the
 /// activity, so it never runs.
@@ -72,14 +73,29 @@ pub extern "system" fn Java_dev_officexr_bevyflutter_BevyBridge_nativeStart(
     width: jint,
     height: jint,
     scale: jfloat,
+    scene: JString,
     listener: JObject,
 ) {
     stop();
+    let scene = match env.get_string(&scene).map(String::from) {
+        Ok(json) => SceneSpec::parse(&json),
+        Err(err) => Err(err.to_string()),
+    };
+    let scene = match scene {
+        Ok(scene) => scene,
+        Err(message) => {
+            let _ = env.throw_new("java/lang/IllegalArgumentException", message);
+            return;
+        }
+    };
     // SAFETY: `surface` is a live android.view.Surface for the duration of this call, and
     // `from_surface` takes its own reference to the native window.
     let window = unsafe { NativeWindow::from_surface(env.get_raw(), surface.as_raw()) };
     let Some(window) = window else {
-        let _ = env.throw_new("java/lang/IllegalStateException", "Surface has no native window");
+        let _ = env.throw_new(
+            "java/lang/IllegalStateException",
+            "Surface has no native window",
+        );
         return;
     };
     let handle = match RawHandleWrapper::new(&WindowWrapper::new(AndroidSurface(window))) {
@@ -107,7 +123,7 @@ pub extern "system" fn Java_dev_officexr_bevyflutter_BevyBridge_nativeStart(
         .name("bevy-render-host".into())
         .spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                host::run(target, input_rx, render_events.clone());
+                host::run(target, scene, input_rx, render_events.clone());
             }));
             if let Err(panic) = result {
                 let message = panic

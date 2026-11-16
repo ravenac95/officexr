@@ -7,6 +7,8 @@ import io.flutter.embedding.engine.FlutterEngine
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        BevyTexture(flutterEngine.dartExecutor.binaryMessenger, flutterEngine.renderer)
+        // `adb shell am start … --esa officexr_args demo` opens the demo directly (CI does).
+        val args = intent?.getStringArrayExtra("officexr_args")?.toList() ?: emptyList()
+        BevyTexture(flutterEngine.dartExecutor.binaryMessenger, flutterEngine.renderer, args)
     }
 }

@@ -1,4 +1,5 @@
-//! The demo scene: spinning cubes on a floor under an orbit camera.
+//! The demo scene: spinning cubes on a floor under an orbit camera. It needs no server, so CI's
+//! smoke tests run it.
 //!
 //! It knows nothing about Android or Flutter. The host feeds it [`SceneCommand`]s and
 //! `TouchInput` messages, and it reports [`HostEvent`]s back over a channel.
@@ -8,34 +9,28 @@ use std::f32::consts::{FRAC_PI_2, TAU};
 use bevy::input::touch::Touches;
 use bevy::prelude::*;
 use bevy::render::view::Tonemapping;
-use crossbeam_channel::Sender;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+
+use crate::events::{EventSender, FpsCounter, HostEvent};
 
 /// What Flutter can ask the scene to do.
 #[derive(Message, Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SceneCommand {
     /// Spin speed in turns per second.
-    SetSpeed { turns_per_second: f32 },
+    SetSpeed {
+        turns_per_second: f32,
+    },
     /// The cubes' base colour, sRGB 0..1.
-    SetColor { r: f32, g: f32, b: f32 },
+    SetColor {
+        r: f32,
+        g: f32,
+        b: f32,
+    },
     AddCube,
     RemoveCube,
     ResetCamera,
 }
-
-/// What the scene tells Flutter.
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum HostEvent {
-    /// The renderer is up; `adapter` names the GPU and backend wgpu picked.
-    Ready { adapter: String },
-    Stats { fps: f32, cubes: usize },
-    Error { message: String },
-}
-
-#[derive(Resource, Clone)]
-pub struct EventSender(pub Sender<HostEvent>);
 
 pub struct DemoScenePlugin;
 
@@ -45,7 +40,6 @@ impl Plugin for DemoScenePlugin {
             .insert_resource(ClearColor(Color::srgb(0.08, 0.09, 0.12)))
             .init_resource::<Orbit>()
             .init_resource::<CubeStyle>()
-            .init_resource::<FpsCounter>()
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
@@ -87,7 +81,9 @@ struct CubeStyle {
 
 impl FromWorld for CubeStyle {
     fn from_world(world: &mut World) -> Self {
-        let mesh = world.resource_mut::<Assets<Mesh>>().add(Cuboid::new(0.9, 0.9, 0.9));
+        let mesh = world
+            .resource_mut::<Assets<Mesh>>()
+            .add(Cuboid::new(0.9, 0.9, 0.9));
         let material = world
             .resource_mut::<Assets<StandardMaterial>>()
             .add(StandardMaterial {
@@ -106,12 +102,6 @@ impl FromWorld for CubeStyle {
 #[derive(Component)]
 struct Spinner {
     phase: f32,
-}
-
-#[derive(Resource, Default)]
-struct FpsCounter {
-    frames: u32,
-    elapsed: f32,
 }
 
 const START_CUBES: usize = 6;
@@ -242,20 +232,15 @@ fn spin(time: Res<Time>, style: Res<CubeStyle>, mut cubes: Query<(&mut Transform
 
 fn report_stats(
     time: Res<Time>,
-    mut counter: ResMut<FpsCounter>,
+    mut counter: Local<FpsCounter>,
     cubes: Query<(), With<Spinner>>,
     events: Option<Res<EventSender>>,
 ) {
-    counter.frames += 1;
-    counter.elapsed += time.delta_secs();
-    if counter.elapsed < 0.5 {
+    let (Some(fps), Some(events)) = (counter.tick(time.delta_secs()), events) else {
         return;
-    }
-    if let Some(events) = events {
-        let _ = events.0.send(HostEvent::Stats {
-            fps: counter.frames as f32 / counter.elapsed,
-            cubes: cubes.iter().count(),
-        });
-    }
-    *counter = FpsCounter::default();
+    };
+    events.send(HostEvent::Stats {
+        fps,
+        cubes: cubes.iter().count(),
+    });
 }

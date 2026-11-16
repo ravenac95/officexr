@@ -21,6 +21,8 @@ object BevyBridge {
         width: Int,
         height: Int,
         scale: Float,
+        /** A `SceneSpec` as JSON, e.g. `{"type":"demo"}`. */
+        scene: String,
         listener: BevyEventListener,
     )
 

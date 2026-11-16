@@ -9,7 +9,11 @@ embedded as a platform view.
   - `host.rs` runs a Bevy app on a surface someone else owns, without `bevy_winit`: it spawns the
     primary window entity with the surface's `RawHandleWrapper` before `RenderPlugin` builds, then
     drives `app.update()` itself.
-  - `scene.rs` is the demo: spinning cubes and an orbit camera, with commands in and events out.
+  - It shows a `SceneSpec` Flutter picks:
+    - a live office: `OfficeRoomPlugin` from `crates/officexr-client`, built with
+      `default-features = false` so its standalone winit app stays out; `office.rs` reports
+      joined, peers and disconnects back to Flutter;
+    - or the demo (`scene.rs`), spinning cubes that need no server. CI's smoke tests run it.
   - `android.rs` is the JNI glue: Bevy runs on a thread of its own.
   - `ios.rs` is a C API. wgpu only creates Metal surfaces on the main thread, so Swift steps the
     host from a `CADisplayLink` instead.
@@ -20,7 +24,12 @@ embedded as a platform view.
   - `BevyTexture.kt` creates a `SurfaceProducer` (a Flutter texture backed by an Android
     `Surface`) and hands its `Surface` to Rust.
   - `bevy_view.dart` shows the texture and forwards pointer events.
-  - `main.dart` lays Flutter controls (speed, colour, cube count, a second Flutter page) over it.
+  - `join_screen.dart` asks for the server, realtime URL, office id and session cookie,
+    remembered with `flutter_secure_storage`. It also opens the demo.
+  - `office_screen.dart` shows the room with a status bar. Bevy draws the walk stick and
+    handles look-drag itself.
+  - `demo_screen.dart` lays Flutter controls (speed, colour, cube count, a second Flutter page)
+    over the demo.
 
 Android:
 
@@ -59,6 +68,21 @@ Android jobs run on Linux and the iOS job on macOS; both are free on a public re
 The workflow artifacts also keep the builds and the emulator/simulator smoke tests'
 screenshots.
 
+## Join an office
+
+1. Sign in to OfficeXR on the web and open the office. Its id is in the URL.
+2. In your browser's dev tools (Network tab), copy the `Cookie` request header of any
+   `/api/me` request.
+3. In the app, enter:
+   - **Server URL:** the API origin, the web server's `PUBLIC_URL`.
+   - **Realtime URL:** its WebSocket, usually the same host with `wss://` and `/ws`.
+   - **Office id** and **session cookie** from steps 1 and 2.
+4. Tap **Join office**. Walk with the stick bottom-left, and drag anywhere else to look.
+
+The app joins as `<your login>#native`, so the same account can stay signed in on the web at the
+same time (if the office allows several sessions per login). The cookie expires with your web
+session; paste a fresh one if joining fails with a 401.
+
 ## Build locally
 
 Needs Flutter 3.50, the Android SDK with NDK 28.2.13676358, `cargo-ndk`, and the Rust targets:
@@ -84,8 +108,13 @@ aarch64-apple-ios-sim`), then `flutter run` on a simulator or device.
 
 - **iOS on a real phone, untested.** CI only proves the simulator; real-device runs depend on
   sideloading. The simulator slice is arm64 only (Apple-silicon Macs).
-- **OfficeXR itself.** The scene is a stand-in. Next steps: draw a room with
-  `crates/officexr-render`, and connect with `crates/officexr-protocol`.
+- **Sign-in.** A session cookie pasted from the browser, not a native Google sign-in.
+- **The office is the native client's.** Walking, peers, avatars and the world are there; voice,
+  chat and the web's HUD are not.
+- **Connecting blocks.** `Host::new` waits on the `/api/me` login request before drawing. On
+  iOS that's the main thread.
+- **Size.** The Rust library is about 64 MB per ABI with the office renderer and networking;
+  the arm64 APK is about 80 MB.
 - **Lifecycle polish.** On Android, resizing or regaining the surface restarts Bevy, so scene
   state resets, and frames are paced by a fixed 60 fps sleep, not vsync. On iOS, Bevy runs on
   the main thread, so a slow frame stalls platform-channel calls (Flutter's own UI keeps

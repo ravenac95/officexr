@@ -7,11 +7,12 @@
 /// Receives each host event as NUL-terminated JSON, valid only for the call.
 typedef void (*BevyEventCallback)(void *context, const char *json);
 
-/// Starts Bevy on `ui_view` (a UIView whose layer is a CAMetalLayer), replacing any running
-/// host. `width`/`height` are physical pixels. The view, callback and context must stay valid
-/// until `bevy_host_stop`.
+/// Starts Bevy on `ui_view` (a UIView whose layer is a CAMetalLayer) showing `scene_json` (a
+/// SceneSpec, e.g. {"type":"demo"}), replacing any running host. `width`/`height` are physical
+/// pixels. On failure, sends an `error` event and returns false. The view, callback and context
+/// must stay valid until `bevy_host_stop`.
 bool bevy_host_start(void *ui_view, uint32_t width, uint32_t height, float scale,
-                     BevyEventCallback callback, void *context);
+                     const char *scene_json, BevyEventCallback callback, void *context);
 
 /// Runs one frame and delivers its events. Call from a CADisplayLink.
 void bevy_host_frame(void);

@@ -8,11 +8,11 @@ use officexr_sim::physics::character_movement::XZ;
 use officexr_sim::physics::rules::SPAWN_DROP_HEIGHT;
 use officexr_sim::{SimCore, SimInput, SimPeer, Vec3 as SimVec3};
 
-use crate::VIEW;
 use crate::baked_colliders::BakedColliders;
 use crate::broadcaster::{Pose, PositionBroadcaster};
 use crate::net::{Joined, Outbound};
 use crate::peers::character_for;
+use crate::room::VIEW;
 use crate::world::{CHAR_RADIUS, SimWorld};
 
 #[derive(Resource)]

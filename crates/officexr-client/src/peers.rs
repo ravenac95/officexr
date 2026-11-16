@@ -46,6 +46,17 @@ struct Peer {
 #[derive(Resource, Default)]
 pub struct Peers(HashMap<String, Peer>);
 
+impl Peers {
+    /// How many other people are in the room.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 pub fn update_peers(
     time: Res<Time>,
     mut updates: MessageReader<PeerUpdate>,

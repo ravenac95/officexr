@@ -37,6 +37,11 @@ pub struct InboundRx {
 #[derive(Message)]
 pub struct Joined;
 
+/// The realtime client gave up; the reason says why. A standalone app exits on it, an
+/// embedding host reports it.
+#[derive(Message, Clone, Debug)]
+pub struct RoomClosed(pub String);
+
 /// Sends the local player's events, numbered from the same `seq` as the client's own.
 #[derive(Resource)]
 pub struct Outbound {
@@ -62,9 +67,20 @@ fn take_seq(seq: &AtomicU64) -> f64 {
     (seq.fetch_add(1, Ordering::Relaxed) + 1) as f64
 }
 
+/// A live connection to a room: what [`crate::OfficeRoomPlugin`] reads from and sends through.
+pub struct Connection {
+    pub(crate) inbound: InboundRx,
+    pub(crate) outbound: Outbound,
+}
+
 /// Resolves the signed-in login, then runs the realtime client and the kinds fetch on their
-/// own thread, feeding [`InboundRx`].
-pub fn spawn(config: Config) -> Result<(InboundRx, Outbound), String> {
+/// own thread. Blocks on the login request.
+pub fn connect(config: Config) -> Result<Connection, String> {
+    let (inbound, outbound) = spawn(config)?;
+    Ok(Connection { inbound, outbound })
+}
+
+fn spawn(config: Config) -> Result<(InboundRx, Outbound), String> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -325,7 +341,7 @@ pub fn receive_inbound(
     mut world: MessageWriter<WorldUpdate>,
     mut peers: MessageWriter<PeerUpdate>,
     mut joined: MessageWriter<Joined>,
-    mut exit: MessageWriter<AppExit>,
+    mut closed: MessageWriter<RoomClosed>,
 ) {
     let rx = inbound.rx.lock().unwrap();
     for message in rx.try_iter() {
@@ -360,7 +376,7 @@ pub fn receive_inbound(
             }
             Inbound::Closed(reason) => {
                 error!("realtime: {reason}");
-                exit.write(AppExit::error());
+                closed.write(RoomClosed(reason));
             }
         }
     }

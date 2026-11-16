@@ -22,18 +22,19 @@ bevy = { version = "=0.20.1", default-features = false, features = [
   "bevy_pbr",
 ] }
 crossbeam-channel = "0.5"
+# The office room; its standalone winit app stays out.
+officexr-client = { path = "../../crates/officexr-client", default-features = false }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [target.'cfg(target_os = "ios")'.dependencies]
 raw-window-handle = "0.6"
-serde_json = "1"
 
 [target.'cfg(target_os = "android")'.dependencies]
 # Bevy pulls android-activity in on Android, and it refuses to compile without one glue
 # feature; `lib.rs` defines the `android_main` that glue links against.
 android-activity = { version = "0.6", features = ["native-activity"] }
 jni = "0.21"
-serde_json = "1"
 ndk = { version = "0.9", features = ["rwh_06"] }
 raw-window-handle = "0.6"
 # Bevy only compiles wgpu's Vulkan backend in; GLES is the fallback for devices and

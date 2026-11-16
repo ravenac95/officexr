@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Installs the APK on the running emulator, launches it, and checks Bevy came up inside Flutter:
-# the host's `ready` and `stats` events reach Kotlin (logged under the BevyFlutter tag) and no
-# `error` event or crash shows up. Leaves screenshots and logcat in the output directory.
+# Installs the APK on the running emulator, launches it into the demo scene, and checks Bevy came
+# up inside Flutter: the host's `ready` and `stats` events reach Kotlin (logged under the
+# BevyFlutter tag) and no `error` event or crash shows up. Leaves screenshots and logcat in the output directory.
 # Usage: emulator-smoke.sh <apk> <out-dir>
 set -euo pipefail
 
@@ -12,7 +12,7 @@ mkdir -p "$out"
 
 adb install -r "$apk"
 adb logcat -c
-adb shell am start -W -n "$package/.MainActivity"
+adb shell am start -W -n "$package/.MainActivity" --esa officexr_args demo
 
 ready=""
 for _ in $(seq 1 90); do

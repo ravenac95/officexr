@@ -17,8 +17,9 @@ use raw_window_handle::{
     UiKitWindowHandle, WindowHandle,
 };
 
-use crate::host::{Host, HostInput, SurfaceTarget};
-use crate::scene::{HostEvent, SceneCommand};
+use crate::events::HostEvent;
+use crate::host::{Host, HostInput, SceneSpec, SurfaceTarget};
+use crate::scene::SceneCommand;
 
 /// Receives each event as a NUL-terminated JSON string, valid only for the call.
 pub type EventCallback = extern "C" fn(context: *mut c_void, json: *const c_char);
@@ -58,27 +59,47 @@ impl HasDisplayHandle for UiView {
     }
 }
 
-/// Starts Bevy on `ui_view` (a `UIView` whose layer is a `CAMetalLayer`), replacing any
-/// running host. `width`/`height` are physical pixels. Returns false if it couldn't start.
+/// Starts Bevy on `ui_view` (a `UIView` whose layer is a `CAMetalLayer`) showing `scene_json`
+/// (a `SceneSpec`), replacing any running host. `width`/`height` are physical pixels. Returns
+/// false if it couldn't start, after sending an `error` event saying why.
 ///
 /// # Safety
 /// `ui_view` must be a live `UIView` that stays alive until `bevy_host_stop` or the next
-/// `bevy_host_start`; `callback` and `context` must stay valid for as long.
+/// `bevy_host_start`; `scene_json` a valid NUL-terminated string; `callback` and `context` must
+/// stay valid for as long as the view.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bevy_host_start(
     ui_view: *mut c_void,
     width: u32,
     height: u32,
     scale: f32,
+    scene_json: *const c_char,
     callback: EventCallback,
     context: *mut c_void,
 ) -> bool {
     bevy_host_stop();
-    let Some(view) = NonNull::new(ui_view) else {
-        return false;
+    let fail = |message: String| {
+        send_now(callback, context, &HostEvent::Error { message });
+        false
     };
-    let Ok(handle) = RawHandleWrapper::new(&WindowWrapper::new(UiView(view))) else {
-        return false;
+    if scene_json.is_null() {
+        return fail("no scene".into());
+    }
+    // SAFETY: the caller passes a valid C string.
+    let scene = match unsafe { CStr::from_ptr(scene_json) }.to_str() {
+        Ok(json) => SceneSpec::parse(json),
+        Err(err) => Err(err.to_string()),
+    };
+    let scene = match scene {
+        Ok(scene) => scene,
+        Err(message) => return fail(message),
+    };
+    let Some(view) = NonNull::new(ui_view) else {
+        return fail("no view".into());
+    };
+    let handle = match RawHandleWrapper::new(&WindowWrapper::new(UiView(view))) {
+        Ok(handle) => handle,
+        Err(err) => return fail(err.to_string()),
     };
     let (event_tx, event_rx) = crossbeam_channel::unbounded();
     let target = SurfaceTarget {
@@ -87,7 +108,10 @@ pub unsafe extern "C" fn bevy_host_start(
         height: height.max(1),
         scale,
     };
-    let host = Host::new(target, event_tx);
+    let host = match Host::new(target, scene, event_tx) {
+        Ok(host) => host,
+        Err(message) => return fail(message),
+    };
     let running = Running {
         host,
         events: event_rx,
@@ -112,13 +136,15 @@ pub extern "C" fn bevy_host_frame() {
 
 fn deliver(running: &Running) {
     for event in running.events.try_iter() {
-        let Ok(json) = serde_json::to_string(&event).map(CString::new) else {
-            continue;
-        };
-        if let Ok(json) = json {
-            (running.callback)(running.context, json.as_ptr());
-        }
+        send_now(running.callback, running.context, &event);
     }
+}
+
+fn send_now(callback: EventCallback, context: *mut c_void, event: &HostEvent) {
+    let Ok(Ok(json)) = serde_json::to_string(event).map(CString::new) else {
+        return;
+    };
+    callback(context, json.as_ptr());
 }
 
 fn apply(input: HostInput) {
@@ -160,7 +186,11 @@ pub unsafe extern "C" fn bevy_host_command(json: *const c_char) -> bool {
     }
     // SAFETY: the caller passes a valid C string.
     let json = unsafe { CStr::from_ptr(json) };
-    match json.to_str().ok().and_then(|s| serde_json::from_str::<SceneCommand>(s).ok()) {
+    match json
+        .to_str()
+        .ok()
+        .and_then(|s| serde_json::from_str::<SceneCommand>(s).ok())
+    {
         Some(command) => {
             apply(HostInput::Scene(command));
             true

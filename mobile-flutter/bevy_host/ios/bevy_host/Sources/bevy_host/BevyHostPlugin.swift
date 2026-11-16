@@ -2,8 +2,9 @@ import BevyHostCore
 import Flutter
 import UIKit
 
-/// Registers the `officexr/bevy-view` platform view and the channels the app uses:
-/// `officexr/bevy` (`command {json}`, `stop`) and `officexr/bevy/events` (host JSON events).
+/// Registers the `officexr/bevy-view` platform view (creation params `{scene}`, a SceneSpec
+/// JSON) and the channels the app uses: `officexr/bevy` (`command {json}`, `stop`,
+/// `launchArguments`) and `officexr/bevy/events` (host JSON events).
 public final class BevyHostPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     static var eventSink: FlutterEventSink?
 
@@ -33,6 +34,9 @@ public final class BevyHostPlugin: NSObject, FlutterPlugin, FlutterStreamHandler
         case "stop":
             BevyMetalView.active?.stopBevy()
             result(nil)
+        case "launchArguments":
+            // `xcrun simctl launch <device> <bundle> demo` opens the demo directly (CI does).
+            result(Array(ProcessInfo.processInfo.arguments.dropFirst()))
         default:
             result(FlutterMethodNotImplemented)
         }
@@ -61,18 +65,23 @@ func bevyHostEvent(_ context: UnsafeMutableRawPointer?, _ json: UnsafePointer<CC
 }
 
 final class BevyViewFactory: NSObject, FlutterPlatformViewFactory {
+    func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
+        FlutterStandardMessageCodec.sharedInstance()
+    }
+
     func create(withFrame frame: CGRect, viewIdentifier viewId: Int64, arguments args: Any?)
         -> FlutterPlatformView
     {
-        BevyPlatformView(frame: frame)
+        let scene = (args as? [String: Any])?["scene"] as? String ?? "{\"type\":\"demo\"}"
+        return BevyPlatformView(frame: frame, scene: scene)
     }
 }
 
 final class BevyPlatformView: NSObject, FlutterPlatformView {
     private let metalView: BevyMetalView
 
-    init(frame: CGRect) {
-        metalView = BevyMetalView(frame: frame)
+    init(frame: CGRect, scene: String) {
+        metalView = BevyMetalView(frame: frame, scene: scene)
     }
 
     func view() -> UIView { metalView }
