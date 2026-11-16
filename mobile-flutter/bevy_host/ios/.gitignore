@@ -1,0 +1,4 @@
+# Built by mobile-flutter/scripts/build-ios-native.sh
+/bevy_host/BevyHostCore.xcframework/
+/bevy_host/.build/
+/bevy_host/.swiftpm/

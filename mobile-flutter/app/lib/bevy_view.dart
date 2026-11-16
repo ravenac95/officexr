@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:bevy_host/bevy_host.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -76,7 +79,12 @@ class BevyController {
   }
 }
 
-/// Shows the Bevy scene as a Flutter texture sized to this widget, and forwards touches to it.
+/// Shows the Bevy scene sized to this widget.
+///
+/// On Android, Bevy renders into a Flutter texture and this widget forwards touches to it. On
+/// iOS, Bevy renders into a native Metal view (wgpu only creates Metal surfaces on the main
+/// thread, which a texture's producer doesn't run on), embedded as a platform view that
+/// handles its own touches.
 class BevyView extends StatefulWidget {
   const BevyView({super.key, required this.controller});
 
@@ -122,6 +130,14 @@ class _BevyViewState extends State<BevyView> {
 
   @override
   Widget build(BuildContext context) {
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      return UiKitView(
+        viewType: bevyViewType,
+        gestureRecognizers: {
+          Factory<OneSequenceGestureRecognizer>(EagerGestureRecognizer.new),
+        },
+      );
+    }
     final scale = MediaQuery.devicePixelRatioOf(context);
     return LayoutBuilder(builder: (context, constraints) {
       final size = constraints.biggest;

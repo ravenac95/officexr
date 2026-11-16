@@ -10,6 +10,9 @@ dependencies:
   flutter:
     sdk: flutter
   material_ui: ^1.1.0
+  # The iOS platform view and channels; Android's live in android/app (BevyTexture.kt).
+  bevy_host:
+    path: ../bevy_host
 
 dev_dependencies:
   flutter_test:

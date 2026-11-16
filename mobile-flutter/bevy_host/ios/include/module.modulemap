@@ -1,0 +1,4 @@
+module BevyHostCore {
+    header "bevy_host.h"
+    export *
+}

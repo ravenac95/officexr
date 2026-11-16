@@ -1,8 +1,8 @@
 name: Bevy + Flutter prototype
 
-# Builds the Android APK in mobile-flutter/ (a Flutter app that renders a Bevy scene into a
-# Flutter texture), smoke-tests it on an emulator, and publishes it as the rolling
-# `bevy-flutter-prototype` pre-release.
+# Builds mobile-flutter/ (a Flutter app that renders a Bevy scene behind Flutter widgets) for
+# Android (APKs, on Linux) and iOS (an unsigned .ipa, on macOS), smoke-tests each on an
+# emulator/simulator, and publishes them as the rolling `bevy-flutter-prototype` pre-release.
 
 on:
   push:
@@ -110,11 +110,70 @@ jobs:
           path: smoke/
           retention-days: 14
 
+  ios:
+    # Free on public repos like the Linux jobs; macOS is only needed because Flutter's iOS build
+    # (and Apple's SDK) only run there.
+    runs-on: macos-latest
+    timeout-minutes: 75
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust with the iOS targets
+        # rustup reads the pinned toolchain from the repo's rust-toolchain.toml.
+        run: rustup toolchain install && rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mobile-flutter/native
+
+      - name: Build the Bevy library
+        run: mobile-flutter/scripts/build-ios-native.sh
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Build the unsigned app
+        working-directory: mobile-flutter/app
+        run: flutter build ios --release --no-codesign
+
+      - name: Package the .ipa
+        run: >
+          mobile-flutter/scripts/package-ipa.sh
+          mobile-flutter/app/build/ios/iphoneos/Runner.app bevy-flutter-ios-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bevy-flutter-ipa
+          path: bevy-flutter-ios-unsigned.ipa
+          retention-days: 14
+
+      - name: Build for the simulator
+        working-directory: mobile-flutter/app
+        run: flutter build ios --simulator --debug
+
+      - name: Launch on a simulator
+        run: >
+          mobile-flutter/scripts/ios-simulator-smoke.sh
+          mobile-flutter/app/build/ios/iphonesimulator/Runner.app ios-smoke
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-simulator-smoke
+          path: ios-smoke/
+          retention-days: 14
+
   publish:
-    # Publishes even if the emulator smoke test fails: the emulator's software GPU is not a
-    # phone's, and the APK is still worth trying on a device.
-    needs: build
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # Publishes even if a smoke test fails (an emulator's software GPU is not a phone's, and the
+    # build is still worth trying on a device), and without the .ipa if the iOS build failed.
+    needs: [build, ios]
+    if: >
+      always() && needs.build.result == 'success'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -123,6 +182,13 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: bevy-flutter-apks
+          path: apks
+
+      - uses: actions/download-artifact@v4
+        # Missing only if the iOS build itself failed; a failed simulator test still uploads it.
+        continue-on-error: true
+        with:
+          name: bevy-flutter-ipa
           path: apks
 
       - name: Replace the rolling pre-release
@@ -136,4 +202,4 @@ jobs:
             --prerelease \
             --target "$GITHUB_SHA" \
             --title "Bevy + Flutter prototype" \
-            --notes "Built from \`${GITHUB_REF_NAME}\` at ${GITHUB_SHA}. Install \`app-arm64-v8a-release.apk\` on a phone (allow installs from unknown sources); \`app-x86_64-release.apk\` is for emulators. See mobile-flutter/README.md."
+            --notes "Built from \`${GITHUB_REF_NAME}\` at ${GITHUB_SHA}. Android: install \`app-arm64-v8a-release.apk\` (allow installs from unknown sources); \`app-x86_64-release.apk\` is for emulators. iOS: sideload \`bevy-flutter-ios-unsigned.ipa\` with Sideloadly and your Apple ID. See mobile-flutter/README.md."
