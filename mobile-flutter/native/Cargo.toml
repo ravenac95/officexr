@@ -1,0 +1,42 @@
+[package]
+name = "bevy-flutter-host"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Its own workspace: the root workspace only covers `crates/*`, and this crate only builds for Android.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bevy = { version = "=0.20.1", default-features = false, features = [
+  "std",
+  "async_executor",
+  "multi_threaded",
+  "bevy_log",
+  "bevy_window",
+  "bevy_render",
+  "bevy_core_pipeline",
+  "bevy_pbr",
+] }
+crossbeam-channel = "0.5"
+serde = { version = "1", features = ["derive"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+# Bevy pulls android-activity in on Android, and it refuses to compile without one glue
+# feature; `lib.rs` defines the `android_main` that glue links against.
+android-activity = { version = "0.6", features = ["native-activity"] }
+jni = "0.21"
+serde_json = "1"
+ndk = { version = "0.9", features = ["rwh_06"] }
+raw-window-handle = "0.6"
+# Bevy only compiles wgpu's Vulkan backend in; GLES is the fallback for devices and
+# emulators without a usable Vulkan driver.
+wgpu = { version = "30", default-features = false, features = ["gles"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
