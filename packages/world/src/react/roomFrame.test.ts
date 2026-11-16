@@ -247,6 +247,18 @@ describe('RoomFrame', () => {
     expect(bob!.bump).toEqual({ count: 2, normal: [1, 0] });
   });
 
+  it("sends each player's character clip-speed tunables", async () => {
+    const { frame, players, actions } = await setup();
+    actions.upsertPlayer({ id: 'bob', avatar: { model: 'Knight' } });
+    actions.setCharacterConfig('Knight', { walkAnimSpeed: 0.8, runAnimSpeed: 1.2 });
+
+    frame.step(0.016, 1000);
+
+    const [alice, bob] = players[0]!.players;
+    expect(alice!.animSpeeds).toEqual({ idle: 1, walk: 1, run: 1 });
+    expect(bob!.animSpeeds).toEqual({ idle: 1, walk: 0.8, run: 1.2 });
+  });
+
   it('sends the world once, and again only when the store changes it', async () => {
     const { frame, log, store } = await setup();
     const worldSends = () => log.filter((l) => l === 'view.setWorld').length;

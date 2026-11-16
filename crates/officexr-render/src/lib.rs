@@ -39,8 +39,8 @@ use bevy::prelude::*;
 use bevy::ui::UiSystems;
 
 pub use avatars::{
-    AnimationState, Bound as AvatarBound, Bump, Motion, PlayerAnimation, PlayerRender, Players,
-    Seat, next_motion,
+    AnimSpeeds, AnimationState, Bound as AvatarBound, Bump, Motion, PlayerAnimation, PlayerRender,
+    Players, Seat, next_motion,
 };
 pub use layouts::LayoutIndex;
 pub use lighting::{HemisphereFill, ObjectMaterial, snap_to_shadow_texel};

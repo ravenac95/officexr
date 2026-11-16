@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 use officexr_render::{PlayerRender, Players};
+
+use crate::world::SimWorld;
 use officexr_sim::{Vec3 as SimVec3, extrapolate_pos};
 
 const CHARACTERS: [&str; 6] = [
@@ -49,7 +51,9 @@ pub fn update_peers(
     mut updates: MessageReader<PeerUpdate>,
     mut peers: ResMut<Peers>,
     mut players: ResMut<Players>,
+    world: Option<Res<SimWorld>>,
 ) {
+    let anim_speeds = world.map(|w| w.anim_speeds).unwrap_or_default();
     let now_ms = time.elapsed_secs_f64() * 1000.0;
     for update in updates.read() {
         match update {
@@ -84,6 +88,7 @@ pub fn update_peers(
                     peer.name.clone()
                 },
                 airborne: p.is_airborne,
+                anim_speeds,
                 ..default()
             })
         })
