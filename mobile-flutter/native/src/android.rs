@@ -147,7 +147,7 @@ fn forward_events(
         let Ok(text) = env.new_string(json) else {
             continue;
         };
-        let _ = env.call_method(
+        let called = env.call_method(
             listener.as_obj(),
             "onEvent",
             "(Ljava/lang/String;)V",
@@ -155,7 +155,11 @@ fn forward_events(
         );
         let _ = env.delete_local_ref(text);
         if env.exception_check().unwrap_or(false) {
+            let _ = env.exception_describe();
             let _ = env.exception_clear();
+        }
+        if let Err(err) = called {
+            bevy::log::error!("delivering an event to Kotlin failed: {err}");
         }
     }
 }

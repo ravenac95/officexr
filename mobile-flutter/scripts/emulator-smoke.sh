@@ -26,7 +26,8 @@ done
 # Let a few stats events through, then exercise the touch path with a one-finger orbit.
 sleep 10
 adb exec-out screencap -p > "$out/1-launched.png"
-adb shell input swipe 300 900 750 1000 800
+read -r width height < <(adb shell wm size | sed -n 's/.*: \([0-9]*\)x\([0-9]*\).*/\1 \2/p' | tail -1)
+adb shell input swipe $((width / 5)) $((height / 2)) $((width * 4 / 5)) $((height / 2)) 800
 sleep 3
 adb exec-out screencap -p > "$out/2-after-orbit.png"
 adb logcat -d > "$out/logcat.txt"
