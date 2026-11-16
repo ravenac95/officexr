@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 use officexr_render::placement::VOXEL_SIZE;
 use officexr_render::{
-    BackgroundConfig, BakedLayoutPlacement, LightingConfig, WorldObjectKind, WorldObjects,
-    WorldSceneData,
+    AnimSpeeds, BackgroundConfig, BakedLayoutPlacement, LightingConfig, WorldObjectKind,
+    WorldObjects, WorldSceneData,
 };
 use officexr_sim::{SimKind, SimKinds, SimSettings, Vec3 as SimVec3};
 use serde::Deserialize;
@@ -43,6 +43,12 @@ struct Constants {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Animation {
+    #[serde(default = "one")]
+    idle_speed: f32,
+    #[serde(default = "one")]
+    walk_speed: f32,
+    #[serde(default = "one")]
+    run_speed: f32,
     player_speed: f64,
     run_multiplier: f64,
     movement_block_threshold: f64,
@@ -55,6 +61,10 @@ struct Jump {
     air_control: f64,
     max_jumps: u32,
     landing_ease_ms: f64,
+}
+
+fn one() -> f32 {
+    1.0
 }
 
 /// As `COLLISION_DEFAULTS.charRadius`: not part of the world constants.
@@ -70,6 +80,8 @@ pub struct SimWorld {
     pub settings: SimSettings,
     pub player_speed: f64,
     pub run_multiplier: f64,
+    /// The world's clip-speed tunables; per-character overrides aren't read here.
+    pub anim_speeds: AnimSpeeds,
 }
 
 #[derive(Default)]
@@ -150,6 +162,11 @@ fn sim_world(assembly: &Assembly) -> Option<SimWorld> {
         },
         player_speed: c.animation.player_speed,
         run_multiplier: c.animation.run_multiplier,
+        anim_speeds: AnimSpeeds {
+            idle: c.animation.idle_speed,
+            walk: c.animation.walk_speed,
+            run: c.animation.run_speed,
+        },
     })
 }
 
