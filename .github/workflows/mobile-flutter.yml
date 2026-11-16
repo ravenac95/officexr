@@ -198,7 +198,7 @@ jobs:
           TAG: bevy-flutter-prototype
         run: |
           gh release delete "$TAG" --cleanup-tag --yes || true
-          gh release create "$TAG" apks/*.apk \
+          gh release create "$TAG" apks/* \
             --prerelease \
             --target "$GITHUB_SHA" \
             --title "Bevy + Flutter prototype" \
