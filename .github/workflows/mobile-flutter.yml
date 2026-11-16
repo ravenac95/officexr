@@ -48,9 +48,11 @@ jobs:
           tool: cargo-ndk
 
       - name: Build the Bevy library
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
-        run: mobile-flutter/scripts/build-native.sh arm64-v8a x86_64
+        # ANDROID_HOME is the runner's shell env, not the workflow `env` context.
+        run: >
+          ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
+          ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/$NDK_VERSION"
+          mobile-flutter/scripts/build-native.sh arm64-v8a x86_64
 
       - uses: subosito/flutter-action@v2
         with:
