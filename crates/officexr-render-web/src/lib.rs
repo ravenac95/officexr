@@ -26,8 +26,8 @@ use bevy::prelude::*;
 use bevy::window::ExitCondition;
 use officexr_render::views::{ViewHub, ViewId, ViewKind, ViewMsg, ViewStatus, ViewTarget};
 use officexr_render::{
-    AssetBase, Bump, OfficeXrRenderPlugin, PlayerAnimation, PlayerRender, Players, SceneCamera,
-    Seat, WorldDiff, mugshot_player,
+    AnimSpeeds, AssetBase, Bump, OfficeXrRenderPlugin, PlayerAnimation, PlayerRender, Players,
+    SceneCamera, Seat, WorldDiff, mugshot_player,
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -116,6 +116,9 @@ struct PlayerInput {
     seat: Option<SeatInput>,
     #[serde(default)]
     bump: BumpInput,
+    /// `{ idle, walk, run }`: the character's clip-speed tunables, all 1 when omitted.
+    #[serde(default, rename = "animSpeeds")]
+    anim_speeds: AnimSpeeds,
 }
 
 #[derive(Serialize)]
@@ -352,6 +355,7 @@ pub fn set_players(id: ViewId, players: JsValue) -> Result<(), JsError> {
                     normal: p.bump.normal.into(),
                 },
                 animation: p.animation,
+                anim_speeds: p.anim_speeds,
             })
             .collect(),
         char_radius: input.char_radius,

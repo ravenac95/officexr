@@ -252,7 +252,9 @@ export interface RendererModule {
    * `players`: `{ players, charRadius, playerSpeed, runSpeed, bumpEasingMs?, paused? }`. A player's `animation`, when set,
    * plays that state's clip at that time scale instead of the one its velocity implies. A player's optional
    * `seat` (`{ pos, yaw }`) sits it there; a change of its `bump.count` plays the hit reaction and a kick along
-   * `bump.normal`, eased over `bumpEasingMs`. `paused` draws every player in its bind pose without name tags,
+   * `bump.normal`, eased over `bumpEasingMs`. A player's optional `animSpeeds` (`{ idle, walk, run }`, each 1 when
+   * omitted) multiplies its clip rate: a walk or run plays at its ground speed over the clip's authored ground
+   * speed, so at 1 the planted foot doesn't slide. `paused` draws every player in its bind pose without name tags,
    * as a `setWorld` mugshot does.
    */
   setPlayers(id: ViewId, players: unknown): void;

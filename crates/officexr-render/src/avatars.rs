@@ -33,6 +33,13 @@ const FADE: Duration = Duration::from_millis(200);
 /// Faster than authored so a bump reads as a quick recoil, not a flinch.
 const HIT_SPEED: f32 = 1.6;
 const BUMP_KICK_M: f32 = 0.16;
+/// Ground speed (m/s) `Walking_C` and `Running_A` are authored at: how fast a
+/// planted foot moves back under the body at 1x, measured from
+/// `Rig_Medium_MovementBasic.glb` (see `clip_ground_speeds_match_the_rig`).
+/// Locomotion plays at the player's ground speed over these, so the feet
+/// don't slide whatever the frame rate.
+const WALK_CLIP_GROUND_SPEED: f32 = 0.5;
+const RUN_CLIP_GROUND_SPEED: f32 = 2.43;
 /// Where the ping bell hangs, above the name tag.
 const BELL_HEIGHT_M: f32 = 2.45;
 
@@ -55,6 +62,28 @@ pub struct PlayerRender {
     /// Sitting overrides the motion `vel` and `airborne` imply, and places the player at the seat.
     pub seat: Option<Seat>,
     pub bump: Bump,
+    /// The character's clip-speed tunables (`resolveCharacterTunables`'s
+    /// `idleAnimSpeed` / `walkAnimSpeed` / `runAnimSpeed`).
+    pub anim_speeds: AnimSpeeds,
+}
+
+/// Multipliers on the locomotion clips' playback rate. At 1 a walk or run
+/// plays at the rate that keeps its planted foot still on the ground.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+pub struct AnimSpeeds {
+    pub idle: f32,
+    pub walk: f32,
+    pub run: f32,
+}
+
+impl Default for AnimSpeeds {
+    fn default() -> Self {
+        Self {
+            idle: 1.0,
+            walk: 1.0,
+            run: 1.0,
+        }
+    }
 }
 
 /// Where a seated player sits: the body root and yaw the seat puts them at.
@@ -237,20 +266,18 @@ pub fn next_motion(
     }
 }
 
-/// Clip time scale: speed over the tier's reference speed, clamped to
-/// [0, 1] in tenths. Idle and jumping play at authored speed.
-fn anim_scale(motion: Motion, vel: Vec3, player_speed: f32, run_speed: f32) -> f32 {
-    let denom = match motion {
-        Motion::Running => run_speed,
-        Motion::Walking => player_speed,
-        Motion::Idle | Motion::Jumping => return 1.0,
+/// Clip time scale: ground speed (m/s) over the speed the tier's clip is
+/// authored at, times the character's tunable, so a planted foot stays put.
+/// Frame-rate independent: both speeds are per second. Idle plays at its
+/// tunable, jumping at authored speed.
+fn anim_scale(motion: Motion, vel: Vec3, speeds: AnimSpeeds) -> f32 {
+    let (clip_speed, tunable) = match motion {
+        Motion::Running => (RUN_CLIP_GROUND_SPEED, speeds.run),
+        Motion::Walking => (WALK_CLIP_GROUND_SPEED, speeds.walk),
+        Motion::Idle => return speeds.idle,
+        Motion::Jumping => return 1.0,
     };
-    let ratio = if denom > 0.0 {
-        Vec2::new(vel.x, vel.z).length() / denom
-    } else {
-        0.0
-    };
-    (ratio.clamp(0.0, 1.0) * 10.0).round() / 10.0
+    Vec2::new(vel.x, vel.z).length() / clip_speed * tunable
 }
 
 #[derive(Component)]
@@ -672,7 +699,11 @@ fn choose_clip(
     }
     let (walk, run) = (players.player_speed, players.run_speed);
     let motion = next_motion(previous, p.vel, p.airborne, walk, run);
-    (motion, motion.into(), anim_scale(motion, p.vel, walk, run))
+    (
+        motion,
+        motion.into(),
+        anim_scale(motion, p.vel, p.anim_speeds),
+    )
 }
 
 /// Fades to `state`'s clip when it isn't what's `playing`, looping it unless
@@ -883,7 +914,183 @@ mod tests {
     fn without_an_animation_the_velocity_picks_the_clip_as_before() {
         let p = player(Vec3::new(3.0, 0.0, 0.0), None);
         let chosen = choose_clip(Motion::Idle, &p, &Players::default());
-        assert_eq!(chosen, (Motion::Walking, AnimationState::Walking, 1.0));
+        assert_eq!(chosen.0, Motion::Walking);
+        assert_eq!(chosen.1, AnimationState::Walking);
+        assert!((chosen.2 - 3.0 / WALK_CLIP_GROUND_SPEED).abs() < 1e-5);
+    }
+
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-4
+    }
+
+    #[test]
+    fn locomotion_plays_at_ground_speed_over_the_clips_authored_speed() {
+        let ones = AnimSpeeds::default();
+        let walk = |v: Vec3| anim_scale(Motion::Walking, v, ones);
+        // At the clip's own ground speed it plays at 1x, in any direction.
+        assert!(close(
+            walk(Vec3::new(0.0, 0.0, WALK_CLIP_GROUND_SPEED)),
+            1.0
+        ));
+        assert!(close(
+            walk(Vec3::new(0.3, 0.0, 0.4)),
+            0.5 / WALK_CLIP_GROUND_SPEED
+        ));
+        // The default 3 m/s walk and 6 m/s run play well over 1x, rising
+        // linearly with speed rather than clamping at the tier's reference.
+        assert!(close(walk(Vec3::X * 3.0), 6.0));
+        assert!(close(walk(Vec3::X * 4.5), 9.0));
+        let run = anim_scale(Motion::Running, Vec3::X * 6.0, ones);
+        assert!(close(run, 6.0 / RUN_CLIP_GROUND_SPEED));
+        // Vertical speed (a slope, a fall) doesn't speed the legs up.
+        assert!(close(walk(Vec3::new(3.0, -5.0, 0.0)), 6.0));
+        assert!(close(anim_scale(Motion::Idle, Vec3::X, ones), 1.0));
+        assert!(close(anim_scale(Motion::Jumping, Vec3::X * 6.0, ones), 1.0));
+    }
+
+    #[test]
+    fn the_characters_tunables_scale_their_clip() {
+        let speeds = AnimSpeeds {
+            idle: 0.5,
+            walk: 0.8,
+            run: 1.25,
+        };
+        let walk = anim_scale(Motion::Walking, Vec3::X * 3.0, speeds);
+        assert!(close(walk, 3.0 / WALK_CLIP_GROUND_SPEED * 0.8));
+        let run = anim_scale(Motion::Running, Vec3::X * 6.0, speeds);
+        assert!(close(run, 6.0 / RUN_CLIP_GROUND_SPEED * 1.25));
+        assert!(close(anim_scale(Motion::Idle, Vec3::ZERO, speeds), 0.5));
+        assert!(close(anim_scale(Motion::Jumping, Vec3::ZERO, speeds), 1.0));
+
+        let mut p = player(Vec3::X * 3.0, None);
+        p.anim_speeds = speeds;
+        let chosen = choose_clip(Motion::Walking, &p, &Players::default());
+        assert!(close(chosen.2, walk));
+    }
+
+    /// Measures how fast a planted foot slides back under the body in a
+    /// `Rig_Medium_MovementBasic.glb` clip at 1x: the clip's ground speed.
+    fn clip_ground_speed(clip: &str) -> f32 {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../packages/studio/public/models/animations/Rig_Medium_MovementBasic.glb"
+        );
+        let glb = std::fs::read(path).expect("the rig GLB is checked in");
+        let le = |at: usize| u32::from_le_bytes(glb[at..at + 4].try_into().unwrap()) as usize;
+        let json_len = le(12);
+        let doc: serde_json::Value = serde_json::from_slice(&glb[20..20 + json_len]).unwrap();
+        let bin = &glb[20 + json_len + 8..];
+        let floats = |accessor: &serde_json::Value| -> Vec<f32> {
+            let a = &doc["accessors"][accessor.as_u64().unwrap() as usize];
+            assert_eq!(a["componentType"], 5126, "float keys");
+            let view = &doc["bufferViews"][a["bufferView"].as_u64().unwrap() as usize];
+            let width = match a["type"].as_str().unwrap() {
+                "SCALAR" => 1,
+                "VEC3" => 3,
+                _ => 4,
+            };
+            let start = (view["byteOffset"].as_u64().unwrap_or(0)
+                + a["byteOffset"].as_u64().unwrap_or(0)) as usize;
+            let n = a["count"].as_u64().unwrap() as usize * width;
+            (0..n)
+                .map(|i| {
+                    f32::from_le_bytes(bin[start + i * 4..start + i * 4 + 4].try_into().unwrap())
+                })
+                .collect()
+        };
+        let nodes = doc["nodes"].as_array().unwrap();
+        let mut parent = vec![None; nodes.len()];
+        for (i, n) in nodes.iter().enumerate() {
+            for c in n["children"].as_array().into_iter().flatten() {
+                parent[c.as_u64().unwrap() as usize] = Some(i);
+            }
+        }
+        let anim = doc["animations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["name"] == clip)
+            .unwrap();
+        let mut curves = std::collections::HashMap::new();
+        let mut duration = 0.0f32;
+        for ch in anim["channels"].as_array().unwrap() {
+            let s = &anim["samplers"][ch["sampler"].as_u64().unwrap() as usize];
+            let times = floats(&s["input"]);
+            duration = duration.max(*times.last().unwrap());
+            let key = (
+                ch["target"]["node"].as_u64().unwrap() as usize,
+                ch["target"]["path"].as_str().unwrap().to_string(),
+            );
+            curves.insert(key, (times, floats(&s["output"])));
+        }
+        let sample = |node: usize, path: &str, t: f32, width: usize| -> Option<Vec<f32>> {
+            let (times, values) = curves.get(&(node, path.to_string()))?;
+            let k = times.partition_point(|&x| x <= t).clamp(1, times.len() - 1) - 1;
+            let f = ((t - times[k]) / (times[k + 1] - times[k])).clamp(0.0, 1.0);
+            let at = |i: usize| values[i * width..(i + 1) * width].to_vec();
+            Some(if width == 4 {
+                let q = |v: Vec<f32>| Quat::from_xyzw(v[0], v[1], v[2], v[3]);
+                q(at(k)).slerp(q(at(k + 1)), f).to_array().to_vec()
+            } else {
+                let (a, b) = (Vec3::from_slice(&at(k)), Vec3::from_slice(&at(k + 1)));
+                a.lerp(b, f).to_array().to_vec()
+            })
+        };
+        let rest = |node: usize, key: &str, default: &[f32]| -> Vec<f32> {
+            nodes[node][key].as_array().map_or(default.to_vec(), |v| {
+                v.iter().map(|x| x.as_f64().unwrap() as f32).collect()
+            })
+        };
+        let world = |mut node: usize, t: f32| -> Vec3 {
+            let mut m = Mat4::IDENTITY;
+            loop {
+                let tr = sample(node, "translation", t, 3)
+                    .unwrap_or_else(|| rest(node, "translation", &[0.0; 3]));
+                let r = sample(node, "rotation", t, 4)
+                    .unwrap_or_else(|| rest(node, "rotation", &[0.0, 0.0, 0.0, 1.0]));
+                let s =
+                    sample(node, "scale", t, 3).unwrap_or_else(|| rest(node, "scale", &[1.0; 3]));
+                let local = Mat4::from_scale_rotation_translation(
+                    Vec3::from_slice(&s),
+                    Quat::from_slice(&r),
+                    Vec3::from_slice(&tr),
+                );
+                m = local * m;
+                match parent[node] {
+                    Some(p) => node = p,
+                    None => return m.w_axis.truncate(),
+                }
+            }
+        };
+        let foot = nodes.iter().position(|n| n["name"] == "foot.l").unwrap();
+        const N: usize = 160;
+        let dt = duration / N as f32;
+        let feet: Vec<Vec3> = (0..=N).map(|i| world(foot, i as f32 * dt)).collect();
+        // While planted (its lowest 40 % of heights) the foot slides back at
+        // the clip's ground speed.
+        let mut heights: Vec<f32> = feet.iter().map(|p| p.y).collect();
+        heights.sort_by(f32::total_cmp);
+        let planted = heights[N * 2 / 5];
+        let mut speeds: Vec<f32> = (1..N)
+            .filter(|&i| feet[i].y <= planted)
+            .map(|i| (feet[i - 1].z - feet[i + 1].z).abs() / (2.0 * dt))
+            .collect();
+        speeds.sort_by(f32::total_cmp);
+        speeds[speeds.len() / 2]
+    }
+
+    #[test]
+    fn clip_ground_speeds_match_the_rig() {
+        for (clip, authored) in [
+            (AnimationState::Walking, WALK_CLIP_GROUND_SPEED),
+            (AnimationState::Running, RUN_CLIP_GROUND_SPEED),
+        ] {
+            let measured = clip_ground_speed(clip.clip().unwrap());
+            assert!(
+                (measured - authored).abs() / authored < 0.05,
+                "{clip:?}: measured {measured} m/s, constant {authored} m/s"
+            );
+        }
     }
 
     #[test]

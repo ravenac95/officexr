@@ -38,6 +38,8 @@ export interface PlayerInput {
   seat: { pos: Xyz; yaw: number } | null;
   /** Each increase of `count` is a bump, pushed along `normal` (XZ). */
   bump: { count: number; normal: [number, number] };
+  /** The character's clip-speed tunables; at 1 a walk or run plays at the rate that keeps its feet planted. */
+  animSpeeds: { idle: number; walk: number; run: number };
 }
 
 export interface PlayersInput {
@@ -346,6 +348,7 @@ export class RoomFrame {
       .map((p): PlayerInput => {
         const isSelf = p.id === selfId;
         const pos = isSelf ? p.pos : sim ? sim.extrapolatePeer(p, nowMs) : extrapolatePos(p, nowMs);
+        const tun = resolveCharacterTunables(p.avatar.model ?? 'default', ws, state.characterConfigs);
         return {
           id: p.id,
           character: this.options.characterOf(p),
@@ -356,6 +359,7 @@ export class RoomFrame {
           airborne: isSelf ? this.airborne : p.isAirborne,
           seat: p.seat == null ? null : { pos: xyz(p.pos), yaw: p.yaw },
           bump: this.bumps.get(p.id) ?? { count: 0, normal: [0, 0] },
+          animSpeeds: { idle: tun.idleAnimSpeed, walk: tun.walkAnimSpeed, run: tun.runAnimSpeed },
         };
       });
     return {
