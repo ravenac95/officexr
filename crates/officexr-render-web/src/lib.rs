@@ -24,6 +24,7 @@ use bevy::asset::AssetMetaCheck;
 use bevy::picking::input::PointerInputPlugin;
 use bevy::prelude::*;
 use bevy::window::ExitCondition;
+use bevy::winit::WinitSettings;
 use officexr_render::views::{ViewHub, ViewId, ViewKind, ViewMsg, ViewStatus, ViewTarget};
 use officexr_render::{
     AssetBase, Bump, OfficeXrRenderPlugin, PlayerAnimation, PlayerRender, Players, SceneCamera,
@@ -209,6 +210,12 @@ pub fn init(origin: String, primary_canvas: JsValue) -> Result<(), JsError> {
             .disable::<PointerInputPlugin>(),
         OfficeXrRenderPlugin,
     ));
+    // Bevy's default drops to a 60 Hz `Reactive` timer once no canvas has focus (any tap on the
+    // page's DOM blurs it), and on the web that timer lands some frames in a scheduler task
+    // instead of a `requestAnimationFrame` callback. WebKit's WebGPU canvas flickers when it
+    // presents outside rAF. `Continuous` keeps winit in `ControlFlow::Wait`, so every update
+    // runs from the canvas's rAF redraw.
+    app.insert_resource(WinitSettings::continuous());
     picking::add(&mut app);
     capture::add(&mut app);
     #[cfg(feature = "webgl2")]
