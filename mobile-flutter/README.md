@@ -1,20 +1,28 @@
 # Bevy + Flutter prototype
 
 Does a Flutter app work as the shell for OfficeXR's Bevy renderer? This prototype says yes on
-Android: Flutter owns the app and its UI, and a Bevy scene renders into a Flutter texture behind
-Flutter widgets.
+Android and iOS: Flutter owns the app and its UI, and a Bevy scene renders behind Flutter
+widgets. On Android, Bevy draws into a Flutter texture. On iOS, it draws into a Metal view
+embedded as a platform view.
 
 - `native/`: the Rust library `libbevy_flutter_host.so`.
   - `host.rs` runs a Bevy app on a surface someone else owns, without `bevy_winit`: it spawns the
     primary window entity with the surface's `RawHandleWrapper` before `RenderPlugin` builds, then
     drives `app.update()` itself.
   - `scene.rs` is the demo: spinning cubes and an orbit camera, with commands in and events out.
-  - `android.rs` is the JNI glue.
+  - `android.rs` is the JNI glue: Bevy runs on a thread of its own.
+  - `ios.rs` is a C API. wgpu only creates Metal surfaces on the main thread, so Swift steps the
+    host from a `CADisplayLink` instead.
+- `bevy_host/`: the iOS plugin (a Swift package). `BevyMetalView` is a `CAMetalLayer`-backed
+  `UIView` that Bevy renders into and that sends touches straight to Rust. It links the Rust
+  library as `BevyHostCore.xcframework`, built by `scripts/build-ios-native.sh` (gitignored).
 - `app/`: the Flutter app.
   - `BevyTexture.kt` creates a `SurfaceProducer` (a Flutter texture backed by an Android
     `Surface`) and hands its `Surface` to Rust.
   - `bevy_view.dart` shows the texture and forwards pointer events.
   - `main.dart` lays Flutter controls (speed, colour, cube count, a second Flutter page) over it.
+
+Android:
 
 ```
 Dart widgets ──MethodChannel──▶ Kotlin BevyTexture ──JNI──▶ Rust host thread ──▶ Bevy app
@@ -23,12 +31,33 @@ Dart widgets ──MethodChannel──▶ Kotlin BevyTexture ──JNI──▶ 
 Texture(textureId) ◀── Flutter composites the SurfaceProducer's frames
 ```
 
-## Get the APK
+iOS:
+
+```
+Dart widgets ──MethodChannel──▶ BevyHostPlugin ──C──▶ Host (main thread) ──▶ Bevy app
+UiKitView ◀── BevyMetalView (CAMetalLayer) ◀── renders; CADisplayLink calls bevy_host_frame
+      touches ──────────────────────▶ bevy_host_touch
+```
+
+## Get the app
 
 CI (`.github/workflows/mobile-flutter.yml`) builds on every push that touches this folder and
-publishes the rolling **`bevy-flutter-prototype`** pre-release under the repo's Releases.
-Install `app-arm64-v8a-release.apk` on a phone; you need to allow installs from unknown sources.
-The same APKs and the emulator smoke test's screenshots are also kept as workflow artifacts.
+publishes the rolling **`bevy-flutter-prototype`** pre-release under the repo's Releases. The
+Android jobs run on Linux and the iOS job on macOS; both are free on a public repo.
+
+- **Android:** install `app-arm64-v8a-release.apk`; you need to allow installs from unknown
+  sources.
+- **iOS:** `bevy-flutter-ios-unsigned.ipa` is unsigned, so sideload it:
+  1. Install [Sideloadly](https://sideloadly.io) on a Mac (or Windows PC).
+  2. Plug in the iPhone, drop the `.ipa` into Sideloadly, sign in with your Apple ID, and press
+     Start.
+  3. On the iPhone, trust your Apple ID under *Settings → General → VPN & Device Management*.
+     On iOS 16 and later, also turn on *Settings → Privacy & Security → Developer Mode*.
+
+  With a free Apple ID the install expires after 7 days; sideload the latest build again.
+
+The workflow artifacts also keep the builds and the emulator/simulator smoke tests'
+screenshots.
 
 ## Build locally
 
@@ -47,15 +76,22 @@ cd mobile-flutter/app && flutter run --release
 ```
 
 `build-native.sh` writes the `.so` files into `app/android/app/src/main/jniLibs/` (gitignored).
-Rebuild them whenever `native/` changes; `flutter run` doesn't.
+Rebuild them whenever `native/` changes; `flutter run` doesn't. On a Mac, iOS is the same with
+`scripts/build-ios-native.sh` (it needs `rustup target add aarch64-apple-ios
+aarch64-apple-ios-sim`), then `flutter run` on a simulator or device.
 
 ## What it doesn't do yet
 
-- **iOS.** The same `host.rs` should work behind a `CAMetalLayer` (a Flutter texture through
-  `FlutterTexture`/`CVPixelBuffer`, or a platform view), but it needs macOS runners.
+- **iOS on a real phone, untested.** CI only proves the simulator; real-device runs depend on
+  sideloading. The simulator slice is arm64 only (Apple-silicon Macs).
 - **OfficeXR itself.** The scene is a stand-in. Next steps: draw a room with
   `crates/officexr-render`, and connect with `crates/officexr-protocol`.
-- **Lifecycle polish.** Resizing or regaining the surface restarts Bevy, so scene state resets.
-  Frames are paced by a fixed 60 fps sleep, not the display's vsync.
-- **Input.** Touches go through a method channel (one async hop per pointer event); `dart:ffi`
-  straight into the library would cut that.
+- **Lifecycle polish.** On Android, resizing or regaining the surface restarts Bevy, so scene
+  state resets, and frames are paced by a fixed 60 fps sleep, not vsync. On iOS, Bevy runs on
+  the main thread, so a slow frame stalls platform-channel calls (Flutter's own UI keeps
+  going).
+- **One platform layer each.** Android's bridge lives in the app (`BevyTexture.kt`) and iOS's in
+  the `bevy_host` plugin; moving Android into the plugin would make them symmetric.
+- **Input.** On Android, touches go through a method channel (one async hop per pointer
+  event); `dart:ffi` straight into the library would cut that. On iOS, the native view hands
+  them to Rust directly.
