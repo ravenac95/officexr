@@ -24,6 +24,13 @@ use crate::views::{Lit, ViewCamera, ViewScene};
 const HEMISPHERE_SKY: [u8; 3] = [0xae, 0xdc, 0xff];
 const HEMISPHERE_GROUND: [u8; 3] = [0x3a, 0x2f, 0x24];
 const SHADOW_NEAR: f32 = 1.0;
+/// The least normal bias, in shadow-map texels: Bevy's own default.
+/// three.js draws a mesh's back faces into the shadow map, so a lit face is
+/// compared against the far side of its object and a tiny `shadowNormalBias`
+/// is enough. Bevy draws front faces, so each lit face meets its own depth
+/// and needs about two texels of offset or it shadows itself in stripes
+/// across the light (shadow acne).
+const MIN_NORMAL_BIAS_TEXELS: f32 = 1.8;
 
 /// `StandardMaterial` plus three.js's hemisphere and ambient lights, which
 /// Bevy has no equivalent for (its ambient adds a specular term).
@@ -138,7 +145,7 @@ fn sync_lights(
             illuminance: l.sun_intensity,
             shadow_maps_enabled: l.cast_shadow,
             shadow_depth_bias: -l.shadow_bias * (shadow_far(l) - SHADOW_NEAR),
-            shadow_normal_bias: l.shadow_normal_bias / texel,
+            shadow_normal_bias: normal_bias_texels(l.shadow_normal_bias, texel),
             ..default()
         },
         // Only the first cascade's far bound matters: `fit_sun_shadow`
@@ -197,6 +204,12 @@ fn sync_lights(
 
 fn shadow_far(l: &LightingConfig) -> f32 {
     Vec3::from(l.sun_position).length() + l.shadow_range + 20.0
+}
+
+/// `shadowNormalBias` (world units, as three.js reads it) in shadow-map
+/// texels, as Bevy reads it, raised to [`MIN_NORMAL_BIAS_TEXELS`].
+fn normal_bias_texels(normal_bias: f32, texel_size: f32) -> f32 {
+    (normal_bias / texel_size).max(MIN_NORMAL_BIAS_TEXELS)
 }
 
 fn shadow_texel_size(l: &LightingConfig) -> f32 {
@@ -307,6 +320,16 @@ mod tests {
             assert!((t - t.round()).abs() < 1e-4);
         }
         assert!((s.dot(b.z_axis) - p.dot(b.z_axis)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn the_normal_bias_is_in_texels_and_never_under_bevys_default() {
+        // The default 0.02 m on 40 m / 2048 texels is about half a texel.
+        let texel = 2.0 * 40.0 / 2048.0;
+        assert_eq!(normal_bias_texels(0.02, texel), MIN_NORMAL_BIAS_TEXELS);
+        assert_eq!(normal_bias_texels(0.0, texel), MIN_NORMAL_BIAS_TEXELS);
+        // Above the floor it converts as before.
+        assert!((normal_bias_texels(0.1, texel) - 0.1 / texel).abs() < 1e-5);
     }
 
     #[test]
