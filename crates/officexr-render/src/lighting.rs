@@ -40,6 +40,26 @@ pub type ObjectMaterial = ExtendedMaterial<StandardMaterial, HemisphereFill>;
 pub struct HemisphereFill {
     #[uniform(100)]
     pub irradiance: HemisphereIrradiance,
+    /// Zero for everything but an avatar under a spell or frozen at its desk.
+    #[uniform(101)]
+    pub look: AvatarLook,
+}
+
+/// What an avatar's spell or absence does to its colours (`Adventurer.tsx`'s
+/// tint and `frozenLook.ts`); the default changes nothing.
+// ISP bend: every object material carries this uniform though only avatars
+// set it. A second extension type would need its own pipeline and a material
+// swap whenever a spell lands; one zeroed uniform is cheaper.
+#[derive(ShaderType, Reflect, Debug, Clone, Copy, Default, PartialEq)]
+pub struct AvatarLook {
+    /// Linear RGB the base colour is multiplied toward, by `tint.a`.
+    pub tint: LinearRgba,
+    /// Emissive added in the tint's colour.
+    pub glow: f32,
+    /// 0 keeps the colours, 1 makes them grey.
+    pub desaturate: f32,
+    /// A fresnel rim's linear RGB, `rim.a` its strength.
+    pub rim: LinearRgba,
 }
 
 #[derive(ShaderType, Reflect, Debug, Clone, Copy, Default)]
@@ -61,6 +81,7 @@ impl HemisphereFill {
         let ground = hemisphere_color(HEMISPHERE_GROUND) * lighting.ambient_intensity + fill;
         Self {
             irradiance: HemisphereIrradiance { sky, ground },
+            look: AvatarLook::default(),
         }
     }
 }
@@ -113,7 +134,7 @@ pub(crate) fn sync_lighting(
             .collect();
         for id in handles {
             if let Some(mut material) = materials.get_mut(id) {
-                material.extension = fill.clone();
+                material.extension.irradiance = fill.irradiance;
             }
         }
         commands.entity(view).insert(Lit(scene.lighting.clone()));

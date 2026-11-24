@@ -9,6 +9,7 @@
 
 mod avatars;
 mod compressed_gltf;
+pub mod effects;
 mod layouts;
 mod lighting;
 #[cfg(feature = "mugshot")]
@@ -39,9 +40,11 @@ use bevy::prelude::*;
 use bevy::ui::UiSystems;
 
 pub use avatars::{
-    AnimSpeeds, AnimationState, Bound as AvatarBound, Bump, Motion, PlayerAnimation, PlayerRender,
-    Players, Seat, next_motion,
+    AnimSpeeds, AnimationState, BodyOffset, Bound as AvatarBound, Bump, FALLBACK_HEIGHT_M,
+    Motion, NamedClip, OVERHEAD_GAP_M, PlayerAnimation, PlayerRender, Players, Seat,
+    SilhouetteMaterial, Tint, next_motion,
 };
+pub use views::PlayerAnchor;
 pub use layouts::LayoutIndex;
 pub use lighting::{HemisphereFill, ObjectMaterial, snap_to_shadow_texel};
 #[cfg(feature = "mugshot")]
@@ -129,6 +132,8 @@ impl Plugin for OfficeXrRenderPlugin {
             MaterialPlugin::<proximity::GlowMaterial>::default(),
             lighting::plugin,
             avatars::plugin,
+            avatars::render_plugin,
+            effects::plugin,
             scene_systems,
             #[cfg(feature = "picking")]
             picking::plugin,

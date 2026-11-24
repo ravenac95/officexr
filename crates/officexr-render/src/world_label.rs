@@ -10,6 +10,8 @@ use crate::views::View;
 #[derive(Component)]
 pub(crate) struct WorldLabel {
     pub offset: Vec3,
+    /// Logical pixels the label moves by once centred on its point.
+    pub nudge: Vec2,
     pub shown: bool,
 }
 
@@ -27,6 +29,7 @@ fn anchored(anchor: Entity, offset: Vec3, node: Node, background: Color) -> impl
     (
         WorldLabel {
             offset,
+            nudge: Vec2::ZERO,
             shown: true,
         },
         LabelOf(anchor),
@@ -162,8 +165,8 @@ pub(crate) fn place_labels(
         match at {
             Some(xy) if label.shown && computed.size() != Vec2::ZERO => {
                 let half = computed.size() * computed.inverse_scale_factor() / 2.0;
-                node.left = Val::Px(xy.x - half.x);
-                node.top = Val::Px(xy.y - half.y);
+                node.left = Val::Px(xy.x - half.x + label.nudge.x);
+                node.top = Val::Px(xy.y - half.y + label.nudge.y);
                 *visibility = Visibility::Inherited;
             }
             _ => *visibility = Visibility::Hidden,

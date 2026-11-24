@@ -1,0 +1,189 @@
+{
+  "size": [
+    640,
+    360
+  ],
+  "instances": [
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "furniture_chair_a",
+      "position": [
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "characters": [
+    {
+      "character": "Knight",
+      "spawn": [
+        0.375,
+        0,
+        0.423
+      ],
+      "moves": [
+        {
+          "frames": 60
+        }
+      ],
+      "seat": {
+        "pos": [
+          0.375,
+          -0.3397,
+          0.423
+        ],
+        "yaw": -3.141593
+      },
+      "look": {
+        "frozen": true
+      }
+    },
+    {
+      "character": "Mage",
+      "spawn": [
+        -1.8,
+        0,
+        0.5
+      ],
+      "yaw": 3.141593,
+      "moves": [
+        {
+          "frames": 60
+        }
+      ],
+      "look": {
+        "tint": {
+          "color": "#ff33cc",
+          "strength": 0.6,
+          "glow": true
+        },
+        "aura": "sparkles"
+      }
+    },
+    {
+      "character": "Barbarian",
+      "spawn": [
+        2.4,
+        0,
+        0.5
+      ],
+      "yaw": 3.141593,
+      "moves": [
+        {
+          "frames": 60
+        }
+      ],
+      "look": {
+        "tint": {
+          "color": "#1c1410",
+          "strength": 0.85,
+          "glow": false
+        },
+        "aura": "smoke"
+      }
+    },
+    {
+      "character": "Rogue",
+      "spawn": [
+        -3.4,
+        0,
+        0.5
+      ],
+      "yaw": 3.141593,
+      "moves": [
+        {
+          "frames": 60
+        }
+      ],
+      "look": {
+        "body": {
+          "scale": 0.5
+        }
+      }
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "position": [
+        0,
+        2.2,
+        7.5
+      ],
+      "lookAt": [
+        0,
+        1.0,
+        0.4
+      ],
+      "fov": 50
+    }
+  ],
+  "captures": [
+    59
+  ],
+  "assert": []
+}

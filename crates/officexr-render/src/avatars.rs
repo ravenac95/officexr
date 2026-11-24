@@ -1,7 +1,16 @@
 //! Port of `Players.tsx` + `Adventurer.tsx` + `PlayerNameTag.tsx`: one
 //! KayKit character per player, animated with the shared `Rig_Medium_*`
-//! clips, with a screen-space name tag over its head.
+//! clips retargeted to its proportions, with what its pose, items and
+//! spells add, and a screen-space name tag over its head.
 
+mod arm_clips;
+mod look;
+mod overhead;
+mod props;
+mod retarget;
+mod silhouette;
+
+use std::collections::HashMap;
 use std::f32::consts::PI;
 use std::time::Duration;
 
@@ -9,14 +18,21 @@ use bevy::animation::animated_field;
 use bevy::animation::animation_curves::{AnimatableCurve, AnimatableKeyframeCurve};
 use bevy::animation::{AnimatedBy, AnimationTargetId};
 use bevy::gltf::{Gltf, GltfNode};
+use bevy::mesh::skinning::SkinnedMesh;
 use bevy::prelude::*;
 use serde::Deserialize;
 
 use crate::AssetBase;
-use crate::lighting::{HemisphereFill, ObjectMaterial};
+use crate::effects::{Aura, Effect};
+use crate::lighting::{AvatarLook, HemisphereFill, ObjectMaterial};
 use crate::picking::PickTarget;
 use crate::views::{View, ViewKind, ViewPlayers, ViewScene};
 use crate::world_label::{self, Labels, WorldLabel};
+use arm_clips::ArmClip;
+use props::{AvatarProp, Finger, Vehicle, Wand};
+pub use overhead::{FALLBACK_HEIGHT_M, OVERHEAD_GAP_M};
+
+pub use silhouette::SilhouetteMaterial;
 
 const RIGS: [&str; 4] = [
     "/models/animations/Rig_Medium_General.glb",
@@ -40,8 +56,11 @@ const BUMP_KICK_M: f32 = 0.16;
 /// don't slide whatever the frame rate.
 const WALK_CLIP_GROUND_SPEED: f32 = 0.5;
 const RUN_CLIP_GROUND_SPEED: f32 = 2.43;
-/// Where the ping bell hangs, above the name tag.
+/// Where the ping bell hangs, above the name tag Bevy draws.
 const BELL_HEIGHT_M: f32 = 2.45;
+const BELL_PX: f32 = 28.0;
+/// Between the head and the bell, and the bell and a host's stack above it.
+const BELL_GAP_PX: f32 = 2.0;
 
 /// One player as the renderer needs it, as `OfficeState.players` holds it.
 #[derive(Clone, Debug, Default)]
@@ -65,6 +84,27 @@ pub struct PlayerRender {
     /// The character's clip-speed tunables (`resolveCharacterTunables`'s
     /// `idleAnimSpeed` / `walkAnimSpeed` / `runAnimSpeed`).
     pub anim_speeds: AnimSpeeds,
+    /// A pose's rig clip (a swim stroke, a ride), over the motion's.
+    pub clip: Option<NamedClip>,
+    /// How a pose or a spell moves the body off its feet.
+    pub body: BodyOffset,
+    /// A vehicle model drawn under the rider, e.g. `/models/props/scooter.gltf`.
+    pub vehicle: Option<String>,
+    /// Holding the wand, drawn in the right hand.
+    pub wand: bool,
+    /// Each increase points once, as a poke.
+    pub pokes: u32,
+    /// Each increase waves the wand once, as a cast.
+    pub casts: u32,
+    /// A spell's colour on the character.
+    pub tint: Option<Tint>,
+    /// An away claimant left at their desk: grey, translucent and rimmed,
+    /// with no tag, bell or reactions.
+    pub frozen: bool,
+    /// Shows the avatar through whatever hides it, in this colour.
+    pub silhouette: Option<Color>,
+    /// What a spell leaves rising off the player.
+    pub aura: Option<Aura>,
 }
 
 /// Multipliers on the locomotion clips' playback rate. At 1 a walk or run
@@ -100,6 +140,56 @@ pub struct Seat {
 pub struct Bump {
     pub count: u32,
     pub normal: Vec2,
+}
+
+/// A rig clip by its glTF name, looped at `speed`.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct NamedClip {
+    pub name: String,
+    pub speed: f32,
+}
+
+/// `Players.tsx`'s pose group: the body's offset from where its feet stand,
+/// in the avatar's own frame (+Z toward its back).
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct BodyOffset {
+    pub lift: f32,
+    pub forward: f32,
+    /// Radians about the avatar's X: positive lies face down.
+    pub pitch: f32,
+    /// Radians about its Z: positive leans toward its left.
+    pub roll: f32,
+    pub scale: f32,
+}
+
+impl Default for BodyOffset {
+    fn default() -> Self {
+        Self {
+            lift: 0.0,
+            forward: 0.0,
+            pitch: 0.0,
+            roll: 0.0,
+            scale: 1.0,
+        }
+    }
+}
+
+impl BodyOffset {
+    fn transform(&self) -> Transform {
+        Transform::from_xyz(0.0, self.lift, self.forward)
+            .with_rotation(Quat::from_euler(EulerRot::XYZ, self.pitch, 0.0, self.roll))
+            .with_scale(Vec3::splat(self.scale))
+    }
+}
+
+/// A spell's colour: the character's colours move `strength` of the way to
+/// `color`, glowing in it with `glow`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tint {
+    pub color: Color,
+    pub strength: f32,
+    pub glow: bool,
 }
 
 impl PlayerRender {
@@ -205,6 +295,13 @@ pub struct Players {
     pub bump_easing_ms: f32,
     /// Bind pose, no clips and no name tags, as the mugshot renders.
     pub paused: bool,
+    /// Radians a second an avatar turns toward its player's yaw; `None` snaps.
+    pub turn_speed: Option<f32>,
+    /// The host draws the name tags itself from [`crate::views::ViewHub::anchors`];
+    /// the ping bell then hangs just over the head.
+    pub host_tags: bool,
+    /// The pokes' sparks and spell bolts playing in the view.
+    pub effects: Vec<Effect>,
 }
 
 impl Players {
@@ -224,6 +321,9 @@ impl Default for Players {
             run_speed: 6.0,
             bump_easing_ms: 180.0,
             paused: false,
+            turn_speed: None,
+            host_tags: false,
+            effects: vec![],
         }
     }
 }
@@ -280,17 +380,51 @@ fn anim_scale(motion: Motion, vel: Vec3, speeds: AnimSpeeds) -> f32 {
     Vec2::new(vel.x, vel.z).length() / clip_speed * tunable
 }
 
+/// `Players.tsx`'s `stepTowardAngle`: `from` turned toward `to` by at most
+/// `max_step` radians, the short way round.
+fn step_toward_angle(from: f32, to: f32, max_step: f32) -> f32 {
+    let delta = (to - from + PI).rem_euclid(2.0 * PI) - PI;
+    if delta.abs() <= max_step {
+        to
+    } else {
+        from + delta.signum() * max_step
+    }
+}
+
 #[derive(Component)]
 pub(crate) struct Avatar {
     id: String,
     character: String,
     motion: Motion,
     playing: AnimationState,
+    /// The pose clip playing over the motion's, if any.
+    pose_clip: Option<AnimationNodeIndex>,
     /// The player's `bump.count` last seen, and the running bump's start (seconds) and push.
     bumps: u32,
     bump: Option<(f32, Vec2)>,
+    /// The player's `pokes` and `casts` last seen.
+    pokes: u32,
+    casts: u32,
+    /// The yaw drawn, easing toward the player's.
+    yaw: Option<f32>,
+    /// The pivot a pose or spell moves, and the character model under it.
+    body: Entity,
+    character_root: Entity,
     /// The `Rig_Medium` node, once bound.
     rig: Option<Entity>,
+    /// The bind-pose model height, once measured.
+    height: f32,
+    /// The character's own materials, which its look recolours, and the look they have.
+    materials: Vec<Handle<ObjectMaterial>>,
+    look: (AvatarLook, bool),
+    silhouette: Option<(Handle<SilhouetteMaterial>, Option<Color>)>,
+    vehicle: Option<(String, Entity)>,
+}
+
+impl Avatar {
+    pub(crate) fn id(&self) -> &str {
+        &self.id
+    }
 }
 
 /// The label a hovered player shows to be pinged; `picking::ping_bell` drives it.
@@ -324,10 +458,22 @@ type AvatarItem<'a> = (
     Has<Replaced>,
 );
 
+/// The animation graph every avatar shares, once the rigs load.
+struct Graph {
+    handle: Handle<AnimationGraph>,
+    states: [AnimationNodeIndex; 8],
+    /// Every rig clip by name, earlier rigs winning as `Adventurer.tsx` merges them.
+    named: HashMap<String, AnimationNodeIndex>,
+    poke: AnimationNodeIndex,
+    cast: AnimationNodeIndex,
+    /// Each rig bone's rest transform, which the clips are authored against.
+    rig_rest: HashMap<String, Transform>,
+}
+
 #[derive(Resource)]
 struct Clips {
     rigs: Vec<Handle<Gltf>>,
-    graph: Option<(Handle<AnimationGraph>, [AnimationNodeIndex; 8])>,
+    graph: Option<Graph>,
 }
 
 pub(crate) fn plugin(app: &mut App) {
@@ -355,21 +501,40 @@ pub(crate) fn plugin(app: &mut App) {
         .register_type::<bevy::gltf::GltfSceneName>()
         .register_type::<bevy::gltf::GltfSceneExtras>()
         .register_type::<bevy::camera::visibility::DynamicSkinnedMeshBounds>();
-    app.add_systems(Startup, load_rigs).add_systems(
-        Update,
-        (
-            build_graph,
-            sync_avatars,
-            bind_avatars,
-            retire_replaced,
-            animate,
-            show_tags,
+    app.add_systems(Startup, load_rigs)
+        .add_systems(
+            Update,
+            (
+                build_graph,
+                sync_avatars,
+                bind_avatars,
+                retire_replaced,
+                animate,
+                dress_avatars,
+                dress_vehicles,
+                show_tags,
+            )
+                .chain()
+                .in_set(crate::views::SceneSystems)
+                .after(crate::views::mirror_resources)
+                .before(world_label::target_labels),
         )
-            .chain()
-            .in_set(crate::views::SceneSystems)
-            .after(crate::views::mirror_resources)
-            .before(world_label::target_labels),
-    );
+        .add_systems(
+            PostUpdate,
+            retarget::retarget_bones
+                .after(bevy::app::AnimationSystems)
+                .before(TransformSystems::Propagate),
+        )
+        .add_systems(
+            PostUpdate,
+            overhead::report_anchors.after(TransformSystems::Propagate),
+        );
+}
+
+/// The shaders and material [`plugin`]'s avatars draw with, which need the renderer.
+pub(crate) fn render_plugin(app: &mut App) {
+    bevy::asset::embedded_asset!(app, "avatars/silhouette.wesl");
+    app.add_plugins(bevy::pbr::MaterialPlugin::<SilhouetteMaterial>::default());
 }
 
 fn load_rigs(mut commands: Commands, base: Res<AssetBase>, assets: Res<AssetServer>) {
@@ -413,8 +578,34 @@ fn build_graph(
     let sit = animation_clips.add(sit_pose_clip(rig, &nodes));
     let clips_by_state =
         state_clips(find, sit).unwrap_or_else(|| panic!("no Idle_A clip in the Rig_Medium GLBs"));
-    let (graph, indices) = AnimationGraph::from_clips(clips_by_state);
-    clips.graph = Some((graphs.add(graph), indices.try_into().unwrap()));
+    let (mut graph, indices) = AnimationGraph::from_clips(clips_by_state);
+    let mut named = HashMap::new();
+    for rig_gltf in clips.rigs.iter().filter_map(|h| gltfs.get(h)) {
+        for (name, clip) in &rig_gltf.named_animations {
+            named
+                .entry(name.to_string())
+                .or_insert_with(|| graph.add_clip(clip.clone(), 1.0, graph.root));
+        }
+    }
+    let poke = animation_clips.add(ArmClip::Poke.build(rig, &nodes));
+    let cast = animation_clips.add(ArmClip::Cast.build(rig, &nodes));
+    let mut rig_rest = HashMap::new();
+    rest_transforms(rig, &nodes, &mut rig_rest);
+    clips.graph = Some(Graph {
+        poke: graph.add_clip(poke, 1.0, graph.root),
+        cast: graph.add_clip(cast, 1.0, graph.root),
+        handle: graphs.add(graph),
+        states: indices.try_into().unwrap(),
+        named,
+        rig_rest,
+    });
+}
+
+fn rest_transforms(node: &GltfNode, nodes: &Assets<GltfNode>, out: &mut HashMap<String, Transform>) {
+    out.insert(node.name.clone(), node.transform);
+    for child in node.children.iter().filter_map(|c| nodes.get(c)) {
+        rest_transforms(child, nodes, out);
+    }
 }
 
 /// Each state's clip, in [`AnimationState::ALL`] order: the sit pose for
@@ -520,14 +711,18 @@ fn sync_view_avatars(
         }
     }
     for p in &players.players {
-        // ponytail: the yaw snaps; Players.tsx eases it at `turnSpeed`.
         let transform = Transform::from_translation(players.feet(p))
             .with_rotation(Quat::from_rotation_y(p.placed().1 + AVATAR_YAW_OFFSET));
         let existing = avatars.iter_mut().find(|(_, a, _, v, _)| {
             v.parent() == view && a.id == p.id && a.character == p.character
         });
-        if let Some((_, _, mut t, _, _)) = existing {
-            *t = transform;
+        if let Some((_, avatar, mut t, _, _)) = existing {
+            // The eased yaw is `animate`'s, once it has started.
+            if avatar.yaw.is_none() || players.paused {
+                *t = transform;
+            } else {
+                t.translation = transform.translation;
+            }
             continue;
         }
         let replacing = avatars
@@ -537,15 +732,6 @@ fn sync_view_avatars(
         // ponytail: no bind-pose foot anchor; every KayKit character's lowest vertex is within 2 mm of y=0.
         let avatar = commands
             .spawn((
-                Avatar {
-                    id: p.id.clone(),
-                    character: p.character.clone(),
-                    motion: Motion::Idle,
-                    playing: AnimationState::Idle,
-                    bumps: p.bump.count,
-                    bump: None,
-                    rig: None,
-                },
                 PickTarget::Player { id: p.id.clone() },
                 transform,
                 if replacing {
@@ -553,10 +739,40 @@ fn sync_view_avatars(
                 } else {
                     Visibility::default()
                 },
-                WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(path))),
                 ChildOf(view),
             ))
             .id();
+        let body = commands
+            .spawn((Transform::default(), Visibility::default(), ChildOf(avatar)))
+            .id();
+        let character_root = commands
+            .spawn((
+                Transform::default(),
+                Visibility::default(),
+                WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(path))),
+                ChildOf(body),
+            ))
+            .id();
+        commands.entity(avatar).insert(Avatar {
+            id: p.id.clone(),
+            character: p.character.clone(),
+            motion: Motion::Idle,
+            playing: AnimationState::Idle,
+            pose_clip: None,
+            bumps: p.bump.count,
+            bump: None,
+            pokes: p.pokes,
+            casts: p.casts,
+            yaw: None,
+            body,
+            character_root,
+            rig: None,
+            height: FALLBACK_HEIGHT_M,
+            materials: vec![],
+            look: (AvatarLook::default(), false),
+            silhouette: None,
+            vehicle: None,
+        });
         commands.spawn(world_label::label(
             p.name.clone(),
             14.0,
@@ -568,7 +784,7 @@ fn sync_view_avatars(
             PingBell::default(),
             world_label::icon_badge(
                 assets.load("embedded://officexr_render/bell.png"),
-                28.0,
+                BELL_PX,
                 16.0,
                 Color::srgb(0.07, 0.07, 0.07),
                 avatar,
@@ -604,6 +820,19 @@ fn character_path(character: &str) -> String {
     }
 }
 
+/// What binding reads of an avatar's freshly spawned model.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ModelParts<'w, 's> {
+    children: Query<'w, 's, &'static Children>,
+    parents: Query<'w, 's, &'static ChildOf>,
+    names: Query<'w, 's, &'static Name>,
+    transforms: Query<'w, 's, &'static Transform>,
+    mesh3d: Query<'w, 's, &'static Mesh3d>,
+    skins: Query<'w, 's, &'static SkinnedMesh>,
+    standard: Query<'w, 's, &'static MeshMaterial3d<StandardMaterial>>,
+    meshes: Res<'w, Assets<Mesh>>,
+}
+
 /// The character GLBs carry no animations, so Bevy's loader gives their
 /// bones no animation targets. The clips target the rig GLBs' bones by
 /// name path from `Rig_Medium`, which the characters share, so tagging
@@ -614,50 +843,86 @@ fn bind_avatars(
     mut avatars: Query<(Entity, &mut Avatar, &ChildOf), Without<Bound>>,
     views: Query<(&ViewPlayers, &ViewScene)>,
     clips: Res<Clips>,
-    children: Query<&Children>,
-    names: Query<&Name>,
-    standard: Query<&MeshMaterial3d<StandardMaterial>>,
+    parts: ModelParts,
     standard_materials: Res<Assets<StandardMaterial>>,
     mut materials: ResMut<Assets<ObjectMaterial>>,
+    mut silhouettes: ResMut<Assets<SilhouetteMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
 ) {
     for (avatar, mut state, view) in &mut avatars {
         let Ok((players, scene)) = views.get(view.parent()) else {
             continue;
         };
-        let Some(rig) = children
-            .iter_descendants(avatar)
-            .find(|e| names.get(*e).is_ok_and(|n| n.as_str() == RIG_ROOT))
+        let root = state.character_root;
+        let Some(rig) = parts
+            .children
+            .iter_descendants(root)
+            .find(|e| parts.names.get(*e).is_ok_and(|n| n.as_str() == RIG_ROOT))
         else {
             continue;
         };
         if !players.paused {
-            let Some((graph, _)) = &clips.graph else {
+            let Some(graph) = &clips.graph else {
                 continue;
             };
             commands.entity(rig).insert((
                 AnimationPlayer::default(),
-                AnimationGraphHandle(graph.clone()),
+                AnimationGraphHandle(graph.handle.clone()),
                 AnimationTransitions::new(),
             ));
-            tag_targets(&mut commands, rig, rig, &mut vec![], &children, &names);
+            tag_targets(&mut commands, rig, rig, &mut vec![], &parts.children, &parts.names);
+            retarget_skeleton(&mut commands, rig, &graph.rig_rest, &parts);
             state.rig = Some(rig);
+            let hand = parts
+                .children
+                .iter_descendants(rig)
+                .find(|e| parts.names.get(*e).is_ok_and(|n| n.as_str() == props::HAND));
+            if let Some(hand) = hand {
+                props::attach_to_hand(&mut commands, hand, &mut meshes, &mut materials, &scene.lighting);
+            }
         }
+        if let Some(height) = overhead::model_height(
+            root,
+            &parts.children,
+            &parts.parents,
+            &parts.transforms,
+            &parts.mesh3d,
+            &parts.meshes,
+        ) {
+            state.height = height;
+        }
+        let silhouette = silhouettes.add(SilhouetteMaterial::new(Color::WHITE));
         // Characters take the same hemisphere fill as every other object.
-        for e in children.iter_descendants(avatar) {
-            if let Some(m) = standard
+        for e in parts.children.iter_descendants(root) {
+            if let Some(m) = parts
+                .standard
                 .get(e)
                 .ok()
                 .and_then(|m| standard_materials.get(&m.0))
             {
+                let own = materials.add(ObjectMaterial {
+                    base: m.clone(),
+                    extension: HemisphereFill::new(&scene.lighting),
+                });
+                state.materials.push(own.clone());
                 commands
                     .entity(e)
                     .remove::<MeshMaterial3d<StandardMaterial>>()
-                    .insert(MeshMaterial3d(materials.add(ObjectMaterial {
-                        base: m.clone(),
-                        extension: HemisphereFill::new(&scene.lighting),
-                    })));
+                    .insert(MeshMaterial3d(own));
+            }
+            if let Ok(mesh) = parts.mesh3d.get(e)
+                && !players.paused
+            {
+                silhouette::twin(
+                    &mut commands,
+                    e,
+                    mesh,
+                    parts.skins.get(e).ok(),
+                    silhouette.clone(),
+                );
             }
         }
+        state.silhouette = Some((silhouette, None));
         commands.entity(avatar).insert(Bound);
     }
 }
@@ -683,6 +948,37 @@ fn tag_targets(
     path.pop();
 }
 
+/// Maps the clips onto each bone of the character whose rest pose differs from the rig's.
+fn retarget_skeleton(
+    commands: &mut Commands,
+    rig: Entity,
+    rig_rest: &HashMap<String, Transform>,
+    parts: &ModelParts,
+) {
+    let bones = || {
+        std::iter::once(rig)
+            .chain(parts.children.iter_descendants(rig))
+            .filter_map(|e| Some((e, parts.names.get(e).ok()?, parts.transforms.get(e).ok()?)))
+    };
+    let hips = |rest: &dyn Fn(&str, Entity) -> Option<Vec3>| {
+        bones()
+            .find(|(_, n, _)| retarget::is_hips(n))
+            .and_then(|(e, n, _)| rest(n.as_str(), e))
+    };
+    let hips_ratio = retarget::hips_ratio(
+        hips(&|n, _| rig_rest.get(n).map(|t| t.translation)),
+        hips(&|_, e| parts.transforms.get(e).ok().map(|t| t.translation)),
+    );
+    for (entity, name, own) in bones() {
+        if let Some(r) = rig_rest
+            .get(name.as_str())
+            .and_then(|rig| retarget::Retarget::new(rig, own, hips_ratio))
+        {
+            commands.entity(entity).insert(r);
+        }
+    }
+}
+
 /// The locomotion tier to remember, and the state and time scale to play:
 /// the player's `animation` when it has one, else its motion's.
 fn choose_clip(
@@ -706,6 +1002,16 @@ fn choose_clip(
     )
 }
 
+/// The pose clip to play instead of the state's: never over an editor
+/// preview or a seat, and only when the rigs have it.
+fn pose_node(p: &PlayerRender, named: &HashMap<String, AnimationNodeIndex>) -> Option<(AnimationNodeIndex, f32)> {
+    if p.animation.is_some() || p.seat.is_some() {
+        return None;
+    }
+    let clip = p.clip.as_ref()?;
+    named.get(&clip.name).map(|n| (*n, clip.speed))
+}
+
 /// Fades to `state`'s clip when it isn't what's `playing`, looping it unless
 /// it is a one-shot, which then holds its last frame.
 fn play(
@@ -717,12 +1023,30 @@ fn play(
     speed: f32,
 ) {
     let node = nodes[state as usize];
-    if state != *playing || !player.is_playing_animation(node) {
+    if state != *playing
+        || transitions.get_main_animation() != Some(node)
+        || !player.is_playing_animation(node)
+    {
         *playing = state;
         let active = transitions.play(player, node, FADE);
         if state.loops() {
             active.repeat();
         }
+    }
+    if let Some(active) = player.animation_mut(node) {
+        active.set_speed(speed);
+    }
+}
+
+/// Fades to a pose's looping clip unless it already plays.
+fn play_pose(
+    player: &mut AnimationPlayer,
+    transitions: &mut AnimationTransitions,
+    node: AnimationNodeIndex,
+    speed: f32,
+) {
+    if transitions.get_main_animation() != Some(node) || !player.is_playing_animation(node) {
+        transitions.play(player, node, FADE).repeat();
     }
     if let Some(active) = player.animation_mut(node) {
         active.set_speed(speed);
@@ -735,11 +1059,13 @@ fn animate(
     views: Query<&ViewPlayers>,
     clips: Res<Clips>,
     mut avatars: Query<(&mut Avatar, &mut Transform, &ChildOf), With<Bound>>,
+    mut bodies: Query<&mut Transform, Without<Avatar>>,
     mut rigs: Query<(&mut AnimationPlayer, &mut AnimationTransitions)>,
 ) {
-    let Some((_, nodes)) = &clips.graph else {
+    let Some(graph) = &clips.graph else {
         return;
     };
+    let nodes = &graph.states;
     let now = time.elapsed_secs();
     for (mut avatar, mut transform, view) in &mut avatars {
         let Ok(players) = views.get(view.parent()) else {
@@ -751,9 +1077,15 @@ fn animate(
         let Some(p) = players.players.iter().find(|p| p.id == avatar.id) else {
             continue;
         };
-        let bumped = p.bump.count != avatar.bumps;
+        if let Ok(mut body) = bodies.get_mut(avatar.body) {
+            let want = p.body.transform();
+            if *body != want {
+                *body = want;
+            }
+        }
+        let bumped = p.bump.count != avatar.bumps && !p.frozen;
+        avatar.bumps = p.bump.count;
         if bumped {
-            avatar.bumps = p.bump.count;
             avatar.bump = Some((now, p.bump.normal));
         }
         // Players.tsx's visual-only kick: a decaying wave along the bump's normal.
@@ -768,9 +1100,31 @@ fn animate(
             }
         }
         transform.translation = players.feet(p) + kick;
+        let target_yaw = p.placed().1 + AVATAR_YAW_OFFSET;
+        let yaw = match (avatar.yaw, players.turn_speed) {
+            (Some(from), Some(speed)) if p.seat.is_none() => {
+                step_toward_angle(from, target_yaw, speed * time.delta_secs())
+            }
+            _ => target_yaw,
+        };
+        avatar.yaw = Some(yaw);
+        transform.rotation = Quat::from_rotation_y(yaw);
         let Some(Ok((mut player, mut transitions))) = avatar.rig.map(|r| rigs.get_mut(r)) else {
             continue;
         };
+        let poked = p.pokes != avatar.pokes;
+        avatar.pokes = p.pokes;
+        if poked {
+            arm_clips::start(&mut player, graph.poke);
+        }
+        let cast = p.casts != avatar.casts;
+        avatar.casts = p.casts;
+        if cast {
+            arm_clips::start(&mut player, graph.cast);
+        }
+        arm_clips::ease(&mut player, graph.poke, ArmClip::Poke);
+        arm_clips::ease(&mut player, graph.cast, ArmClip::Cast);
+
         let (motion, state, speed) = choose_clip(avatar.motion, p, &players.0);
         avatar.motion = motion;
         let hit = nodes[AnimationState::Hit as usize];
@@ -793,6 +1147,13 @@ fn animate(
         if reacting && player.animation(hit).is_some_and(|a| !a.is_finished()) {
             continue;
         }
+        if let Some((node, speed)) = pose_node(p, &graph.named) {
+            avatar.playing = state;
+            avatar.pose_clip = Some(node);
+            play_pose(&mut player, &mut transitions, node, speed);
+            continue;
+        }
+        avatar.pose_clip = None;
         play(
             &mut player,
             &mut transitions,
@@ -804,11 +1165,145 @@ fn animate(
     }
 }
 
-/// Shows a named player's tag in a world view whose players aren't paused.
+/// What an avatar wears and rides, and how it is coloured: the held wand,
+/// the poke's finger, the vehicle, the spell or frozen look and the silhouette.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn dress_avatars(
+    mut commands: Commands,
+    views: Query<&ViewPlayers>,
+    clips: Res<Clips>,
+    base: Res<AssetBase>,
+    assets: Res<AssetServer>,
+    mut avatars: Query<(&mut Avatar, &ChildOf), With<Bound>>,
+    rigs: Query<&AnimationPlayer>,
+    children: Query<&Children>,
+    mut wands: Query<&mut Visibility, (With<Wand>, Without<Finger>)>,
+    mut fingers: Query<&mut Visibility, (With<Finger>, Without<Wand>)>,
+    mut twins: Query<
+        &mut Visibility,
+        (With<silhouette::SilhouetteTwin>, Without<Wand>, Without<Finger>),
+    >,
+    mut materials: ResMut<Assets<ObjectMaterial>>,
+    mut silhouettes: ResMut<Assets<SilhouetteMaterial>>,
+) {
+    for (mut avatar, view) in &mut avatars {
+        let Ok(players) = views.get(view.parent()) else {
+            continue;
+        };
+        let player = players.players.iter().find(|p| p.id == avatar.id);
+        let paused = players.paused;
+        let shown = |f: fn(&PlayerRender) -> bool| !paused && player.is_some_and(f);
+
+        if let Some(rig) = avatar.rig {
+            let poking = clips.graph.as_ref().is_some_and(|g| {
+                rigs.get(rig)
+                    .ok()
+                    .and_then(|r| r.animation(g.poke))
+                    .is_some_and(|a| arm_clips::finger_shown(a.seek_time()))
+            });
+            for e in children.iter_descendants(rig) {
+                if let Ok(mut v) = wands.get_mut(e) {
+                    props::show(&mut v, shown(|p| p.wand));
+                }
+                if let Ok(mut v) = fingers.get_mut(e) {
+                    props::show(&mut v, poking);
+                }
+            }
+        }
+
+        let vehicle = player.filter(|_| !paused).and_then(|p| p.vehicle.clone());
+        if avatar.vehicle.as_ref().map(|(path, _)| path) != vehicle.as_ref() {
+            if let Some((_, old)) = avatar.vehicle.take() {
+                commands.entity(old).despawn();
+            }
+            if let Some(path) = vehicle {
+                let scene = assets.load(GltfAssetLabel::Scene(0).from_asset(base.asset_path(&path)));
+                let entity = commands
+                    .spawn((
+                        Vehicle,
+                        Transform::default(),
+                        Visibility::default(),
+                        WorldAssetRoot(scene),
+                        ChildOf(avatar.body),
+                    ))
+                    .id();
+                avatar.vehicle = Some((path, entity));
+            }
+        }
+
+        let frozen = player.is_some_and(|p| p.frozen);
+        let look = player.map_or_else(AvatarLook::default, look::look_of);
+        if avatar.look != (look, frozen) {
+            avatar.look = (look, frozen);
+            for handle in &avatar.materials {
+                if let Some(mut material) = materials.get_mut(handle) {
+                    look::apply(&mut material, look, frozen);
+                }
+            }
+        }
+
+        let color = player.filter(|_| !paused && !frozen).and_then(|p| p.silhouette);
+        if let Some((handle, applied)) = &mut avatar.silhouette
+            && *applied != color
+        {
+            *applied = color;
+            if let (Some(c), Some(mut material)) = (color, silhouettes.get_mut(handle.id())) {
+                *material = SilhouetteMaterial::new(c);
+            }
+            for e in children.iter_descendants(avatar.character_root) {
+                if let Ok(mut v) = twins.get_mut(e) {
+                    props::show(&mut v, color.is_some());
+                }
+            }
+        }
+    }
+}
+
+/// Gives a vehicle model's materials the hemisphere fill avatars and objects have.
+fn dress_vehicles(
+    mut commands: Commands,
+    added: Query<(Entity, &MeshMaterial3d<StandardMaterial>), Added<MeshMaterial3d<StandardMaterial>>>,
+    parents: Query<&ChildOf>,
+    vehicles: Query<&ChildOf, With<Vehicle>>,
+    avatars: Query<&ChildOf, With<Avatar>>,
+    bodies: Query<&ChildOf, Without<Vehicle>>,
+    views: Query<&ViewScene>,
+    standard: Res<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<ObjectMaterial>>,
+) {
+    for (entity, material) in &added {
+        let Some(vehicle) = parents.iter_ancestors(entity).find(|e| vehicles.contains(*e)) else {
+            continue;
+        };
+        // Vehicle → body → avatar → view.
+        let scene = vehicles
+            .get(vehicle)
+            .ok()
+            .and_then(|body| bodies.get(body.parent()).ok())
+            .and_then(|avatar| avatars.get(avatar.parent()).ok())
+            .and_then(|view| views.get(view.parent()).ok());
+        let (Some(scene), Some(base)) = (scene, standard.get(&material.0)) else {
+            continue;
+        };
+        commands
+            .entity(entity)
+            .remove::<MeshMaterial3d<StandardMaterial>>()
+            .insert((
+                AvatarProp,
+                MeshMaterial3d(materials.add(ObjectMaterial {
+                    base: base.clone(),
+                    extension: HemisphereFill::new(&scene.lighting),
+                })),
+            ));
+    }
+}
+
+/// Shows a named player's tag in a world view whose players aren't paused,
+/// unless the host draws the tags; and hangs the bell over the measured head then.
 fn show_tags(
     views: Query<(&View, &ViewPlayers)>,
     avatars: Query<(&Avatar, &Labels, &ChildOf)>,
-    mut tags: Query<&mut WorldLabel, Without<PingBell>>,
+    mut tags: Query<(&mut WorldLabel, Has<PingBell>)>,
 ) {
     for (avatar, labels, view) in &avatars {
         let Ok((view, players)) = views.get(view.parent()) else {
@@ -816,20 +1311,34 @@ fn show_tags(
         };
         let shown = view.kind == ViewKind::World
             && !players.paused
+            && !players.host_tags
             && players
                 .players
                 .iter()
-                .any(|p| p.id == avatar.id && !p.name.is_empty());
+                .any(|p| p.id == avatar.id && !p.name.is_empty() && !p.frozen);
         for tag in labels.iter() {
-            if let Ok(mut tag) = tags.get_mut(tag)
-                && tag.shown != shown
-            {
+            let Ok((mut tag, bell)) = tags.get_mut(tag) else {
+                continue;
+            };
+            if bell {
+                let (offset, nudge) = if players.host_tags {
+                    (
+                        overhead::anchor_point(Vec3::ZERO, avatar.height),
+                        Vec2::new(0.0, -(BELL_PX / 2.0 + BELL_GAP_PX)),
+                    )
+                } else {
+                    (Vec3::Y * BELL_HEIGHT_M, Vec2::ZERO)
+                };
+                if tag.offset != offset || tag.nudge != nudge {
+                    tag.offset = offset;
+                    tag.nudge = nudge;
+                }
+            } else if tag.shown != shown {
                 tag.shown = shown;
             }
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use bevy::animation::RepeatAnimation;

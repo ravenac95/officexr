@@ -66,11 +66,26 @@ pub struct ViewStatus {
     pub triangles: usize,
 }
 
+/// Where a player's overhead stack stands in a view this frame, for a host
+/// that draws name tags, bubbles or cards over the canvas itself.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlayerAnchor {
+    pub id: String,
+    /// Logical pixels from the view's top left of the point just over the
+    /// head; `None` while it is behind the camera.
+    pub screen: Option<Vec2>,
+    /// The character model's measured height, metres.
+    pub height: f32,
+    /// The ping bell shows over the head, between it and the stack.
+    pub bell: bool,
+}
+
 #[derive(Default)]
 struct Hub {
     next_id: ViewId,
     inbox: Vec<(ViewId, ViewMsg)>,
     status: HashMap<ViewId, ViewStatus>,
+    anchors: HashMap<ViewId, Vec<PlayerAnchor>>,
 }
 
 /// The app's view inbox and the views' last status, shareable with callers
@@ -97,7 +112,10 @@ impl ViewHub {
     pub fn send(&self, id: ViewId, msg: ViewMsg) -> bool {
         let mut hub = self.lock();
         let known = match msg {
-            ViewMsg::Destroy => hub.status.remove(&id).is_some(),
+            ViewMsg::Destroy => {
+                hub.anchors.remove(&id);
+                hub.status.remove(&id).is_some()
+            }
             // Not ready until the new content has loaded, even before the app sees it.
             ViewMsg::World(_) => hub.status.get_mut(&id).map(|s| s.ready = false).is_some(),
             _ => hub.status.contains_key(&id),
@@ -110,6 +128,18 @@ impl ViewHub {
 
     pub fn status(&self, id: ViewId) -> Option<ViewStatus> {
         self.lock().status.get(&id).copied()
+    }
+
+    /// The view's players' overhead anchors as of its last frame.
+    pub fn anchors(&self, id: ViewId) -> Vec<PlayerAnchor> {
+        self.lock().anchors.get(&id).cloned().unwrap_or_default()
+    }
+
+    pub(crate) fn set_anchors(&self, id: ViewId, anchors: Vec<PlayerAnchor>) {
+        let mut hub = self.lock();
+        if hub.status.contains_key(&id) {
+            hub.anchors.insert(id, anchors);
+        }
     }
 }
 

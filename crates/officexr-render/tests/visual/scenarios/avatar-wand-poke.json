@@ -1,0 +1,173 @@
+{
+  "size": [
+    640,
+    360
+  ],
+  "instances": [
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        0
+      ]
+    }
+  ],
+  "characters": [
+    {
+      "character": "Mage",
+      "spawn": [
+        -1.2,
+        0,
+        0.5
+      ],
+      "yaw": -1.570796,
+      "moves": [
+        {
+          "frames": 90
+        }
+      ],
+      "look": {
+        "wand": true
+      },
+      "castsAt": [
+        20
+      ]
+    },
+    {
+      "character": "Knight",
+      "spawn": [
+        1.2,
+        0,
+        0.5
+      ],
+      "yaw": 1.570796,
+      "moves": [
+        {
+          "frames": 90
+        }
+      ],
+      "pokesAt": [
+        30
+      ]
+    }
+  ],
+  "effects": [
+    {
+      "from": 30,
+      "effect": {
+        "kind": "pokeSpark",
+        "id": 1,
+        "at": [
+          0.1,
+          1.55,
+          0.5
+        ]
+      }
+    },
+    {
+      "from": 20,
+      "effect": {
+        "kind": "bolt",
+        "id": 2,
+        "origin": [
+          -0.7,
+          1.4,
+          0.5
+        ],
+        "dir": [
+          0.6,
+          0.2,
+          -0.775
+        ],
+        "distance": 4,
+        "speed": 8,
+        "color": "#ffb02e",
+        "fire": true
+      }
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "position": [
+        0,
+        2.0,
+        5.5
+      ],
+      "lookAt": [
+        0,
+        1.2,
+        0
+      ],
+      "fov": 45
+    }
+  ],
+  "captures": [
+    40,
+    80
+  ],
+  "assert": [
+    {
+      "type": "feetOn",
+      "frame": 40,
+      "surfaceY": 0
+    }
+  ]
+}
