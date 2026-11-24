@@ -127,8 +127,11 @@ mod tests {
             .world_mut()
             .spawn((Transform::from_xyz(0.0, 0.5, 0.0), ChildOf(root)))
             .id();
-        app.world_mut()
-            .spawn((Mesh3d(mesh), Transform::from_xyz(0.0, 1.0, 0.0), ChildOf(armature)));
+        app.world_mut().spawn((
+            Mesh3d(mesh),
+            Transform::from_xyz(0.0, 1.0, 0.0),
+            ChildOf(armature),
+        ));
         let height = app
             .world_mut()
             .run_system_once(

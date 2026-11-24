@@ -25,12 +25,12 @@ use bevy::render::RenderPlugin;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::time::TimeUpdateStrategy;
 use bevy::winit::WinitPlugin;
+use officexr_render::effects::Aura;
 use officexr_render::overlays::{Overlay, ViewOverlays};
 use officexr_render::picking::{Modifiers, PickHub, PointerMsg, PointerMsgAction};
 use officexr_render::placement::VOXEL_SIZE;
 use officexr_render::proximity::{Proximity, ViewProximity};
 use officexr_render::views::View;
-use officexr_render::effects::Aura;
 use officexr_render::{
     AssetBase, AvatarBound, BodyOffset, LayoutIndex, NamedClip, ObjectKinds, OffscreenTarget,
     PlayerRender, Players, SceneCamera, Seat, Tint, WorldSceneData, offscreen_app, scene_sim,

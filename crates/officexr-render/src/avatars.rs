@@ -29,8 +29,8 @@ use crate::picking::PickTarget;
 use crate::views::{View, ViewKind, ViewPlayers, ViewScene};
 use crate::world_label::{self, Labels, WorldLabel};
 use arm_clips::ArmClip;
-use props::{AvatarProp, Finger, Vehicle, Wand};
 pub use overhead::{FALLBACK_HEIGHT_M, OVERHEAD_GAP_M};
+use props::{AvatarProp, Finger, Vehicle, Wand};
 
 pub use silhouette::SilhouetteMaterial;
 
@@ -601,7 +601,11 @@ fn build_graph(
     });
 }
 
-fn rest_transforms(node: &GltfNode, nodes: &Assets<GltfNode>, out: &mut HashMap<String, Transform>) {
+fn rest_transforms(
+    node: &GltfNode,
+    nodes: &Assets<GltfNode>,
+    out: &mut HashMap<String, Transform>,
+) {
     out.insert(node.name.clone(), node.transform);
     for child in node.children.iter().filter_map(|c| nodes.get(c)) {
         rest_transforms(child, nodes, out);
@@ -869,7 +873,14 @@ fn bind_avatars(
                 AnimationGraphHandle(graph.handle.clone()),
                 AnimationTransitions::new(),
             ));
-            tag_targets(&mut commands, rig, rig, &mut vec![], &parts.children, &parts.names);
+            tag_targets(
+                &mut commands,
+                rig,
+                rig,
+                &mut vec![],
+                &parts.children,
+                &parts.names,
+            );
             retarget_skeleton(&mut commands, rig, &graph.rig_rest, &parts);
             state.rig = Some(rig);
             let hand = parts
@@ -877,7 +888,13 @@ fn bind_avatars(
                 .iter_descendants(rig)
                 .find(|e| parts.names.get(*e).is_ok_and(|n| n.as_str() == props::HAND));
             if let Some(hand) = hand {
-                props::attach_to_hand(&mut commands, hand, &mut meshes, &mut materials, &scene.lighting);
+                props::attach_to_hand(
+                    &mut commands,
+                    hand,
+                    &mut meshes,
+                    &mut materials,
+                    &scene.lighting,
+                );
             }
         }
         if let Some(height) = overhead::model_height(
@@ -1003,7 +1020,10 @@ fn choose_clip(
 
 /// The pose clip to play instead of the state's: never over an editor
 /// preview or a seat, and only when the rigs have it.
-fn pose_node(p: &PlayerRender, named: &HashMap<String, AnimationNodeIndex>) -> Option<(AnimationNodeIndex, f32)> {
+fn pose_node(
+    p: &PlayerRender,
+    named: &HashMap<String, AnimationNodeIndex>,
+) -> Option<(AnimationNodeIndex, f32)> {
     if p.animation.is_some() || p.seat.is_some() {
         return None;
     }
@@ -1180,7 +1200,11 @@ fn dress_avatars(
     mut fingers: Query<&mut Visibility, (With<Finger>, Without<Wand>)>,
     mut twins: Query<
         &mut Visibility,
-        (With<silhouette::SilhouetteTwin>, Without<Wand>, Without<Finger>),
+        (
+            With<silhouette::SilhouetteTwin>,
+            Without<Wand>,
+            Without<Finger>,
+        ),
     >,
     mut materials: ResMut<Assets<ObjectMaterial>>,
     mut silhouettes: ResMut<Assets<SilhouetteMaterial>>,
@@ -1216,7 +1240,8 @@ fn dress_avatars(
                 commands.entity(old).despawn();
             }
             if let Some(path) = vehicle {
-                let scene = assets.load(GltfAssetLabel::Scene(0).from_asset(base.asset_path(&path)));
+                let scene =
+                    assets.load(GltfAssetLabel::Scene(0).from_asset(base.asset_path(&path)));
                 let entity = commands
                     .spawn((
                         Vehicle,
@@ -1241,7 +1266,9 @@ fn dress_avatars(
             }
         }
 
-        let color = player.filter(|_| !paused && !frozen).and_then(|p| p.silhouette);
+        let color = player
+            .filter(|_| !paused && !frozen)
+            .and_then(|p| p.silhouette);
         if let Some((handle, applied)) = &mut avatar.silhouette
             && *applied != color
         {
@@ -1259,9 +1286,13 @@ fn dress_avatars(
 }
 
 /// Gives a vehicle model's materials the hemisphere fill avatars and objects have.
+#[allow(clippy::too_many_arguments)]
 fn dress_vehicles(
     mut commands: Commands,
-    added: Query<(Entity, &MeshMaterial3d<StandardMaterial>), Added<MeshMaterial3d<StandardMaterial>>>,
+    added: Query<
+        (Entity, &MeshMaterial3d<StandardMaterial>),
+        Added<MeshMaterial3d<StandardMaterial>>,
+    >,
     parents: Query<&ChildOf>,
     vehicles: Query<&ChildOf, With<Vehicle>>,
     avatars: Query<&ChildOf, With<Avatar>>,
@@ -1271,7 +1302,10 @@ fn dress_vehicles(
     mut materials: ResMut<Assets<ObjectMaterial>>,
 ) {
     for (entity, material) in &added {
-        let Some(vehicle) = parents.iter_ancestors(entity).find(|e| vehicles.contains(*e)) else {
+        let Some(vehicle) = parents
+            .iter_ancestors(entity)
+            .find(|e| vehicles.contains(*e))
+        else {
             continue;
         };
         // Vehicle → body → avatar → view.

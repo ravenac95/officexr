@@ -55,7 +55,10 @@ mod tests {
     fn a_plain_player_changes_nothing() {
         let plain = look_of(&PlayerRender::default());
         assert_eq!(plain, AvatarLook::default());
-        assert_eq!((plain.tint.alpha, plain.rim.alpha, plain.glow), (0.0, 0.0, 0.0));
+        assert_eq!(
+            (plain.tint.alpha, plain.rim.alpha, plain.glow),
+            (0.0, 0.0, 0.0)
+        );
     }
 
     #[test]

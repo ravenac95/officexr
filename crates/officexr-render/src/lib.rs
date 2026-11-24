@@ -40,11 +40,10 @@ use bevy::prelude::*;
 use bevy::ui::UiSystems;
 
 pub use avatars::{
-    AnimSpeeds, AnimationState, BodyOffset, Bound as AvatarBound, Bump, FALLBACK_HEIGHT_M,
-    Motion, NamedClip, OVERHEAD_GAP_M, PlayerAnimation, PlayerRender, Players, Seat,
-    SilhouetteMaterial, Tint, next_motion,
+    AnimSpeeds, AnimationState, BodyOffset, Bound as AvatarBound, Bump, FALLBACK_HEIGHT_M, Motion,
+    NamedClip, OVERHEAD_GAP_M, PlayerAnimation, PlayerRender, Players, Seat, SilhouetteMaterial,
+    Tint, next_motion,
 };
-pub use views::PlayerAnchor;
 pub use layouts::LayoutIndex;
 pub use lighting::{HemisphereFill, ObjectMaterial, snap_to_shadow_texel};
 #[cfg(feature = "mugshot")]
@@ -53,6 +52,7 @@ pub use objects::{ObjectIndex, ObjectKinds, apply_overrides};
 pub use offscreen::{OffscreenTarget, offscreen_app, straight_rgba};
 pub use scene::*;
 pub use sky::{SkyMaterial, sun_sky_params};
+pub use views::PlayerAnchor;
 use views::{View, ViewCamera, ViewScene};
 
 const CAMERA_FAR: f32 = 2000.0;

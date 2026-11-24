@@ -136,7 +136,10 @@ mod tests {
         app.update();
         let at = |app: &App| app.world().get::<Transform>(bone).unwrap().translation;
         assert_eq!(at(&app), own.translation, "the rest pose stays");
-        app.world_mut().get_mut::<Transform>(bone).unwrap().translation = Vec3::Y * 0.5;
+        app.world_mut()
+            .get_mut::<Transform>(bone)
+            .unwrap()
+            .translation = Vec3::Y * 0.5;
         app.update();
         app.update();
         assert!(at(&app).distance(Vec3::Y * 0.75) < 1e-5);

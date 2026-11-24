@@ -24,8 +24,8 @@ use bevy::asset::AssetMetaCheck;
 use bevy::picking::input::PointerInputPlugin;
 use bevy::prelude::*;
 use bevy::window::ExitCondition;
-use officexr_render::views::{ViewHub, ViewId, ViewKind, ViewMsg, ViewStatus, ViewTarget};
 use officexr_render::effects::{Aura, Effect};
+use officexr_render::views::{ViewHub, ViewId, ViewKind, ViewMsg, ViewStatus, ViewTarget};
 use officexr_render::{
     AnimSpeeds, AssetBase, BodyOffset, Bump, NamedClip, OfficeXrRenderPlugin, PlayerAnimation,
     PlayerRender, Players, SceneCamera, Seat, Tint, WorldDiff, mugshot_player,

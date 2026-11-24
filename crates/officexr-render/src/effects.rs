@@ -98,10 +98,10 @@ pub struct Particle {
     pub additive: bool,
 }
 
-
 /// A stable pseudo-random number in `[0, 1)` for `(a, b, c)`.
 fn hash(a: u32, b: u32, c: u32) -> f32 {
-    let mut h = a.wrapping_mul(0x9E37_79B1) ^ b.wrapping_mul(0x85EB_CA77) ^ c.wrapping_mul(0xC2B2_AE3D);
+    let mut h =
+        a.wrapping_mul(0x9E37_79B1) ^ b.wrapping_mul(0x85EB_CA77) ^ c.wrapping_mul(0xC2B2_AE3D);
     h ^= h >> 15;
     h = h.wrapping_mul(0x2C1B_3C6D);
     h ^= h >> 12;
@@ -199,7 +199,11 @@ fn bolt(
         let shown = flying && i > 0 && age >= back;
         let k = 1.0 - i as f32 / TRAIL as f32;
         let jitter = if fire { 0.05 } else { 0.02 };
-        let wobble = Vec3::new(r(i, frame) - 0.5, r(i, frame + 7) - 0.5, r(i, frame + 13) - 0.5);
+        let wobble = Vec3::new(
+            r(i, frame) - 0.5,
+            r(i, frame + 7) - 0.5,
+            r(i, frame + 13) - 0.5,
+        );
         let trail_color = match (fire, i) {
             (true, 0..5) => hex("#ffb02e"),
             (true, 5..10) => hex("#ff6a14"),
@@ -262,7 +266,14 @@ fn bolt(
 
 /// `SpellAuras.tsx`'s particles around a player, relative to its feet, at
 /// `time` seconds: a steady stream, each particle on its own cycle.
-pub fn aura_particles(aura: Aura, seed: u32, head: f32, scale: f32, lift: f32, time: f32) -> Vec<Option<Particle>> {
+pub fn aura_particles(
+    aura: Aura,
+    seed: u32,
+    head: f32,
+    scale: f32,
+    lift: f32,
+    time: f32,
+) -> Vec<Option<Particle>> {
     let (count, life) = match aura {
         Aura::Smoke => (SMOKE_PARTICLES, SMOKE_LIFE_S),
         Aura::Sparkles => (SPARKLE_PARTICLES, SPARKLE_LIFE_S),
@@ -315,6 +326,14 @@ struct AuraOf(Aura);
 #[derive(Component)]
 struct Bead(usize);
 
+type BeadItem<'a> = (
+    &'a Bead,
+    &'a mut Transform,
+    &'a mut Visibility,
+    &'a MeshMaterial3d<StandardMaterial>,
+);
+type BeadFilter = (Without<EffectOf>, Without<AuraOf>);
+
 /// The unit sphere every bead draws, made with the first effect: a scene with
 /// none adds no mesh, so it draws exactly as before effects existed.
 #[derive(Resource, Default)]
@@ -330,16 +349,16 @@ impl SphereMesh {
 
 pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<SphereMesh>()
-    .add_systems(
-        Update,
-        (sync_effects, sync_auras)
-            .in_set(crate::views::SceneSystems)
-            .after(crate::views::mirror_resources),
-    )
-    .add_systems(
-        PostUpdate,
-        (place_effects, place_auras).before(TransformSystems::Propagate),
-    );
+        .add_systems(
+            Update,
+            (sync_effects, sync_auras)
+                .in_set(crate::views::SceneSystems)
+                .after(crate::views::mirror_resources),
+        )
+        .add_systems(
+            PostUpdate,
+            (place_effects, place_auras).before(TransformSystems::Propagate),
+        );
 }
 
 fn spawn_spheres(
@@ -397,7 +416,13 @@ fn sync_effects(
                 ))
                 .id();
             let sphere = mesh.get(&mut meshes);
-            spawn_spheres(&mut commands, entity, effect.particle_count(), &sphere, &mut materials);
+            spawn_spheres(
+                &mut commands,
+                entity,
+                effect.particle_count(),
+                &sphere,
+                &mut materials,
+            );
         }
     }
 }
@@ -432,9 +457,20 @@ fn sync_auras(
         if let (Some(aura), None) = (want, have) {
             let count = aura_particles(aura, 0, 0.0, 1.0, 0.0, 0.0).len();
             let parent = commands
-                .spawn((AuraOf(aura), Transform::default(), Visibility::default(), ChildOf(entity)))
+                .spawn((
+                    AuraOf(aura),
+                    Transform::default(),
+                    Visibility::default(),
+                    ChildOf(entity),
+                ))
                 .id();
-            spawn_spheres(&mut commands, parent, count, &mesh.get(&mut meshes), &mut materials);
+            spawn_spheres(
+                &mut commands,
+                parent,
+                count,
+                &mesh.get(&mut meshes),
+                &mut materials,
+            );
         }
     }
 }
@@ -442,10 +478,7 @@ fn sync_auras(
 fn show_particles(
     particles: &[Option<Particle>],
     spheres: &Children,
-    query: &mut Query<
-        (&Bead, &mut Transform, &mut Visibility, &MeshMaterial3d<StandardMaterial>),
-        (Without<EffectOf>, Without<AuraOf>),
-    >,
+    query: &mut Query<BeadItem, BeadFilter>,
     materials: &mut Assets<StandardMaterial>,
 ) {
     for child in spheres {
@@ -478,10 +511,7 @@ fn place_effects(
     views: Query<(&View, &ViewPlayers)>,
     cameras: Query<&GlobalTransform>,
     mut effects: Query<(&EffectOf, &ChildOf, &Children, &mut Transform)>,
-    mut spheres: Query<
-        (&Bead, &mut Transform, &mut Visibility, &MeshMaterial3d<StandardMaterial>),
-        (Without<EffectOf>, Without<AuraOf>),
-    >,
+    mut spheres: Query<BeadItem, BeadFilter>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     for (effect, view, children, mut transform) in &mut effects {
@@ -509,10 +539,7 @@ fn place_auras(
     views: Query<&ViewPlayers>,
     avatars: Query<(&Avatar, &ChildOf)>,
     auras: Query<(&AuraOf, &ChildOf, &Children)>,
-    mut spheres: Query<
-        (&Bead, &mut Transform, &mut Visibility, &MeshMaterial3d<StandardMaterial>),
-        (Without<EffectOf>, Without<AuraOf>),
-    >,
+    mut spheres: Query<BeadItem, BeadFilter>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     for (aura, avatar, children) in &auras {
@@ -527,13 +554,22 @@ fn place_auras(
             continue;
         };
         let head = HEAD_M * p.body.scale + p.body.lift;
-        let particles = aura_particles(aura.0, seed_of(p), head, p.body.scale, p.body.lift, time.elapsed_secs());
+        let particles = aura_particles(
+            aura.0,
+            seed_of(p),
+            head,
+            p.body.scale,
+            p.body.lift,
+            time.elapsed_secs(),
+        );
         show_particles(&particles, children, &mut spheres, &mut materials);
     }
 }
 
 fn seed_of(p: &PlayerRender) -> u32 {
-    p.id.bytes().fold(2_166_136_261u32, |h, b| (h ^ u32::from(b)).wrapping_mul(16_777_619))
+    p.id.bytes().fold(2_166_136_261u32, |h, b| {
+        (h ^ u32::from(b)).wrapping_mul(16_777_619)
+    })
 }
 
 #[cfg(test)]
@@ -563,7 +599,10 @@ mod tests {
         let burst = flash(0.6).unwrap();
         assert_eq!(burst.at, Vec3::X * 10.0);
         assert!(burst.color.alpha < 1.0);
-        assert!(bolt_at(0.5 + IMPACT_S, false).iter().all(Option::is_none), "done");
+        assert!(
+            bolt_at(0.5 + IMPACT_S, false).iter().all(Option::is_none),
+            "done"
+        );
     }
 
     #[test]
@@ -585,7 +624,13 @@ mod tests {
 
     #[test]
     fn a_spark_waits_grows_and_fades() {
-        let spark = |age| particles(&Effect::PokeSpark { id: 3, at: [0.0; 3], age });
+        let spark = |age| {
+            particles(&Effect::PokeSpark {
+                id: 3,
+                at: [0.0; 3],
+                age,
+            })
+        };
         assert!(spark(0.05).iter().all(Option::is_none));
         let early = spark(0.15)[0].unwrap();
         let late = spark(0.5)[0].unwrap();
@@ -598,9 +643,19 @@ mod tests {
     #[test]
     fn smoke_rises_from_the_head_and_sparkles_ring_the_body() {
         let smoke = aura_particles(Aura::Smoke, 7, 1.75, 1.0, 0.0, 3.3);
-        assert!(smoke.iter().flatten().all(|p| p.at.y >= 1.75 && p.at.y < 1.75 + 1.0));
+        assert!(
+            smoke
+                .iter()
+                .flatten()
+                .all(|p| p.at.y >= 1.75 && p.at.y < 1.75 + 1.0)
+        );
         let sparkles = aura_particles(Aura::Sparkles, 7, 1.75, 1.0, 0.0, 3.3);
-        assert!(sparkles.iter().flatten().all(|p| (p.at.xz().length() - 0.5).abs() < 1e-4));
+        assert!(
+            sparkles
+                .iter()
+                .flatten()
+                .all(|p| (p.at.xz().length() - 0.5).abs() < 1e-4)
+        );
         assert_ne!(smoke, aura_particles(Aura::Smoke, 7, 1.75, 1.0, 0.0, 3.4));
     }
 
@@ -610,6 +665,13 @@ mod tests {
             "kind": "pokeSpark", "id": 4, "at": [1, 2, 3], "age": 0.2
         }))
         .unwrap();
-        assert_eq!(e, Effect::PokeSpark { id: 4, at: [1.0, 2.0, 3.0], age: 0.2 });
+        assert_eq!(
+            e,
+            Effect::PokeSpark {
+                id: 4,
+                at: [1.0, 2.0, 3.0],
+                age: 0.2
+            }
+        );
     }
 }
