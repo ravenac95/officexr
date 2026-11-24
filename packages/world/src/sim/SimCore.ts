@@ -38,7 +38,14 @@ export interface SimPeer {
 
 export type SimSettings = Pick<
   WorldSettings,
-  'charRadius' | 'movementBlockThreshold' | 'jumpVelocity' | 'airControl' | 'maxJumps' | 'landingEaseMs'
+  | 'charRadius'
+  | 'movementBlockThreshold'
+  | 'jumpVelocity'
+  | 'airControl'
+  | 'maxJumps'
+  | 'landingEaseMs'
+  | 'stepUpSpeedFactor'
+  | 'climbAnimFactor'
 >;
 
 /** One frame of the local player's intent, as plain data. */

@@ -3,9 +3,11 @@ import { BevyScene } from './BevyScene.tsx';
 import type { Actions, Bus, PlayerId, RuleRegistry, Store, SyncEngine, SnapshotHandshake, Vec3 } from '@officexr/sdk';
 import type { JoystickKind } from '@officexr/render-wasm';
 import type { BotPool } from '../bot/BotPool.ts';
+import type { FixedCameraViewConfig } from '../renderer/viewConfig.ts';
 import type { FrameStatsSample } from './frameStatsMeter.ts';
 import type { CameraMode } from '../renderer/config.ts';
 import type { MotionLookState } from '../renderer/motionLook.ts';
+import type { MissionMarkerTarget } from '../renderer/missionMarker.ts';
 import {
   ErrorBanner,
   FocusIndicator,
@@ -15,7 +17,7 @@ import {
   WorldHud,
   type HudRealtime,
 } from './hud.tsx';
-import { WorldLoadingScreen } from './LoadingScreen.tsx';
+import { WorldLoadingScreen, type WorldLoadingScreenProps } from './LoadingScreen.tsx';
 import { useCameraMode } from './useCameraMode.ts';
 import { useCoarsePointer } from './useCoarsePointer.ts';
 import { NO_MOVE, type MoveInput } from '../renderer/moveIntent.ts';
@@ -28,8 +30,12 @@ import { useSlowNotice } from './useSlowNotice.ts';
 import { useWorldFocus } from './useWorldFocus.ts';
 import { NavGridProvider, useBuildNavGrid } from './useNavGrid.ts';
 import { PlayControlsProvider } from './playControls.tsx';
+import { ActionInput } from '../input/action-input.ts';
+import { InteractionStore } from '../input/interaction.ts';
+import { createInteractionSource, InteractionProvider } from './interactionPrompt.tsx';
 import { useAutoWalk } from './useAutoWalk.ts';
 import { playControlsOf, useSeating } from './useSeating.ts';
+import type { PlacementHost } from '../motion/place-mode.ts';
 import { INITIAL_WORLD_READINESS, worldReadiness } from './world-readiness.ts';
 
 export interface PlayViewProps {
@@ -44,6 +50,8 @@ export interface PlayViewProps {
   mapName: string;
   /** Heads the loading screen, e.g. the office name. */
   title?: string;
+  loading?: Pick<WorldLoadingScreenProps, 'title' | 'step' | 'progress' | 'brand' | 'hint' | 'back'>;
+  renderLoadError?: (message: string) => React.ReactNode;
   /** Changing this re-loads and re-applies `mapName` without remounting the canvas. */
   reloadKey?: number;
   storages: PlayStorages;
@@ -55,6 +63,8 @@ export interface PlayViewProps {
   onFrameStats?: (sample: FrameStatsSample | null) => void;
   /** Makes the camera mode controlled; Alt+P then reports through `onCameraModeChange`. */
   cameraMode?: CameraMode;
+  /** Overrides the world's fixed-camera framing (e.g. the web client's overhead 2D view). Must be stable. */
+  fixedCamera?: Partial<FixedCameraViewConfig>;
   onCameraModeChange?: (mode: CameraMode) => void;
   /** Steers the view with device motion; absent means off. */
   motionLook?: MotionLookState;
@@ -65,6 +75,13 @@ export interface PlayViewProps {
   hud?: 'debug' | 'player';
   /** Pings another player, from the 3D view's hover bell or the participant list. */
   onPingPlayer?: (id: PlayerId) => void;
+  /** Shows Ping on a frozen avatar's card; absent where an offline person cannot be reached. */
+  onPingFrozen?: (login: string) => void;
+  /** Lets the player place props; absent where nobody builds. */
+  placement?: PlacementHost;
+  missionMarker?: MissionMarkerTarget | null;
+  /** The view cannot be turned by dragging: touch drag stops looking around and the joystick may start anywhere. */
+  lookLocked?: boolean;
   /** The local player's simulation; default `'ts'`. */
   sim?: SimImplementation;
   /** Overlays rendered above the scene and HUD. */
@@ -91,10 +108,18 @@ export function PlayView(props: PlayViewProps) {
   const [domJoystick, setDomJoystick] = useState(false);
   const [viewYaw] = useState(createViewYaw);
   const worldConstants = useWorldConstants(props.store);
+  const { fixedCamera } = props;
+  const view = useMemo(
+    () => (fixedCamera ? { ...worldConstants, fixedCamera: { ...worldConstants.fixedCamera, ...fixedCamera } } : worldConstants),
+    [worldConstants, fixedCamera],
+  );
   const navGrid = useBuildNavGrid(props.store);
   const autoWalk = useAutoWalk(props.store, props.selfId, navGrid);
   const seating = useSeating(props.store, props.actions, props.selfId, autoWalk);
   const playControls = useMemo(() => playControlsOf(autoWalk, seating), [autoWalk, seating]);
+  const [actionInput] = useState(() => new ActionInput());
+  const [interactions] = useState(() => new InteractionStore());
+  const interactionSource = useMemo(() => createInteractionSource(interactions, actionInput), [interactions, actionInput]);
   const session = usePlaySession({
     actions: props.actions,
     mapName: props.mapName,
@@ -137,7 +162,8 @@ export function PlayView(props: PlayViewProps) {
           selfId={props.selfId}
           cameraMode={cameraMode}
           invertLook={props.invertLook}
-          view={worldConstants}
+          lookLocked={props.lookLocked}
+          view={view}
           worldFocused={worldFocused}
           moveInputRef={moveInputRef}
           joystickKind={joystickKind}
@@ -145,6 +171,8 @@ export function PlayView(props: PlayViewProps) {
           motionLook={props.motionLook}
           autoWalk={autoWalk}
           seating={seating}
+          actionInput={actionInput}
+          interactions={interactions}
           spawnPoints={session.spawnPoints}
           bakedLayouts={session.bakedLayouts}
           onFrameStats={props.onFrameStats}
@@ -153,6 +181,9 @@ export function PlayView(props: PlayViewProps) {
           sim={props.sim}
           onLoadProgress={setProgress}
           onPing={props.onPingPlayer && ((_, id) => props.onPingPlayer?.(id))}
+          onPingFrozen={props.onPingFrozen}
+          placement={props.placement}
+          missionMarker={props.missionMarker}
           onModelsReady={() => dispatch({ type: 'modelsReady' })}
           onCollidersReady={(roomInstanceId) => dispatch({ type: 'collidersReady', roomInstanceId })}
           onError={(err) => dispatch({ type: 'collidersFailed', message: `Could not load the world: ${err.message}` })}
@@ -166,7 +197,7 @@ export function PlayView(props: PlayViewProps) {
       )}
       <TeleportFlash seating={seating} />
       <SeatRefusalToast seating={seating} />
-      {coarsePointer && domJoystick && <VirtualJoystick inputRef={moveInputRef} />}
+      {coarsePointer && domJoystick && <VirtualJoystick inputRef={moveInputRef} floating={props.lookLocked === true} />}
       {props.error ? (
         <ErrorBanner message={props.error} onDismiss={() => props.onDismissError?.()} />
       ) : (
@@ -174,18 +205,23 @@ export function PlayView(props: PlayViewProps) {
       )}
       <NavGridProvider value={navGrid}>
         <ViewYawProvider viewYaw={viewYaw}>
-          <PlayControlsProvider controls={playControls}>{props.children}</PlayControlsProvider>
+          <PlayControlsProvider controls={playControls}>
+            <InteractionProvider source={interactionSource}>{props.children}</InteractionProvider>
+          </PlayControlsProvider>
         </ViewYawProvider>
       </NavGridProvider>
-      {!ready && (
-        <WorldLoadingScreen
-          title={props.title}
-          step={session.loaded ? 'Loading world…' : 'Loading map…'}
-          error={readiness.type === 'failed' ? readiness.message : undefined}
-          progress={readiness.type === 'failed' ? undefined : progress}
-          slow={slow}
-        />
-      )}
+      {readiness.type === 'failed' && props.renderLoadError
+        ? props.renderLoadError(readiness.message)
+        : !ready && (
+            <WorldLoadingScreen
+              title={props.title}
+              step={session.loaded ? 'Loading world…' : 'Loading map…'}
+              error={readiness.type === 'failed' ? readiness.message : undefined}
+              slow={slow}
+              {...props.loading}
+              progress={readiness.type === 'failed' ? undefined : (props.loading?.progress ?? progress)}
+            />
+          )}
     </>
   );
 }

@@ -16,6 +16,7 @@ pub use proximity::{
     ProximityInput, ProximitySettings, TrackerOutput, VoiceZone, extrapolate_pos,
 };
 pub use sim_core::{
-    SimBakedColliders, SimCore, SimInput, SimKind, SimKinds, SimPeer, SimSettings, SimStepResult,
+    CLIMB_ANIM_FACTOR_DEFAULT, STEP_UP_SPEED_FACTOR_DEFAULT, SimBakedColliders, SimCore, SimInput,
+    SimKind, SimKinds, SimPeer, SimSettings, SimStepResult,
 };
 pub use world_objects::{ObjectInstance, Vec3, WorldObjects};

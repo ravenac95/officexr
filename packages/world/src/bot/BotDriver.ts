@@ -205,6 +205,8 @@ export class BotDriver {
       walkSpeed: tunablesForInit.playerSpeed,
       runSpeed: tunablesForInit.playerSpeed * tunablesForInit.runSpeedMultiplier,
       movementBlockThreshold: state.worldSettings.movementBlockThreshold,
+      stepUpSpeedFactor: state.worldSettings.stepUpSpeedFactor,
+      climbAnimFactor: state.worldSettings.climbAnimFactor,
     });
 
     const botChannel = this.createChannel(botId);
@@ -358,6 +360,8 @@ export class BotDriver {
       walkSpeed: tunables.playerSpeed,
       runSpeed: tunables.playerSpeed * tunables.runSpeedMultiplier,
       movementBlockThreshold: botState.worldSettings.movementBlockThreshold,
+      stepUpSpeedFactor: botState.worldSettings.stepUpSpeedFactor,
+      climbAnimFactor: botState.worldSettings.climbAnimFactor,
     });
 
     // Intent verb: bots always walk (no run/crouch input source yet).

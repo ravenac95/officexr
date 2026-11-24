@@ -89,6 +89,10 @@ export {
   type CubeKindCategory,
   type OptimizationMode,
   type SeatSpec,
+  type WaterSpec,
+  type RideSpec,
+  type RideVehicle,
+  RIDE_VEHICLES,
   CUBE_KIND_CATEGORIES,
   WORLD_OBJECT_KIND_DEFAULTS,
   newWorldObjectKind,
@@ -101,6 +105,7 @@ export {
   isYawAllowed,
   nextAllowedYaw,
   DEFAULT_ROTATION_STEP_DEG,
+  MAX_PORTRAIT_CHARS,
 } from './world-object-kinds-schema.ts';
 // Module-globals for the kind catalog were removed in the three-layer
 // architecture refactor. Consume the catalog through the application

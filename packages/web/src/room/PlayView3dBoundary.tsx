@@ -1,9 +1,10 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
-import { storeViewMode } from './viewMode';
+import { Blocked } from '../page/Blocked';
 
-/** Last line of defence for the 3D view: an error that escapes the scene's own boundaries (or a failed
- * load of the lazy 3D chunk) lands here. It never changes the view by itself; the user picks
- * between reloading into 3D and switching to 2D. */
+const STALE_CHUNK = /dynamically imported module|Loading chunk|Importing a module script failed/i;
+
+/** Last line of defence for the world view (3D and overhead 2D alike): an error that escapes the scene's
+ * own boundaries (or a failed load of the lazy chunk) lands here, and the user can try again. */
 export class PlayView3dBoundary extends Component<
   { children: ReactNode; reload?: () => void },
   { error: Error | null }
@@ -18,32 +19,21 @@ export class PlayView3dBoundary extends Component<
     console.error('3D view crashed', error, info.componentStack);
   }
 
+  private retry = () => {
+    const { error } = this.state;
+    // React caches a failed lazy import, so only a page load fetches the chunk again.
+    if (error && STALE_CHUNK.test(error.message)) {
+      (this.props.reload ?? (() => window.location.reload()))();
+      return;
+    }
+    this.setState({ error: null });
+  };
+
   render() {
     const { error } = this.state;
     if (!error) {
       return this.props.children;
     }
-    const reload = this.props.reload ?? (() => window.location.reload());
-    return (
-      <div role="alert" className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-black text-white">
-        <p>The 3D view hit an error.</p>
-        <p className="max-w-md px-4 text-center text-xs text-white/60">{error.message}</p>
-        <div className="flex gap-2">
-          <button type="button" className="rounded bg-white/20 px-3 py-2 hover:bg-white/30" onClick={reload}>
-            Reload
-          </button>
-          <button
-            type="button"
-            className="rounded bg-white/10 px-3 py-2 hover:bg-white/20"
-            onClick={() => {
-              storeViewMode('2d');
-              reload();
-            }}
-          >
-            Switch to 2D
-          </button>
-        </div>
-      </div>
-    );
+    return <Blocked surface="cover" variant="crashed" details={error.message} onPrimary={this.retry} />;
   }
 }

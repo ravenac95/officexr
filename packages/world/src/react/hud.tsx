@@ -100,7 +100,7 @@ export function WorldHud({
       }}
     >
       {`Camera: ${cameraMode} (Alt+P to cycle) · Realtime: ${realtime} · ${layoutLine}`}
-      {'\nWASD to move · Click to look · Esc to release mouse'}
+      {'\nWASD to move · Hold right mouse button or drag to look'}
     </div>
   );
 }
@@ -112,7 +112,7 @@ export function ErrorBanner({ message, onDismiss }: { message: string; onDismiss
       role="alert"
       style={{
         position: 'absolute',
-        top: HUD_INSET,
+        top: `var(--hud-error-top, ${HUD_INSET}px)`,
         left: '50%',
         transform: 'translateX(-50%)',
         padding: '8px 14px',
@@ -154,7 +154,7 @@ export function SeatRefusalToast({ seating }: { seating: Pick<SeatingController,
       role="status"
       style={{
         position: 'absolute',
-        bottom: 96,
+        bottom: 'var(--hud-seat-toast-bottom, 96px)',
         left: '50%',
         transform: 'translateX(-50%)',
         padding: '6px 12px',

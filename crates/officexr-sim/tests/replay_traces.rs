@@ -33,7 +33,9 @@ fn compare(name: &str, actual: &[SimStepResult], golden: &[SimStepResult]) -> (f
         );
         assert_eq!(a.respawned, g.respawned, "{at}.respawned");
         assert_eq!(a.is_airborne, g.is_airborne, "{at}.isAirborne");
-        assert_eq!(a.broadcast_yaw, g.broadcast_yaw, "{at}.broadcastYaw");
+        // A climb's yaw is an atan2, whose last bit differs between libms.
+        let yaw = (a.broadcast_yaw - g.broadcast_yaw).abs();
+        assert!(yaw <= TOLERANCE, "{at}.broadcastYaw off by {yaw}");
         let ids = |r: &SimStepResult| {
             r.bumps
                 .iter()

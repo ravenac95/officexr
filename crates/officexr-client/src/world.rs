@@ -6,7 +6,10 @@ use officexr_render::{
     AnimSpeeds, BackgroundConfig, BakedLayoutPlacement, LightingConfig, WorldObjectKind,
     WorldObjects, WorldSceneData,
 };
-use officexr_sim::{SimKind, SimKinds, SimSettings, Vec3 as SimVec3};
+use officexr_sim::{
+    CLIMB_ANIM_FACTOR_DEFAULT, STEP_UP_SPEED_FACTOR_DEFAULT, SimKind, SimKinds, SimSettings,
+    Vec3 as SimVec3,
+};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -52,6 +55,11 @@ struct Animation {
     player_speed: f64,
     run_multiplier: f64,
     movement_block_threshold: f64,
+    // Optional so documents saved before these existed still parse.
+    #[serde(default = "step_up_speed_factor_default")]
+    step_up_speed_factor: f64,
+    #[serde(default = "climb_anim_factor_default")]
+    climb_anim_factor: f64,
 }
 
 #[derive(Deserialize)]
@@ -65,6 +73,14 @@ struct Jump {
 
 fn one() -> f32 {
     1.0
+}
+
+fn step_up_speed_factor_default() -> f64 {
+    STEP_UP_SPEED_FACTOR_DEFAULT
+}
+
+fn climb_anim_factor_default() -> f64 {
+    CLIMB_ANIM_FACTOR_DEFAULT
 }
 
 /// As `COLLISION_DEFAULTS.charRadius`: not part of the world constants.
@@ -159,6 +175,8 @@ fn sim_world(assembly: &Assembly) -> Option<SimWorld> {
             air_control: c.jump.air_control,
             max_jumps: c.jump.max_jumps,
             landing_ease_ms: c.jump.landing_ease_ms,
+            step_up_speed_factor: c.animation.step_up_speed_factor,
+            climb_anim_factor: c.animation.climb_anim_factor,
         },
         player_speed: c.animation.player_speed,
         run_multiplier: c.animation.run_multiplier,

@@ -4,6 +4,11 @@ import type { Actions, Bus, PlayerState, RuleRegistry, SnapshotHandshake, Store,
 import type { BotPool } from '../bot/BotPool.ts';
 import { resolveCharacter } from '../characters/registry.ts';
 import type { CameraMode } from '../renderer/config.ts';
+import type { ActionInput } from '../input/action-input.ts';
+import type { InteractionStore } from '../input/interaction.ts';
+import type { PlacementHost } from '../motion/place-mode.ts';
+import type { MissionMarkerTarget } from '../renderer/missionMarker.ts';
+import type { FixedCameraViewConfig } from '../renderer/viewConfig.ts';
 import type { FrameStatsSample } from './frameStatsMeter.ts';
 import type { MotionLookState } from '../renderer/motionLook.ts';
 import type { AutoWalkSource, MoveInput } from '../renderer/moveIntent.ts';
@@ -37,7 +42,18 @@ export interface BevySceneProps {
   selfId: string;
   cameraMode: CameraMode;
   invertLook?: boolean;
-  view: WorldConstants;
+  view: WorldConstants & { fixedCamera: FixedCameraViewConfig };
+  /** The view cannot be turned by dragging. */
+  lookLocked?: boolean;
+  /** Discrete actions (jump, sprint, interact, poke, emote) from keys and the touch action pad. */
+  actionInput?: ActionInput;
+  /** What the player can interact with nearby, for the interaction prompt. */
+  interactions?: InteractionStore;
+  /** Shows Ping on a frozen avatar's card. */
+  onPingFrozen?: (login: string) => void;
+  /** Lets the player place props; absent where nobody builds. */
+  placement?: PlacementHost;
+  missionMarker?: MissionMarkerTarget | null;
   worldFocused: boolean;
   moveInputRef?: React.RefObject<MoveInput>;
   /** Which touch joystick walks: Bevy's own, or the DOM one in `moveInputRef`. */

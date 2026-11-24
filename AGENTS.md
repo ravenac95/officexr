@@ -20,14 +20,15 @@ officexr/
 ├── packages/
 │   ├── web/              # @officexr/web — office app (SPA only)
 │   │   ├── index.html    # SPA shell (entry: src/main.tsx)
-│   │   ├── src/          # App.tsx (routing), home/ (office list + create form), room/ (OfficeWorld, session, characters),
-│   │   │                 # hud/ (chat), voice/ (JaaS proximity voice)
+│   │   ├── src/          # App.tsx (routing), home/ (office list + create form), page/ (shell for pages outside the world), room/ (OfficeWorld, session, characters),
+│   │   │                 # hud/ (chat, roster, zoom; hud/ui/ is the shared control kit), voice/ (JaaS proximity voice)
 │   │   └── vite.config.ts # dev only: mounts @officexr/server's app and an in-process realtime office
 │   ├── server/           # @officexr/server — web backend
 │   │   ├── src/          # main.ts (entrypoint), backend.ts (createBackend: db + realtime + app, shared with `pnpm dev`), app.ts (createApp), api.ts (/api/*), auth.ts (Google login, logout), db.ts (pg),
 │   │   │                 # jaasToken.ts (server-side JaaS JWT signing), runtimeConfig.ts (/config.js), staticDir.ts (/models), listen.ts, shared.ts (browser-safe types/limits); vitest specs
-│   │   └── .env.example  # SUPABASE_DB_URL, GOOGLE_*, SESSION_SECRET, PUBLIC_URL, PORT, ADMIN_PORT, OFFICEXR_DEV_USER_*, VITE_JAAS_APP_ID, OFFICEXR_JAAS_* (server-only), OFFICEXR_ASSET_BASE_URL
-│   ├── world/            # @officexr/world — Bevy views (react/), physics, bots, maps/rooms/cube kinds
+│   │   └── .env.example  # SUPABASE_DB_URL, GOOGLE_*, SESSION_SECRET, PUBLIC_URL, PORT, ADMIN_PORT, OFFICEXR_DEV_USER_*, VITE_JAAS_APP_ID, OFFICEXR_JAAS_* (server-only), OFFICEXR_ASSET_BASE_URL, CALENDAR_ENCRYPTION_SECRET, SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET
+│   ├── world/            # @officexr/world — Bevy views (react/), physics, bots, maps/rooms/cube kinds; top-down/ is the
+│   │                     # renderer-free entry the web HUD imports hooks from
 │   ├── studio/           # @officexr/studio — map/room/object/character/debug editors
 │   ├── studio-server/    # @officexr/studio-server — studio backend: main.ts (entrypoint), app.ts (internal + public servers), studio-gate.ts (public-port sign-in gate),
 │   │                     # studio-backend.ts (storage hooks + R2 sync, shared with the Vite studio), r2-publisher.ts, push-world-constants.ts
@@ -57,13 +58,13 @@ officexr/
   The server never trusts client-supplied identity headers.
 - **Backend.** `@officexr/server` is one Node process (`pnpm --filter @officexr/server start`).
   `PORT` (default 4173) serves the API, Google auth, read-only studio data, `/models`,
-  `/config.js`, and an attached `RealtimeServer` (`/ws`, `/health`, `/rooms/:id/sessions`);
+  `/config.js`, and an attached `RealtimeServer` (`/ws`, `/health`, `/ready`, `/version`, `/rooms/:id/sessions`);
   it serves no SPA, so `GET /` is a 404. `ADMIN_PORT` (default 8787) serves only
   `PUT /admin/world-constants`. `pnpm dev` mounts the same `createBackend` in Vite's dev server.
   The SPA imports only `@officexr/server/shared`, which must stay free of Node and server deps.
 - **Studio backend.** `@officexr/studio-server` is one Node process
   (`pnpm --filter @officexr/studio-server start`; run `pnpm --filter @officexr/studio build` first).
-  Both ports proxy `/health` and `/ws` to `REALTIME_SERVER_TARGET` (default `http://127.0.0.1:8787`).
+  Both ports proxy `/health`, `/version` and `/ws` to `REALTIME_SERVER_TARGET` (default `http://127.0.0.1:8787`).
   `PORT` (default 5174) also serves the built studio SPA at `/studio/` (`/` redirects there), read/write `/api/*`, `/models` and `/mcp`,
   unauthenticated, for in-cluster callers (the bots sidecar, private-ops-center).
   `PUBLIC_PORT` (default 5175) also serves `/api/*` and `/models`, and (when the OAuth server is on) `/mcp`; everything else is a 404 for a signed-in user and a 401 from the gate otherwise. The public
@@ -99,6 +100,18 @@ officexr/
   the session, never the request) with the server-only `OFFICEXR_JAAS_PRIVATE_KEY` /
   `OFFICEXR_JAAS_API_KEY_ID`; `/config.js` serves only the public `VITE_JAAS_APP_ID`. Never add
   a JaaS secret to `RUNTIME_CONFIG_KEYS`.
+- **Missions.** A mission is a typed to-do in one office, stored in `office_missions`
+  (migration `026_office_missions.sql`; RLS on with no policies, so only the server's
+  database connection reads it). The contract is `packages/sdk/src/missions/types.ts`. Routes
+  live in `packages/server/src/missions.ts` (`GET`/`POST /api/offices/:id/missions`,
+  `PATCH`/`DELETE .../missions/:missionId`), storage behind `MissionsStore`
+  (`missionsStore.ts` in memory, `missionsDb.ts` Postgres). The list is the caller's own plus
+  shared missions, open first and newest first. Only the owner edits or deletes; anyone in the
+  office may set `done` on a shared mission (else 403). Limits: title 140 characters, 20 steps,
+  200 open missions per owner per office (409). After each write the server sends the custom
+  frame `missions:changed` `{ officeId }` through `RealtimeServer.notifyOffice` (shared
+  missions) or `notifyLogin` (private ones); clients re-read the list over HTTP and old
+  clients ignore the frame. The opt-in Postgres spec is `missionsDb.test.ts` (`DB_URL`).
 
 ---
 
@@ -109,6 +122,7 @@ pnpm dev          # Start web dev server (Vite, http://localhost:5173) with the 
 pnpm --filter @officexr/render-wasm build   # The Bevy renderer behind the web 3D view and studio debug mode (slow LTO build)
 pnpm build        # Build the web SPA (outputs to packages/web/dist/)
 pnpm preview      # Preview the SPA build (static only: no API)
+pnpm --filter @officexr/web dev:hud-preview   # HUD preview with no backend: http://localhost:5176/hud-preview?scenario=crowd
 pnpm --filter @officexr/server start   # Production backend on :4173, admin on :8787
 pnpm --filter @officexr/studio-server start   # Studio backend: internal :5174, public :5175
 pnpm typecheck    # Typecheck every package
@@ -138,7 +152,7 @@ https the session cookie is Secure, so the TLS terminator must send
 allowlists SPAs on other origins for credentialed CORS and as `?next=` return targets (the first is the
 default landing and the `login_error` target); they must be same-site with `PUBLIC_URL` because the cookie
 is `SameSite=Lax`. `COOKIE_DOMAIN` (e.g. `karibalabs.co`, must contain `PUBLIC_URL`'s host) shares the
-session cookie across subdomains; enabling it signs existing users out once, and the server clears the old host-only cookie on the next sign-in/out. `createCors` and
+session cookie across subdomains; enabling it signs existing users out once, and the server clears the old host-only cookie on the next sign-in/out. Optional integrations, each off until its env is set and both mounted only with Google sign-in configured: `CALENDAR_ENCRYPTION_SECRET` (min 16 characters; AES-256-GCM key for the Google Calendar refresh tokens in `calendar_links`; adds `GET /auth/google/calendar[/callback]`, `GET /api/integrations`, `DELETE /api/calendar`, and `calendar` on each desk claimant; the Google client needs the redirect URI `${PUBLIC_URL}/auth/google/calendar/callback` and the `calendar.freebusy` scope) and `SLACK_BOT_TOKEN` plus `SLACK_SIGNING_SECRET` (both server-only; adds `POST /api/offices/:id/slack-ping` and the signed `POST /api/slack/interactions`; see `docs/slack/`). Code: `integrations.ts`, `calendarService.ts`, `googleCalendar.ts`, `slack.ts`. `createCors` and
 `createSessionReader` are exported for the studio backend, which gates its public port with them. Who may sign in is managed with SQL in `login_allowlist`
 (values lowercase, no admin UI; example inserts in the README "Sign-in" section). The server reads offices from Postgres via
 `SUPABASE_DB_URL`. Run `pnpm db:migrate` (applies `supabase/migrations` to
@@ -192,6 +206,84 @@ Files on disk:
 - `packages/world/rooms/*.json`
 - `packages/world/maps/*.json` (`default.json` is the seed)
 - `packages/world/cube-kinds.json` (+ `cube-kinds.default.json` fallback)
+
+### Swimming, rides and pokes
+
+Three kinds of placed objects and one key add movement to the office scene (`packages/world/src/motion/`, headless
+and unit-tested; the renderer only plays it):
+
+- **Pool** (`water: { surfaceHeight, rim }` on a kind, e.g. `prop_pool`): a player inside the footprint minus the rim
+  swims (`pose: 'swim'`). Shift swims faster; Space does nothing in water. Walk over the rim to get in or out.
+- **Rides** (`ride: { vehicle }` on a kind, e.g. `prop_scooter_rack`, `prop_tricycle_rack`): the object is a rack. F next to
+  it mounts the vehicle (`pose: 'scooter' | 'tricycle'`), F again dismounts. The rack stays where it is.
+- **Poke** (Q): reaches whoever stands in front of you within arm range; they flinch, turn toward you and see a toast.
+- The pose travels as `presence:pose` and the poke as `poke:send` (SDK `protocol.ts`); peers derive the swim stroke, the
+  lean and the buoyancy from the pose and the broadcast velocity.
+- `prop_*` kinds and models come from `packages/world/scripts/generate-prop-models.ts`; the `pool_party` map shows all three.
+  The default catalog fallback stays at the original 12 blocks, so these kinds exist only in `world-object-kinds.json`.
+
+### Build mode, the wand and sound effects
+
+- **Build** (B, or the Build button): any signed-in user places `prop_pool`, `prop_scooter_rack`, `prop_tricycle_rack` and
+  `prop_wand_stand` (`PLACEABLE_KINDS` in `@officexr/sdk`). The ghost is 3 m ahead of the player on a 0.5-voxel grid;
+  Enter or click places, R turns the ghost, Tab picks the next prop, T turns and G picks up the prop you point at, Delete
+  removes it. Ops travel as `prop:op` custom frames to the realtime server, which calls `POST /api/offices/:id/props`
+  (`packages/server`, table `office_props`, migration 024, at most 50 per office), then broadcasts the full list as the
+  server-authority `office:props` event; late joiners get it in the snapshot. Placed props are merged into
+  `useStoreWorldObjects`, so water, rides and colliders treat them like map instances.
+- **Wand** (`prop_wand_stand`, `holdable` on the kind): F next to a stand picks the wand up (`presence:held`, the stand draws
+  as its `emptyKindId`), F again puts it back. Q or a click casts, 1-4 pick the spell. `spell:cast` carries origin, direction,
+  flight distance and the hit target; the caster resolves the hit, the realtime server only checks the schema, the sender,
+  the held wand and the 1 s cooldown (`SpellCastGuard`) and replays running effects to joiners as `spell:effect`.
+- **Spells** are a strategy table in `packages/sdk/src/spells/` (one file per spell plus one registry line); the hotkey order is
+  the registry order and the first spell is the default.
+- **Sound effects** are synthesised with Web Audio (`packages/world/src/audio/`): `cues.ts` decides which event plays which
+  sound and its distance gain (tested), `synth.ts` and `engine.ts` make the sound. Silent until the first click or key;
+  Settings > Controls holds the on/off switch and volume. The studio provides no engine, so it stays silent.
+
+### 2D view
+
+The web client's 2D view is the 3D view (`PlayView3d`) with the fixed follow camera locked
+overhead (`OVERHEAD_CAMERA`, passed to `PlayView` as `fixedCamera`): same scene, models,
+physics and seating, no separate renderer.
+
+### Web HUD theme
+
+The web HUD, settings and pages share one light liquid-glass theme: the `@theme` tokens and the
+`hud-glass` / `hud-glass-thick` utilities in `packages/web/src/index.css`, the system font stack
+(SF Pro on Apple devices), and the kit in `packages/web/src/hud/ui/` (`Panel` with a `material`,
+`Button`, `IconButton`, `Tabs` with `segment` / `sidebar` variants, `Switch`, `Keycap`). Restyle
+through the tokens and the kit rather than per component. A dark appearance (macOS-style)
+redefines the same tokens under `:root[data-theme="dark"]`; `theme/appearance.ts` sets
+`data-theme` from Settings → Appearance (Light / Dark / Auto, stored in localStorage, Auto follows
+the system) and is initialised in `main.tsx` before the first paint. Use tokens, never raw
+`white`/hex, so both appearances stay correct; the world's loading screen reads the same CSS
+variables with light fallbacks.
+
+### Hermetic HUD preview (`/hud-preview`)
+
+Like the studio's `?test=1`, the web app has one startup branch for tests: `main.tsx` renders
+`src/hud-preview/HudPreview` instead of `App` when `import.meta.env.DEV` is true and the path is
+`/hud-preview`. A production build drops the branch and the module. The preview renders the real
+`OfficeWorld` (HUD over the real `Scene`) with a fake identity and office, joined to an
+in-memory channel (`createInMemoryChannelHub` through `createStack({ mode: 'local' })`) and a store
+seeded from `?scenario=<name>`: `crowd`, `alone`, `wand`, `build`, `focus`, `full`
+(`hud-preview/scenarios.ts`). `OfficeWorld` takes this through its optional `hermetic` prop, which
+skips the join check and the realtime join; nothing else differs from production.
+
+`pnpm --filter @officexr/web dev:hud-preview` serves it on :5176 with no database, sign-in or
+realtime server (`vite.hud-preview.config.ts`: the checked-in studio maps, rooms and models, the
+default map's layout baked first). Ladle stories (`pnpm --filter @officexr/web stories`, `src/hud/hud.stories.tsx`)
+render each HUD component over the same seeded scenarios; Ladle's theme toggle switches light and dark.
+Specs: `tests/playwright/hud-layout.spec.ts` asserts no HUD overlaps, nothing outside the viewport and
+safe area, and touch targets of 44 px or more, for every scenario on phone, tablet and desktop
+viewports. It is not in `test:e2e:ci` yet: the current layout fails it (see `docs/hud-review/README.md`),
+so add it to the list once the layout is fixed. `hud-capture.spec.ts` writes screenshots when
+`HUD_CAPTURE_DIR` is set.
+
+`HudLayout`, the touch pad and the joystick keep off the screen edge through the `--hud-inset-*` tokens in
+`index.css` (edge gap or safe area, whichever is larger). The specs set `--hud-safe-*` to a real device's
+insets, since Chromium emulation reports zero for `env()`.
 
 ### Studio control kit
 
@@ -256,4 +348,24 @@ SQL migrations live in `supabase/migrations/`. Apply them to `SUPABASE_DB_URL` w
 pnpm db:migrate           # supabase db push against SUPABASE_DB_URL
 ```
 
-The web container runs `pnpm db:migrate` before starting the server.
+The container does not run migrations: its command only starts the server. Run `pnpm db:migrate`
+as a pre-deploy job, before the rollout.
+
+### Health, readiness and version
+
+The image gets `OFFICEXR_COMMIT` (the build's `GIT_SHA`) and `OFFICEXR_BUILT_AT` from
+`.github/workflows/image.yml`; without them the server uses `git rev-parse HEAD`, else `dev`.
+`RealtimeServer` takes these through its `deployment` option; the web backend supplies the
+database check (`packages/server/src/deployment.ts`), so `@officexr/realtime-server` knows no `pg`.
+
+- `GET /health` (liveness): `{ok, commit, offices}`. Never touches the database.
+- `GET /ready` (readiness): 200 `{status:"pass"}`, or 503 `{status:"fail", reason}` with `reason`
+  `db-unreachable` or `schema-behind`. The check is cached for 60 s and times out after 1 s.
+- `GET /version`: `{commit, builtAt, db:{expected, applied, ok}}`. `expected` is the highest
+  `supabase/migrations/NNN_*.sql` in the image; `applied` is the highest `version` in
+  `supabase_migrations.schema_migrations` (`null` when unreachable or empty).
+- studio-server proxies `/health` and `/version` to the realtime process, which reports the commit only.
+
+Point the cluster's liveness probe at `/health` and its readiness probe at `/ready`.
+To check a deploy, `curl <host>/version` and compare `commit` with the merged SHA and
+`db.applied` with `db.expected`.

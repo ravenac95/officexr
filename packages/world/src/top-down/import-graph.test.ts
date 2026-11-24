@@ -33,13 +33,9 @@ function walk(entry: string): { files: Set<string>; bare: Set<string> } {
 }
 
 describe('@officexr/world/top-down import graph', () => {
-  const { files, bare } = walk(resolve(dirname(fileURLToPath(import.meta.url)), 'index.ts'));
+  const { bare } = walk(resolve(dirname(fileURLToPath(import.meta.url)), 'index.ts'));
 
   it('does not reach the Bevy renderer', () => {
     expect([...bare].filter((s) => s.startsWith('@officexr/render-wasm'))).toEqual([]);
-  });
-
-  it('ticks through the frame loop the 3D view shares', () => {
-    expect([...files].filter((f) => f.endsWith('/react/frameLoop.ts'))).toHaveLength(1);
   });
 });

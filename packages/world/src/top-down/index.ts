@@ -1,4 +1,3 @@
-export { TopDownPlayView, type TopDownPlayViewProps } from './TopDownPlayView.tsx';
 export {
   ApplicationProvider,
   useApplication,
@@ -7,6 +6,7 @@ export {
   type ApplicationProviderProps,
 } from '../react/application-context.tsx';
 export type { HudRealtime } from '../react/hud.tsx';
+export { useSlowNotice } from '../react/useSlowNotice.ts';
 export { WorldLoadingScreen, type WorldLoadingScreenProps } from '../react/LoadingScreen.tsx';
 export { useStoreSelector } from '../react/useStoreSelector.ts';
 export { focusWorld, isTypingTarget, useWorldFocus } from '../react/useWorldFocus.ts';
@@ -16,6 +16,12 @@ export { useViewYaw } from '../react/viewYaw.tsx';
 export type { PlayStorages } from '../react/usePlaySession.ts';
 export { useCoarsePointer } from '../react/useCoarsePointer.ts';
 export { useMediaQuery } from '../react/useMediaQuery.ts';
+export { usePortrait } from '../react/usePortrait.ts';
 export { planarDistance, relativeBearing } from '../react/relativeGeometry.ts';
 export type { NavGrid } from '../nav/grid.ts';
 export type { AutoWalkState } from '../nav/autoWalk.ts';
+export { isGroundTargetId } from '../react/useAutoWalk.ts';
+export { createPlaceKeyHandler } from '../renderer/placeKeys.ts';
+export { useCharacterPortrait } from '../react/useCharacterPortrait.ts';
+export { useInteractionPrompt, useSuppressInteractionPrompt, type InteractionPromptView } from '../react/interactionPrompt.tsx';
+export type { InteractionKind, InteractionOption } from '../input/interaction.ts';

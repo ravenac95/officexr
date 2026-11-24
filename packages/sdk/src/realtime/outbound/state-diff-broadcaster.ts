@@ -1,6 +1,7 @@
 import type { Store } from '../../game-state/store.ts';
 import type {
   CharacterConfigs,
+  ChatMessage,
   OfficeState,
   WorldMap,
   WorldObjects,
@@ -63,6 +64,14 @@ export class StateDiffBroadcaster {
     this.takeSeq = opts.takeSeq;
   }
 
+  private chatEvent(msg: ChatMessage): NetEvent | null {
+    const head = { v: 1 as const, actorId: msg.authorId, seq: this.takeSeq(), t: this.clock.now(), text: msg.text };
+    if (msg.scope === 'direct') {
+      return msg.to ? { ...head, kind: 'chat:direct', targetId: msg.to } : null;
+    }
+    return { ...head, kind: msg.scope === 'nearby' ? 'chat:nearby' : 'chat:message' };
+  }
+
   /** Record current state as the baseline so the first real mutation
    * is treated as a delta against startup, not absorbed into it. */
   captureBaseline(): void {
@@ -79,15 +88,9 @@ export class StateDiffBroadcaster {
     if (next.chat.length > prev.chat.length) {
       const added = next.chat.slice(this.lastChatLen);
       for (const msg of added) {
-        if (msg.authorId === next.selfId) {
-          this.broadcast({
-            kind: 'chat:message',
-            v: 1,
-            actorId: next.selfId,
-            seq: this.takeSeq(),
-            t: this.clock.now(),
-            text: msg.text,
-          });
+        const event = msg.authorId === next.selfId ? this.chatEvent(msg) : null;
+        if (event) {
+          this.broadcast(event);
         }
       }
       this.lastChatLen = next.chat.length;
@@ -120,6 +123,18 @@ export class StateDiffBroadcaster {
 
     if (selfLive && me?.seat !== prevMe?.seat) {
       this.announceSeat(next);
+    }
+
+    if (selfLive && ((me?.pose ?? null) !== (prevMe?.pose ?? null) || (me?.poseRack ?? null) !== (prevMe?.poseRack ?? null))) {
+      this.announcePose(next);
+    }
+
+    if (selfLive && ((me?.held ?? null) !== (prevMe?.held ?? null) || (me?.heldStand ?? null) !== (prevMe?.heldStand ?? null))) {
+      this.announceHeld(next);
+    }
+
+    if (selfLive && (me?.handRaised ?? false) !== (prevMe?.handRaised ?? false)) {
+      this.announceHand(next);
     }
 
     // worldMap: broadcast on any change. Same JSON-equality dedupe; the map
@@ -235,6 +250,45 @@ export class StateDiffBroadcaster {
       seq: this.takeSeq(),
       t: this.clock.now(),
       instanceId: state.players[state.selfId]?.seat ?? null,
+    });
+  }
+
+  announceHandIfRaised(state: OfficeState = this.store.getState()): void {
+    if (state.players[state.selfId]?.handRaised) this.announceHand(state);
+  }
+
+  announceHand(state: OfficeState = this.store.getState()): void {
+    this.broadcast({
+      kind: 'presence:hand',
+      v: 1,
+      actorId: state.selfId,
+      seq: this.takeSeq(),
+      t: this.clock.now(),
+      raised: state.players[state.selfId]?.handRaised ?? false,
+    });
+  }
+
+  announcePose(state: OfficeState = this.store.getState()): void {
+    this.broadcast({
+      kind: 'presence:pose',
+      v: 1,
+      actorId: state.selfId,
+      seq: this.takeSeq(),
+      t: this.clock.now(),
+      pose: state.players[state.selfId]?.pose ?? null,
+      rack: state.players[state.selfId]?.poseRack ?? null,
+    });
+  }
+
+  announceHeld(state: OfficeState = this.store.getState()): void {
+    this.broadcast({
+      kind: 'presence:held',
+      v: 1,
+      actorId: state.selfId,
+      seq: this.takeSeq(),
+      t: this.clock.now(),
+      held: state.players[state.selfId]?.held ?? null,
+      stand: state.players[state.selfId]?.heldStand ?? null,
     });
   }
 

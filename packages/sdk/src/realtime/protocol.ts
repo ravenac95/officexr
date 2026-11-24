@@ -2,8 +2,12 @@ import { z } from 'zod';
 import type {
   AvatarData,
   CharacterConfigs,
+  EmoteId,
+  PingIntent,
   MicState,
   PlayerId,
+  PlayerPose,
+  HeldItem,
   PresenceStatus,
   Stroke,
   Vec3,
@@ -11,8 +15,13 @@ import type {
   WorldObjects,
   ZombieState,
 } from '../game-state/types.ts';
+import { ZDeskClaimant, type DeskClaimant } from './desk-claim.ts';
 import { ZWorldConstants, type WorldConstants } from '../game-state/world-constants.ts';
+import { ZPlacedProp, type PlacedProp } from '../placement/props.ts';
+import { SPELL_IDS, SPELL_RANGE_M, type SpellId } from '../spells/index.ts';
+import { EMOTE_IDS, HELD_ITEMS, PING_INTENTS, PLAYER_POSES, STATUS_EMOJI_MAX, STATUS_TEXT_MAX, isStatusEmoji } from '../game-state/types.ts';
 import type { SerializedOfficeState } from '../game-state/snapshot.ts';
+import { CHAT_MAX_LENGTH } from '../social/chat.ts';
 
 // --- Envelope ---
 
@@ -76,6 +85,14 @@ const ZPlayerState = z.object({
   status: ZPresenceStatus,
   mic: ZMicState,
   seat: z.string().nullable().optional(),
+  pose: z.enum(PLAYER_POSES).nullable().optional(),
+  poseRack: z.string().nullable().optional(),
+  held: z.enum(HELD_ITEMS).nullable().optional(),
+  heldStand: z.string().nullable().optional(),
+  statusText: z.string().nullable().optional(),
+  statusEmoji: z.string().nullable().optional(),
+  focus: z.boolean().optional(),
+  handRaised: z.boolean().optional(),
 });
 
 const ZChatMessageObj = z.object({
@@ -196,14 +213,43 @@ const ZPresenceStatusPayload = z.object({
   mic: ZMicState,
   jitsiRoom: z.string().nullable().optional(),
   jitsiParticipantId: z.string().nullable().optional(),
+  idleMs: z.number().nonnegative().optional(),
+  statusText: z.string().max(STATUS_TEXT_MAX).nullable().optional(),
+  statusEmoji: z.string().max(STATUS_EMOJI_MAX).refine(isStatusEmoji).nullable().optional(),
+  focus: z.boolean().optional(),
 });
 const ZPresenceSeat = z.object({ instanceId: z.string().nullable() });
-const ZDeskClaimsPayload = z.object({ claims: z.record(z.string(), z.string()) });
+const ZPresencePose = z.object({ pose: z.enum(PLAYER_POSES).nullable(), rack: z.string().nullable().optional() });
+const ZPresenceHeld = z.object({ held: z.enum(HELD_ITEMS).nullable(), stand: z.string().nullable().optional() });
+const ZSpellCast = z.object({
+  spell: z.enum(SPELL_IDS),
+  origin: ZVec3,
+  dir: ZVec3,
+  distance: z.number().min(0).max(SPELL_RANGE_M),
+  targetId: z.string().min(1).nullable(),
+});
+const ZSpellEffectPayload = z.object({
+  targetId: z.string().min(1),
+  spell: z.enum(SPELL_IDS),
+  casterId: z.string().min(1),
+  remainingMs: z.number().positive(),
+  elapsedMs: z.number(),
+});
+const ZOfficePropsPayload = z.object({ props: z.array(ZPlacedProp) });
+const ZPresenceHand = z.object({ raised: z.boolean() });
+const ZEmoteSend = z.object({ emote: z.enum(EMOTE_IDS) });
+const ZPokeSend = z.object({ targetId: z.string().min(1).nullable() });
+const ZDeskClaimsPayload = z.object({
+  claims: z.record(z.string(), z.string()),
+  claimants: z.record(z.string(), ZDeskClaimant).optional(),
+});
 const ZAvatarUpdate = z.object({ avatar: ZAvatarData, name: z.string().min(1) });
 const ZChatMessage = z.object({ text: z.string() });
+const ZChatNearby = z.object({ text: z.string().min(1).max(CHAT_MAX_LENGTH) });
+const ZChatDirect = z.object({ targetId: z.string().min(1), text: z.string().min(1).max(CHAT_MAX_LENGTH) });
 const ZWhiteboardStroke = z.object({ stroke: ZStroke });
 const ZShotHit = z.object({ targetId: z.string(), dmg: z.number() });
-const ZPingSend = z.object({ targetId: z.string().min(1) });
+const ZPingSend = z.object({ targetId: z.string().min(1), intent: z.enum(PING_INTENTS).optional() });
 const ZZombieStatePayload = z.object({ state: ZZombieState });
 const ZSnapshotRequest = z.object({});
 const ZWorldConstantsPayload = z.object({ constants: ZWorldConstants });
@@ -224,6 +270,8 @@ const ZSnapshotOffer = z.object({
 // are wired; until then keeping them out of the protocol prevents peers
 // from sending events the receiver silently drops.
 
+type SpellCastPayload = { spell: SpellId; origin: Vec3; dir: Vec3; distance: number; targetId: PlayerId | null };
+
 type WithEnvelope<K extends string, V extends number, P = {}> = Envelope & { kind: K; v: V } & P;
 
 export type NetEvent =
@@ -233,14 +281,28 @@ export type NetEvent =
       mic: MicState;
       jitsiRoom?: string | null;
       jitsiParticipantId?: string | null;
+      idleMs?: number;
+      statusText?: string | null;
+      statusEmoji?: string | null;
+      focus?: boolean;
     }
   >
   | WithEnvelope<'presence:seat', 1, { instanceId: string | null }>
+  | WithEnvelope<'presence:pose', 1, { pose: PlayerPose | null; rack?: string | null }>
+  | WithEnvelope<'presence:held', 1, { held: HeldItem | null; stand?: string | null }>
+  | WithEnvelope<'spell:cast', 1, SpellCastPayload>
+  | WithEnvelope<'spell:effect', 1, { targetId: PlayerId; spell: SpellId; casterId: PlayerId; remainingMs: number; elapsedMs: number }>
+  | WithEnvelope<'office:props', 1, { props: PlacedProp[] }>
+  | WithEnvelope<'presence:hand', 1, { raised: boolean }>
+  | WithEnvelope<'emote:send', 1, { emote: EmoteId }>
+  | WithEnvelope<'poke:send', 1, { targetId: PlayerId | null }>
   | WithEnvelope<'avatar:update', 1, { avatar: AvatarData; name: string }>
   | WithEnvelope<'chat:message', 1, { text: string }>
+  | WithEnvelope<'chat:nearby', 1, { text: string }>
+  | WithEnvelope<'chat:direct', 1, { targetId: PlayerId; text: string }>
   | WithEnvelope<'whiteboard:stroke', 1, { stroke: Stroke }>
   | WithEnvelope<'shot:hit', 1, { targetId: PlayerId; dmg: number }>
-  | WithEnvelope<'ping:send', 1, { targetId: PlayerId }>
+  | WithEnvelope<'ping:send', 1, { targetId: PlayerId; intent?: PingIntent }>
   | WithEnvelope<'zombie:state', 1, { state: ZombieState }>
   | WithEnvelope<'snapshot:request', 1>
   | WithEnvelope<
@@ -252,7 +314,7 @@ export type NetEvent =
   | WithEnvelope<'world:map', 1, { map: WorldMap }>
   | WithEnvelope<'world:characters', 1, { configs: CharacterConfigs }>
   | WithEnvelope<'world:objects', 1, { objects: WorldObjects }>
-  | WithEnvelope<'desk:claims', 1, { claims: Record<string, string> }>;
+  | WithEnvelope<'desk:claims', 1, { claims: Record<string, string>; claimants?: Record<string, DeskClaimant> }>;
 
 export type NetEventKind = NetEvent['kind'];
 
@@ -272,8 +334,18 @@ export const PROTOCOL = {
   'presence:position': { v: 1, schema: ZPresencePosition, authority: 'local', route: 'room' },
   'presence:status': { v: 1, schema: ZPresenceStatusPayload, authority: 'local', route: 'room' },
   'presence:seat': { v: 1, schema: ZPresenceSeat, authority: 'local', route: 'room' },
+  'presence:pose': { v: 1, schema: ZPresencePose, authority: 'local', route: 'room' },
+  'presence:held': { v: 1, schema: ZPresenceHeld, authority: 'local', route: 'room' },
+  'spell:cast': { v: 1, schema: ZSpellCast, authority: 'local', route: 'room' },
+  'spell:effect': { v: 1, schema: ZSpellEffectPayload, authority: 'server', route: 'room' },
+  'office:props': { v: 1, schema: ZOfficePropsPayload, authority: 'server', route: 'room' },
+  'presence:hand': { v: 1, schema: ZPresenceHand, authority: 'local', route: 'room' },
+  'emote:send': { v: 1, schema: ZEmoteSend, authority: 'local', route: 'room' },
+  'poke:send': { v: 1, schema: ZPokeSend, authority: 'local', route: 'room' },
   'avatar:update': { v: 1, schema: ZAvatarUpdate, authority: 'local', route: 'room' },
   'chat:message': { v: 1, schema: ZChatMessage, authority: 'local', route: 'room' },
+  'chat:nearby': { v: 1, schema: ZChatNearby, authority: 'local', route: 'room' },
+  'chat:direct': { v: 1, schema: ZChatDirect, authority: 'local', route: 'target' },
   'whiteboard:stroke': { v: 1, schema: ZWhiteboardStroke, authority: 'local', route: 'room' },
   'shot:hit': { v: 1, schema: ZShotHit, authority: 'local', route: 'room' },
   'ping:send': { v: 1, schema: ZPingSend, authority: 'local', route: 'target' },
@@ -312,7 +384,10 @@ const withEnvelope = <K extends NetEventKind, V extends number, S extends z.AnyZ
   entry: { v: V; schema: S },
 ) => ZEnvelope.extend({ kind: z.literal(kind), v: z.literal(entry.v) }).merge(entry.schema);
 
-/** Wire schema of every NetEvent: envelope fields, literal `kind`/`v`, and the kind's payload. */
+/**
+ * Wire schema of every NetEvent: envelope fields, literal `kind`/`v`, and the kind's payload.
+ * Append new kinds: the generated Rust types number their variants by position here.
+ */
 export const ZNetEvent = z.discriminatedUnion('kind', [
   withEnvelope('presence:position', PROTOCOL['presence:position']),
   withEnvelope('presence:status', PROTOCOL['presence:status']),
@@ -330,6 +405,16 @@ export const ZNetEvent = z.discriminatedUnion('kind', [
   withEnvelope('world:characters', PROTOCOL['world:characters']),
   withEnvelope('world:objects', PROTOCOL['world:objects']),
   withEnvelope('desk:claims', PROTOCOL['desk:claims']),
+  withEnvelope('presence:pose', PROTOCOL['presence:pose']),
+  withEnvelope('presence:held', PROTOCOL['presence:held']),
+  withEnvelope('spell:cast', PROTOCOL['spell:cast']),
+  withEnvelope('spell:effect', PROTOCOL['spell:effect']),
+  withEnvelope('office:props', PROTOCOL['office:props']),
+  withEnvelope('presence:hand', PROTOCOL['presence:hand']),
+  withEnvelope('emote:send', PROTOCOL['emote:send']),
+  withEnvelope('poke:send', PROTOCOL['poke:send']),
+  withEnvelope('chat:nearby', PROTOCOL['chat:nearby']),
+  withEnvelope('chat:direct', PROTOCOL['chat:direct']),
 ]);
 
 type Flat<T> = T extends unknown ? { [K in keyof T]: T[K] } : never;

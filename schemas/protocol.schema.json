@@ -130,6 +130,35 @@
                 "string",
                 "null"
               ]
+            },
+            "idleMs": {
+              "type": "number",
+              "minimum": 0
+            },
+            "statusText": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 60
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "statusEmoji": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 16
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "focus": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -421,6 +450,14 @@
             "targetId": {
               "type": "string",
               "minLength": 1
+            },
+            "intent": {
+              "type": "string",
+              "enum": [
+                "ping",
+                "invite",
+                "wave"
+              ]
             }
           },
           "required": [
@@ -740,6 +777,64 @@
                           "string",
                           "null"
                         ]
+                      },
+                      "pose": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "swim",
+                              "scooter",
+                              "tricycle"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "poseRack": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "held": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "wand"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "heldStand": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "statusText": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "statusEmoji": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "focus": {
+                        "type": "boolean"
+                      },
+                      "handRaised": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -1345,6 +1440,16 @@
                       "type": "number",
                       "minimum": 0,
                       "maximum": 1
+                    },
+                    "stepUpSpeedFactor": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 2
+                    },
+                    "climbAnimFactor": {
+                      "type": "number",
+                      "minimum": 0.1,
+                      "maximum": 3
                     }
                   },
                   "required": [
@@ -2017,6 +2122,57 @@
               "additionalProperties": {
                 "type": "string"
               }
+            },
+            "claimants": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "characterId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "claimedAt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "calendar": {
+                    "type": "object",
+                    "properties": {
+                      "busy": {
+                        "type": "boolean"
+                      },
+                      "until": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "busy",
+                      "until"
+                    ],
+                    "additionalProperties": true
+                  },
+                  "slack": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "emoji": {
+                        "type": "string",
+                        "maxLength": 100
+                      }
+                    },
+                    "required": [
+                      "text"
+                    ],
+                    "additionalProperties": true
+                  }
+                },
+                "additionalProperties": true
+              }
             }
           },
           "required": [
@@ -2026,6 +2182,536 @@
             "seq",
             "t",
             "claims"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "presence:pose"
+            },
+            "v": {
+              "type": "number",
+              "const": 1
+            },
+            "actorId": {
+              "type": "string"
+            },
+            "seq": {
+              "type": "number"
+            },
+            "t": {
+              "type": "number"
+            },
+            "pose": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "swim",
+                    "scooter",
+                    "tricycle"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "rack": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "v",
+            "actorId",
+            "seq",
+            "t",
+            "pose"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "presence:held"
+            },
+            "v": {
+              "type": "number",
+              "const": 1
+            },
+            "actorId": {
+              "type": "string"
+            },
+            "seq": {
+              "type": "number"
+            },
+            "t": {
+              "type": "number"
+            },
+            "held": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "wand"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "stand": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "v",
+            "actorId",
+            "seq",
+            "t",
+            "held"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "spell:cast"
+            },
+            "v": {
+              "type": "number",
+              "const": 1
+            },
+            "actorId": {
+              "type": "string"
+            },
+            "seq": {
+              "type": "number"
+            },
+            "t": {
+              "type": "number"
+            },
+            "spell": {
+              "type": "string",
+              "enum": [
+                "fireball",
+                "levitate",
+                "shrink",
+                "color-burst"
+              ]
+            },
+            "origin": {
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                },
+                "z": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y",
+                "z"
+              ],
+              "additionalProperties": true
+            },
+            "dir": {
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                },
+                "z": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y",
+                "z"
+              ],
+              "additionalProperties": true
+            },
+            "distance": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "targetId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "v",
+            "actorId",
+            "seq",
+            "t",
+            "spell",
+            "origin",
+            "dir",
+            "distance",
+            "targetId"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "spell:effect"
+            },
+            "v": {
+              "type": "number",
+              "const": 1
+            },
+            "actorId": {
+              "type": "string"
+            },
+            "seq": {
+              "type": "number"
+            },
+            "t": {
+              "type": "number"
+            },
+            "targetId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "spell": {
+              "type": "string",
+              "enum": [
+                "fireball",
+                "levitate",
+                "shrink",
+                "color-burst"
+              ]
+            },
+            "casterId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "remainingMs": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "elapsedMs": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "v",
+            "actorId",
+            "seq",
+            "t",
+            "targetId",
+            "spell",
+            "casterId",
+            "remainingMs",
+            "elapsedMs"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "office:props"
+            },
+            "v": {
+              "type": "number",
+              "const": 1
+            },
+            "actorId": {
+              "type": "string"
+            },
+            "seq": {
+              "type": "number"
+            },
+            "t": {
+              "type": "number"
+            },
+            "props": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kindId": {
+                    "type": "string"
+                  },
+                  "position": {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "items": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  },
+                  "yawDeg": {
+                    "type": "number"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "kindId",
+                  "position",
+                  "yawDeg",
+                  "id"
+                ],
+                "additionalProperties": true
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "v",
+            "actorId",
+            "seq",
+            "t",
+            "props"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "presence:hand"
+            },
+            "v": {
+              "type": "number",
+              "const": 1
+            },
+            "actorId": {
+              "type": "string"
+            },
+            "seq": {
+              "type": "number"
+            },
+            "t": {
+              "type": "number"
+            },
+            "raised": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "v",
+            "actorId",
+            "seq",
+            "t",
+            "raised"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "emote:send"
+            },
+            "v": {
+              "type": "number",
+              "const": 1
+            },
+            "actorId": {
+              "type": "string"
+            },
+            "seq": {
+              "type": "number"
+            },
+            "t": {
+              "type": "number"
+            },
+            "emote": {
+              "type": "string",
+              "enum": [
+                "wave",
+                "thumbs-up",
+                "heart",
+                "laugh",
+                "clap",
+                "party",
+                "question"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "v",
+            "actorId",
+            "seq",
+            "t",
+            "emote"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "poke:send"
+            },
+            "v": {
+              "type": "number",
+              "const": 1
+            },
+            "actorId": {
+              "type": "string"
+            },
+            "seq": {
+              "type": "number"
+            },
+            "t": {
+              "type": "number"
+            },
+            "targetId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "v",
+            "actorId",
+            "seq",
+            "t",
+            "targetId"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "chat:nearby"
+            },
+            "v": {
+              "type": "number",
+              "const": 1
+            },
+            "actorId": {
+              "type": "string"
+            },
+            "seq": {
+              "type": "number"
+            },
+            "t": {
+              "type": "number"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "kind",
+            "v",
+            "actorId",
+            "seq",
+            "t",
+            "text"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "chat:direct"
+            },
+            "v": {
+              "type": "number",
+              "const": 1
+            },
+            "actorId": {
+              "type": "string"
+            },
+            "seq": {
+              "type": "number"
+            },
+            "t": {
+              "type": "number"
+            },
+            "targetId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "kind",
+            "v",
+            "actorId",
+            "seq",
+            "t",
+            "targetId",
+            "text"
           ],
           "additionalProperties": true
         }

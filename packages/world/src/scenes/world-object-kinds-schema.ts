@@ -146,16 +146,40 @@ export interface WorldObjectKind {
   /** Allowed yaw increment in degrees: a positive integer dividing 360.
    * Absent means 90. */
   rotationStepDeg?: number;
-  /** Where an avatar sits on this kind. `offset` is in metres from the
-   * `localAABB` min corner in the unrotated frame (the avatar's root rests
-   * on the seat surface: y is the cushion top);
-   * `yawDeg` is the facing relative to the kind's forward. Absent means
-   * not sittable. */
-  seat?: SeatSpec;
+  /** Where avatars sit on this kind, one entry per seat; the entry's index
+   * is the seat's number. Absent means not sittable. The catalog file may
+   * give a single `seat` instead, which normalisation turns into one entry. */
+  seats?: SeatSpec[];
   /** Counts as a desk. Absent means false. */
   isDesk?: boolean;
+  water?: WaterSpec;
+  ride?: RideSpec;
+  holdable?: HoldableSpec;
+  /** Head-and-shoulders WebP data URL of a `character` kind, so a character tile never downloads the model. */
+  portrait?: string;
 }
 
+export interface WaterSpec {
+  surfaceHeight: number;
+  rim: number;
+}
+
+/** A stand holding an item a player can pick up; `emptyKindId` is what the stand looks like while it is held. */
+export interface HoldableSpec {
+  item: 'wand';
+  emptyKindId: string;
+}
+
+export const RIDE_VEHICLES = ['scooter', 'tricycle'] as const;
+export type RideVehicle = (typeof RIDE_VEHICLES)[number];
+
+export interface RideSpec {
+  vehicle: RideVehicle;
+}
+
+/** `offset` is in metres from the `localAABB` min corner in the unrotated
+ * frame (the avatar's root rests on the seat surface: y is the cushion top);
+ * `yawDeg` is the facing relative to the kind's forward. */
 export interface SeatSpec {
   offset: { x: number; y: number; z: number };
   yawDeg: number;
@@ -432,9 +456,19 @@ export function normalizeKind(raw: unknown, idx: number): WorldObjectKind {
     colliderShape: normalizeColliderShape(k.colliderShape),
     colliderComplexity: normalizeColliderComplexity(k.colliderComplexity, idx),
     rotationStepDeg: normalizeRotationStep(k.rotationStepDeg, idx),
-    seat: normalizeSeat(k.seat, idx),
+    seats: normalizeSeats(k, idx),
     isDesk: normalizeOptionalBoolean(k.isDesk, idx, 'isDesk'),
+    water: normalizeWater(k.water, k.rotationStepDeg, idx),
+    ride: normalizeRide(k.ride, idx),
+    holdable: normalizeHoldable(k.holdable, idx),
+    portrait: normalizePortrait(k.portrait),
   };
+}
+
+export const MAX_PORTRAIT_CHARS = 40_000;
+
+function normalizePortrait(raw: unknown): string | undefined {
+  return typeof raw === 'string' && raw.length <= MAX_PORTRAIT_CHARS && raw.startsWith('data:image/webp;base64,') ? raw : undefined;
 }
 
 /** Resolves kinds of a catalog by id, normalised; the last entry wins on a duplicated id. Throws on an invalid kind. */
@@ -456,19 +490,74 @@ function normalizeRotationStep(raw: unknown, idx: number): number | undefined {
   return raw;
 }
 
-function normalizeSeat(raw: unknown, idx: number): SeatSpec | undefined {
-  if (raw === undefined) {
-    return undefined;
+function normalizeSeats(k: { seat?: unknown; seats?: unknown }, idx: number): SeatSpec[] | undefined {
+  if (k.seats === undefined) {
+    return k.seat === undefined ? undefined : [normalizeSeat(k.seat, `kinds[${idx}].seat`)];
   }
+  if (k.seat !== undefined) {
+    throw new Error(`world-object-kind-catalog: kinds[${idx}] has both seat and seats`);
+  }
+  if (!Array.isArray(k.seats) || k.seats.length === 0) {
+    throw new Error(`world-object-kind-catalog: kinds[${idx}].seats must be a non-empty array`);
+  }
+  return k.seats.map((seat, i) => normalizeSeat(seat, `kinds[${idx}].seats[${i}]`));
+}
+
+function normalizeSeat(raw: unknown, path: string): SeatSpec {
   const seat = raw as { offset?: Record<string, unknown>; yawDeg?: unknown } | null;
   const offset = seat?.offset;
   const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
   if (!offset || !finite(offset.x) || !finite(offset.y) || !finite(offset.z) || !finite(seat?.yawDeg)) {
     throw new Error(
-      `world-object-kind-catalog: kinds[${idx}].seat must be { offset: { x, y, z }, yawDeg } of finite numbers, got ${JSON.stringify(raw)}`,
+      `world-object-kind-catalog: ${path} must be { offset: { x, y, z }, yawDeg } of finite numbers, got ${JSON.stringify(raw)}`,
     );
   }
   return { offset: { x: offset.x, y: offset.y, z: offset.z }, yawDeg: seat.yawDeg };
+}
+
+function normalizeWater(raw: unknown, rotationStepDeg: unknown, idx: number): WaterSpec | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (typeof rotationStepDeg === 'number' && rotationStepDeg % 90 !== 0) {
+    throw new Error(
+      `world-object-kind-catalog: kinds[${idx}].water needs a rotationStepDeg that is a multiple of 90, got ${rotationStepDeg}`,
+    );
+  }
+  const water = raw as { surfaceHeight?: unknown; rim?: unknown } | null;
+  const positive = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
+  if (!positive(water?.surfaceHeight) || !positive(water?.rim)) {
+    throw new Error(
+      `world-object-kind-catalog: kinds[${idx}].water must be { surfaceHeight, rim } of positive numbers, got ${JSON.stringify(raw)}`,
+    );
+  }
+  return { surfaceHeight: water.surfaceHeight, rim: water.rim };
+}
+
+function normalizeRide(raw: unknown, idx: number): RideSpec | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  const vehicle = (raw as { vehicle?: unknown } | null)?.vehicle;
+  if (!(RIDE_VEHICLES as readonly unknown[]).includes(vehicle)) {
+    throw new Error(
+      `world-object-kind-catalog: kinds[${idx}].ride must be { vehicle: ${RIDE_VEHICLES.join(' | ')} }, got ${JSON.stringify(raw)}`,
+    );
+  }
+  return { vehicle: vehicle as RideVehicle };
+}
+
+function normalizeHoldable(raw: unknown, idx: number): HoldableSpec | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  const spec = raw as { item?: unknown; emptyKindId?: unknown } | null;
+  if (spec?.item !== 'wand' || typeof spec.emptyKindId !== 'string' || spec.emptyKindId === '') {
+    throw new Error(
+      `world-object-kind-catalog: kinds[${idx}].holdable must be { item: 'wand', emptyKindId: string }, got ${JSON.stringify(raw)}`,
+    );
+  }
+  return { item: 'wand', emptyKindId: spec.emptyKindId };
 }
 
 function normalizeOptionalPositive(raw: unknown, idx: number, field: string): number | undefined {

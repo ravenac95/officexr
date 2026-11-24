@@ -1,9 +1,10 @@
 import type { Actions } from '../game-state/actions.ts';
 import type { Bus } from '../game-state/bus.ts';
 import type { Store } from '../game-state/store.ts';
-import type { OfficeState, PlayerId } from '../game-state/types.ts';
+import type { EmoteId, OfficeState, PingIntent, PlayerId } from '../game-state/types.ts';
 import type { Channel, ChannelStatus } from './channel.ts';
 import type { NetEvent } from './protocol.ts';
+import type { SpellCast } from '../spells/index.ts';
 import type { Clock } from '../test-harness/time.ts';
 import { applyNetEventToStore } from './apply-net-event.ts';
 import { InboundSeqTable } from './inbound-seq-table.ts';
@@ -12,13 +13,14 @@ import { InboundRouter } from './inbound/router.ts';
 import {
   PositionBroadcaster,
   POSITION_CONSTANTS,
+  poseMoved,
 } from './outbound/position-broadcaster.ts';
 import { StateDiffBroadcaster } from './outbound/state-diff-broadcaster.ts';
 import { StatusBroadcaster } from './outbound/status-broadcaster.ts';
 
 // Re-export so existing consumers keep working without their import paths
 // changing.
-export { applyNetEventToStore, POSITION_CONSTANTS };
+export { applyNetEventToStore, POSITION_CONSTANTS, poseMoved };
 
 const HEARTBEAT_TICK_MS = 1_000;
 
@@ -205,7 +207,7 @@ export class SyncEngine {
     this.broadcast(event);
   }
 
-  sendPing(targetId: PlayerId): void {
+  sendPing(targetId: PlayerId, intent?: PingIntent): void {
     this.broadcast({
       kind: 'ping:send',
       v: 1,
@@ -213,6 +215,40 @@ export class SyncEngine {
       seq: this.takeSeq(),
       t: this.clock.now(),
       targetId,
+      ...(intent && { intent }),
+    });
+  }
+
+  sendEmote(emote: EmoteId): void {
+    this.broadcast({
+      kind: 'emote:send',
+      v: 1,
+      actorId: this.store.getState().selfId,
+      seq: this.takeSeq(),
+      t: this.clock.now(),
+      emote,
+    });
+  }
+
+  sendPoke(targetId: PlayerId | null): void {
+    this.broadcast({
+      kind: 'poke:send',
+      v: 1,
+      actorId: this.store.getState().selfId,
+      seq: this.takeSeq(),
+      t: this.clock.now(),
+      targetId,
+    });
+  }
+
+  sendCast(cast: SpellCast): void {
+    this.broadcast({
+      kind: 'spell:cast',
+      v: 1,
+      actorId: this.store.getState().selfId,
+      seq: this.takeSeq(),
+      t: this.clock.now(),
+      ...cast,
     });
   }
 
@@ -227,6 +263,10 @@ export class SyncEngine {
     this.stateDiff.captureBaseline();
     if (!this.heldSelf) {
       this.position.announceSelf();
+      this.stateDiff.announceSeat();
+      this.stateDiff.announcePose();
+      this.stateDiff.announceHeld();
+      this.stateDiff.announceHandIfRaised();
       this.status.announceSelf();
     }
     this.heartbeat = this.timers.setInterval(() => this.tickHeartbeat(), HEARTBEAT_TICK_MS);
@@ -243,7 +283,10 @@ export class SyncEngine {
         a?.status === b?.status &&
         a?.mic === b?.mic &&
         a?.jitsiRoom === b?.jitsiRoom &&
-        a?.jitsiParticipantId === b?.jitsiParticipantId,
+        a?.jitsiParticipantId === b?.jitsiParticipantId &&
+        a?.statusText === b?.statusText &&
+        a?.statusEmoji === b?.statusEmoji &&
+        a?.focus === b?.focus,
     );
     this.offChannel = this.channel.on((event) => this.inbound.onInbound(event));
     // When a peer's channel disconnects, the hub fires presence-leave for
@@ -289,6 +332,9 @@ export class SyncEngine {
     this.position.announceSelf();
     this.stateDiff.announceAvatar();
     this.stateDiff.announceSeat();
+    this.stateDiff.announcePose();
+    this.stateDiff.announceHeld();
+    this.stateDiff.announceHandIfRaised();
     this.status.announceSelf();
   }
 

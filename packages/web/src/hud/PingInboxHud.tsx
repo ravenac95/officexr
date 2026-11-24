@@ -4,20 +4,13 @@ import type { OfficeState, PlayerId, Store } from '@officexr/sdk';
 import { focusWorld, usePlayControls, useStoreSelector } from '@officexr/world/top-down';
 import type { PingInbox } from '../ping/pingInbox';
 import { IconButton } from './IconButton';
+import { relativeTime } from './relativeTime';
 import { useEscapeLayer } from './useEscapeLayer';
 import { sameList } from './sameFields';
 import { Panel, PanelTitle } from './ui/Panel';
 import { useNow } from './useNow';
 
 const MAX_BADGE = 9;
-
-const relativeTime = (ageMs: number) => {
-  const minutes = Math.floor(ageMs / 60_000);
-  if (minutes < 1) {
-    return 'just now';
-  }
-  return minutes < 60 ? `${minutes}m ago` : `${Math.floor(minutes / 60)}h ago`;
-};
 
 const selectPresentIds = (s: OfficeState) => Object.keys(s.players).map((id) => ({ id }));
 const samePresent = (a: { id: string }[], b: { id: string }[]) => sameList(a, b);
@@ -39,6 +32,9 @@ export function PingInboxHud({ inbox, store }: { inbox: PingInbox; store: Store 
     setOpen(false);
     focusWorld();
   });
+  if (entries.length === 0 && !open) {
+    return null;
+  }
   const go = (id: PlayerId) => {
     goTo(id);
     focusWorld();
@@ -60,7 +56,7 @@ export function PingInboxHud({ inbox, store }: { inbox: PingInbox; store: Store 
       {unread > 0 && !open && (
         <span
           aria-hidden
-          className="pointer-events-none absolute -top-1.5 -right-1.5 min-w-4 rounded-full border-2 border-hud-rose bg-hud-rose-text px-1 text-center text-[10px] leading-3 font-bold text-hud-rose"
+          className="pointer-events-none absolute -top-1.5 -right-1.5 min-w-4 rounded-full bg-red-500 px-1 text-center text-[11px] leading-4 font-bold text-white"
         >
           {unread > MAX_BADGE ? `${MAX_BADGE}+` : unread}
         </span>

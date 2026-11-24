@@ -4,6 +4,8 @@ export interface FrameStatsSample {
   fps: number;
   /** Mean frame-to-frame delta over the window, in milliseconds. */
   frameMs: number;
+  /** Longest single frame delta in the window, in milliseconds. */
+  worstMs: number;
   /** Draw calls in the last rendered frame. */
   drawCalls: number;
   /** Triangles drawn in the last rendered frame. */
@@ -22,15 +24,19 @@ export function frameStatsMeter(
 ): (nowMs: number) => void {
   let frames = 0;
   let elapsedMs = 0;
+  let worstMs = 0;
   let lastMs = performance.now();
   return (nowMs) => {
+    const deltaMs = nowMs - lastMs;
     frames += 1;
-    elapsedMs += nowMs - lastMs;
+    elapsedMs += deltaMs;
+    worstMs = Math.max(worstMs, deltaMs);
     lastMs = nowMs;
     if (elapsedMs >= STATS_INTERVAL_MS) {
-      onSample({ fps: (1000 * frames) / elapsedMs, frameMs: elapsedMs / frames, ...renderStats() });
+      onSample({ fps: (1000 * frames) / elapsedMs, frameMs: elapsedMs / frames, worstMs, ...renderStats() });
       frames = 0;
       elapsedMs = 0;
+      worstMs = 0;
     }
   };
 }

@@ -1,7 +1,10 @@
 use bevy::prelude::*;
 use officexr_sim::physics::character_movement::XZ;
 use officexr_sim::physics::rules::{BODY_Y, SPAWN_DROP_HEIGHT};
-use officexr_sim::{SimCore, SimInput, SimKind, SimKinds, SimSettings, WorldObjects};
+use officexr_sim::{
+    CLIMB_ANIM_FACTOR_DEFAULT, STEP_UP_SPEED_FACTOR_DEFAULT, SimCore, SimInput, SimKind, SimKinds,
+    SimSettings, WorldObjects,
+};
 
 use crate::{PlayerRender, Players};
 
@@ -42,6 +45,8 @@ pub fn sim_input(players: &Players, dir: XZ, speed: f32, yaw: f32) -> SimInput {
             air_control: 0.2,
             max_jumps: 2,
             landing_ease_ms: 120.0,
+            step_up_speed_factor: STEP_UP_SPEED_FACTOR_DEFAULT,
+            climb_anim_factor: CLIMB_ANIM_FACTOR_DEFAULT,
         },
         spawn_points: vec![],
     }

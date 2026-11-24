@@ -9,6 +9,7 @@ import {
   isYawAllowed,
   nextAllowedYaw,
   normalizeKind,
+  MAX_PORTRAIT_CHARS,
   validateWorldObjectKindCatalog,
 } from './world-object-kinds-schema.ts';
 import defaultCatalogJson from '../../world-object-kinds.default.json';
@@ -210,10 +211,10 @@ describe('normalizeKind — seat and isDesk', () => {
       updatedAt: 0,
       kinds: [minimalRaw('furniture', { seat, isDesk: true }), minimalRaw('block', { id: 'plain' })],
     });
-    expect(catalog.kinds[0].seat).toEqual(seat);
+    expect(catalog.kinds[0].seats).toEqual([seat]);
     expect(catalog.kinds[0].isDesk).toBe(true);
     const plain = JSON.parse(JSON.stringify(catalog.kinds[1]));
-    expect(plain).not.toHaveProperty('seat');
+    expect(plain).not.toHaveProperty('seats');
     expect(plain).not.toHaveProperty('isDesk');
   });
 
@@ -226,6 +227,21 @@ describe('normalizeKind — seat and isDesk', () => {
     { offset: { x: 0, y: 0, z: 0 }, yawDeg: '0' },
   ])('rejects malformed seat %j', (bad) => {
     expect(() => normalizeKind(minimalRaw('block', { seat: bad }), 4)).toThrow(/kinds\[4\]\.seat/);
+  });
+
+  it('keeps several seats in order', () => {
+    const second = { offset: { x: 1.5, y: 0.55, z: 0.4 }, yawDeg: 180 };
+    const kind = normalizeKind(minimalRaw('furniture', { seats: [seat, second] }), 0);
+    expect(kind.seats).toEqual([seat, second]);
+    expect(kind).not.toHaveProperty('seat');
+  });
+
+  it.each([[[]], ['x'], [[seat, null]]])('rejects malformed seats %j', (bad) => {
+    expect(() => normalizeKind(minimalRaw('block', { seats: bad }), 4)).toThrow(/kinds\[4\]\.seats/);
+  });
+
+  it('rejects seat and seats together', () => {
+    expect(() => normalizeKind(minimalRaw('block', { seat, seats: [seat] }), 4)).toThrow(/both seat and seats/);
   });
 
   it('rejects a non-boolean isDesk', () => {
@@ -241,6 +257,42 @@ describe('normalizeKind — dimensionsPinned', () => {
 
   it('rejects a non-boolean flag', () => {
     expect(() => normalizeKind(minimalRaw('block', { dimensionsPinned: 'yes' }), 3)).toThrow(/kinds\[3\]\.dimensionsPinned/);
+  });
+});
+
+describe('normalizeKind — water and ride', () => {
+  it('keeps both through a catalog round-trip and omits them when absent', () => {
+    const catalog = validateWorldObjectKindCatalog({
+      schemaVersion: 1,
+      updatedAt: 0,
+      kinds: [
+        minimalRaw('prop', { id: 'pool', water: { surfaceHeight: 0.4, rim: 0.35 } }),
+        minimalRaw('prop', { id: 'scooter', ride: { vehicle: 'scooter' } }),
+        minimalRaw('block', { id: 'plain' }),
+      ],
+    });
+    expect(catalog.kinds[0].water).toEqual({ surfaceHeight: 0.4, rim: 0.35 });
+    expect(catalog.kinds[1].ride).toEqual({ vehicle: 'scooter' });
+    const plain = JSON.parse(JSON.stringify(catalog.kinds[2]));
+    expect(plain).not.toHaveProperty('water');
+    expect(plain).not.toHaveProperty('ride');
+  });
+
+  it.each([null, {}, { surfaceHeight: 0.4 }, { surfaceHeight: -1, rim: 0.3 }, { surfaceHeight: '1', rim: 0.3 }])(
+    'rejects malformed water %j',
+    (bad) => {
+      expect(() => normalizeKind(minimalRaw('block', { water: bad }), 5)).toThrow(/kinds\[5\]\.water/);
+    },
+  );
+
+  it('rejects water on a kind that rotates in steps other than quarter turns', () => {
+    const water = { surfaceHeight: 0.4, rim: 0.3 };
+    expect(() => normalizeKind(minimalRaw('block', { water, rotationStepDeg: 45 }), 7)).toThrow(/kinds\[7\]\.water/);
+    expect(normalizeKind(minimalRaw('block', { water, rotationStepDeg: 180 }), 7).water).toEqual(water);
+  });
+
+  it.each([null, {}, { vehicle: 'hoverboard' }])('rejects malformed ride %j', (bad) => {
+    expect(() => normalizeKind(minimalRaw('block', { ride: bad }), 6)).toThrow(/kinds\[6\]\.ride/);
   });
 });
 
@@ -447,5 +499,19 @@ describe('normalizeKind — colliderComplexity', () => {
     expect(() => normalizeKind(minimalRaw('block', { colliderComplexity: recipe }), 4)).toThrow(
       /kinds\[4\]\.colliderComplexity/,
     );
+  });
+});
+
+describe('normalizeKind portrait', () => {
+  const webp = 'data:image/webp;base64,AAAA';
+
+  it('keeps a WebP data URL', () => {
+    expect(normalizeKind(minimalRaw('character', { portrait: webp }), 0).portrait).toBe(webp);
+  });
+
+  it('drops anything else instead of failing the catalog', () => {
+    for (const portrait of ['https://example.com/a.webp', 'data:image/svg+xml;base64,AAAA', `${webp}${'A'.repeat(MAX_PORTRAIT_CHARS)}`, 7]) {
+      expect(normalizeKind(minimalRaw('character', { portrait }), 0).portrait).toBeUndefined();
+    }
   });
 });

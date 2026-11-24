@@ -1,12 +1,18 @@
 import connect from 'connect';
 import type { RealtimeServer } from '@officexr/realtime-server/server';
-import { createStudioStorage, studioCatalogCharacters, studioMapExists, studioMapLoader } from '@officexr/world/vite-plugin-storage';
+import { createStudioStorage, studioCatalogCharacters, studioMapExists, studioMapLoader, studioPlacementFootprint } from '@officexr/world/vite-plugin-storage';
 import type { Store } from 'express-session';
-import { apiMiddleware, type CreateOffice, type ResolveIdentity, type OfficeCharacters, type OfficeDeskClaims, type QueryOffices, type UpdateOffice } from './api';
+import { apiMiddleware, type CreateOffice, type ResolveIdentity, type OfficeCharacters, type OfficeDeskClaims, OfficePlacedProps, type QueryOffices, type UpdateOffice } from './api';
 import { bearerIdentity, createAuth, parseAuthConfig, sessionIdentity, type AuthConfig, type GoogleStrategyFactory, type IsLoginAllowed } from './auth';
 import { createCors } from './cors';
 import { PreviewTokens } from './previewToken';
 import { signJaasToken, type JaasConfig } from './jaasToken';
+import { claimantDecorator, integrationsMiddleware, type CalendarIntegration, type SlackIntegration } from './integrations';
+import { missionsMiddleware } from './missions';
+import { safetyMiddleware } from './safety';
+import type { BlocksStore, ReportsStore } from './safetyStore';
+import { officeLookupMiddleware } from './officeLookup';
+import type { MissionsStore } from './missionsStore';
 import { configJsMiddleware } from './runtimeConfig';
 import type { Identity } from './shared';
 import { DEFAULT_MODELS_DIR, staticDirMiddleware } from './staticDir';
@@ -15,6 +21,10 @@ export interface AppOptions {
   queryOffices: QueryOffices;
   characters: OfficeCharacters;
   deskClaims: OfficeDeskClaims;
+  placedProps: OfficePlacedProps;
+  missions: MissionsStore;
+  blocks: BlocksStore;
+  reports: ReportsStore;
   createOffice: CreateOffice;
   updateOffice: UpdateOffice;
   isLoginAllowed: IsLoginAllowed;
@@ -27,11 +37,13 @@ export interface AppOptions {
   frontendOrigins?: string[];
   /** Parsed `COOKIE_DOMAIN`, applied to the session cookie. */
   cookieDomain?: string;
-  realtime: Pick<RealtimeServer, 'requestHandler'>;
+  realtime: Pick<RealtimeServer, 'requestHandler' | 'pushOfficeProps' | 'hasLiveSession' | 'notifyLogin' | 'notifyOffice' | 'refreshBlocks'>;
   /** Must equal the realtime server's `OFFICEXR_REALTIME_TOKEN_SECRET`; unset disables `/api/realtime-token`. */
   realtimeTokenSecret?: string;
   /** Server-only JaaS signing settings (`jaasConfigFromEnv`); unset disables `/api/offices/:id/voice-token`. */
   jaas?: JaasConfig;
+  calendar?: CalendarIntegration;
+  slack?: SlackIntegration;
   /** Studio data dir served read-only under `/api`; the storage defaults when unset. */
   studioDataDir?: string;
   /** Character and object models served at `/models`. Default: the studio's `public/models`. */
@@ -44,6 +56,10 @@ export async function createApp({
   queryOffices,
   characters,
   deskClaims,
+  placedProps,
+  missions,
+  blocks,
+  reports,
   createOffice,
   updateOffice,
   isLoginAllowed,
@@ -55,6 +71,8 @@ export async function createApp({
   realtime,
   realtimeTokenSecret,
   jaas,
+  calendar,
+  slack,
   studioDataDir,
   modelsDir = DEFAULT_MODELS_DIR,
   dev,
@@ -95,17 +113,39 @@ export async function createApp({
     }
     return realtimeBearer?.(req) ?? (await previewTokens?.verify(token)) ?? null;
   };
+  const integrations = parsedAuth.type === 'valid' ? { calendar, slack } : {};
+  if (parsedAuth.type === 'valid' && (calendar || slack)) {
+    app.use(
+      integrationsMiddleware({
+        identity,
+        queryOffices,
+        deskClaims,
+        presence: realtime,
+        publicUrl: parsedAuth.config.publicUrl,
+        sessionSecret: parsedAuth.config.sessionSecret,
+        frontendOrigins,
+        ...integrations,
+      }),
+    );
+  }
+  app.use(officeLookupMiddleware({ queryOffices }));
+  app.use(safetyMiddleware({ identity, blocks, reports, realtime }));
+  app.use(missionsMiddleware({ identity, queryOffices, missions, presence: realtime }));
   app.use(
     apiMiddleware({
       queryOffices,
       characters,
       deskClaims,
+      placedProps,
+      placementFootprint: studioPlacementFootprint(studioDataDir),
+      onPropsChanged: (officeId, props) => realtime.pushOfficeProps(officeId, props),
       createOffice,
       updateOffice,
       mapExists: studioMapExists(studioDataDir),
       loadMap: studioMapLoader(studioDataDir),
       loadCatalogCharacters: studioCatalogCharacters(studioDataDir),
       identity,
+      decorateClaimants: claimantDecorator(integrations),
       realtimeTokenSecret,
       signVoiceToken: jaas && ((me, office) => signJaasToken(jaas, me, office)),
     }),

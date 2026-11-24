@@ -20,10 +20,13 @@ import {
 } from './src/scenes/serialize.ts';
 import { isBakedRoom } from './src/scenes/commands.ts';
 import { catalogCharacters, type CatalogCharacters } from './src/characters/registry.ts';
-import { validateWorldObjectKindCatalog } from './src/scenes/world-object-kinds-schema.ts';
+import { writeFileAtomic } from './atomic-write.ts';
+import { mergeBundledDefaults } from './bundled-defaults.ts';
+import { catalogKindLookup, validateWorldObjectKindCatalog } from './src/scenes/world-object-kinds-schema.ts';
+import { createInstanceGeometry } from './src/app/geometry-service.ts';
 import { deserializeLayout } from './src/scenes/layout-document.ts';
 import type { MapDocumentV2, SerializedMap } from './src/scenes/map-document.ts';
-import { parseWorldConstants, type WorldConstants } from '@officexr/sdk';
+import { DEFAULT_WORLD_OBJECTS, parseWorldConstants, type WorldConstants } from '@officexr/sdk';
 import type { WorldConstantsPushFailure } from './src/scenes/world-constants-storage.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -92,6 +95,21 @@ export function studioCatalogCharacters(dataDir?: string): () => Promise<Catalog
     } catch {
       return new Map();
     }
+  };
+}
+
+/** Footprints of catalog kinds in metres, for validating placements; unknown kinds have none. Reads the catalog on each call. */
+export function studioPlacementFootprint(dataDir?: string): () => Promise<(kindId: string, position: [number, number, number], yawDeg: number) => { min: readonly number[]; max: readonly number[] } | null> {
+  const file = (dataDir ? dataDirOptions(dataDir).catalog?.file : undefined) ?? DEFAULT_CATALOG_FILE;
+  return async () => {
+    let lookup: ReturnType<typeof catalogKindLookup>;
+    try {
+      lookup = catalogKindLookup(validateWorldObjectKindCatalog(JSON.parse(await fs.readFile(file, 'utf8'))));
+    } catch {
+      return () => null;
+    }
+    const geometry = createInstanceGeometry({ catalog: { getKind: lookup }, voxelSize: DEFAULT_WORLD_OBJECTS.cubeSize });
+    return (kindId, position, yawDeg) => (lookup(kindId) ? geometry.worldAABB(position, kindId, yawDeg) : null);
   };
 }
 
@@ -320,31 +338,31 @@ const SEED_MARKER = '.seeded';
 
 const exists = (p: string) => fs.access(p).then(() => true, () => false);
 
-// ponytail: copy-if-missing only; updated defaults never merge into an existing data dir.
 /**
- * Copies the bundled defaults into `dataDir`. The marker is written once the whole seed has copied,
- * so a seed interrupted mid-copy resumes on the next start, while files the user deletes after a
- * completed seed are never re-seeded.
+ * Brings `dataDir` up to date with the bundled defaults. The first run copies every default; later
+ * runs add only defaults the data dir was never offered (see `mergeBundledDefaults`), so anything a
+ * person changed or deleted stays that way. The marker is written once the whole seed has copied,
+ * so a seed interrupted mid-copy resumes on the next start.
  */
 export async function seedDataDir(dataDir: string): Promise<void> {
   const marker = path.join(dataDir, SEED_MARKER);
-  if (await exists(marker)) {
-    return;
-  }
-  await fs.mkdir(dataDir, { recursive: true });
-  for (const { kind, name, seed } of Object.values<StorageEntry>(STORAGE_ENTRIES)) {
-    if (seed === false) {
-      continue;
+  if (!(await exists(marker))) {
+    await fs.mkdir(dataDir, { recursive: true });
+    for (const { kind, name, seed } of Object.values<StorageEntry>(STORAGE_ENTRIES)) {
+      if (seed === false) {
+        continue;
+      }
+      const src = path.join(HERE, name);
+      const dst = path.join(dataDir, name);
+      if (await exists(src)) {
+        await fs.cp(src, dst, { recursive: true, force: false, errorOnExist: false });
+      } else if (kind === 'dir') {
+        await fs.mkdir(dst, { recursive: true });
+      }
     }
-    const src = path.join(HERE, name);
-    const dst = path.join(dataDir, name);
-    if (await exists(src)) {
-      await fs.cp(src, dst, { recursive: true, force: false, errorOnExist: false });
-    } else if (kind === 'dir') {
-      await fs.mkdir(dst, { recursive: true });
-    }
+    await fs.writeFile(marker, '');
   }
-  await fs.writeFile(marker, '');
+  await mergeBundledDefaults(dataDir, HERE);
 }
 
 /**
@@ -656,18 +674,6 @@ function makeSingleDocumentMiddleware<T = unknown>(
 
 async function ensureDir(dir: string): Promise<void> {
   await fs.mkdir(dir, { recursive: true });
-}
-
-/** Renames into place so a reader never sees a half-written file. */
-async function writeFileAtomic(file: string, data: string): Promise<void> {
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  try {
-    await fs.writeFile(tmp, data, 'utf8');
-    await fs.rename(tmp, file);
-  } catch (err) {
-    await fs.unlink(tmp).catch(() => {});
-    throw err;
-  }
 }
 
 /** Names of the `<name>.json` files in `dir` with a valid name; none when `dir` is missing. */

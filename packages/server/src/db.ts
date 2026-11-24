@@ -1,6 +1,10 @@
 import pg from 'pg';
-import type { CreateOffice, OfficeCharacters, OfficeDeskClaims, QueryOffices, UpdateOffice } from './api';
+import { MAX_PLACED_PROPS, type PlacedProp, type PlaceableKindId } from '@officexr/sdk';
+import type { CreateOffice, OfficeCharacters, OfficeDeskClaims, OfficePlacedProps, QueryOffices, UpdateOffice } from './api';
+import type { CalendarLinks } from './calendarService';
 import { pgAllowlist, pgSessionStore, type IsLoginAllowed } from './auth';
+import { pgMissions } from './missionsDb';
+import { pgBlocks, pgReports } from './safetyDb';
 import type { Office, OfficeUpdate } from './shared';
 
 const UNIQUE_VIOLATION = '23505';
@@ -72,6 +76,24 @@ export function createDb(connectionString: string | undefined) {
       );
       return Object.fromEntries(rows.map((row) => [row.desk_id, row.user_login]));
     },
+    claimants: async (officeId) => {
+      const { rows } = await getPool().query<{ user_login: string; character_id: string | null; claimed_at: Date | null }>(
+        `select c.user_login, ch.character_id, c.claimed_at
+         from office_desk_claims c
+         left join office_characters ch on ch.office_id = c.office_id and ch.user_login = c.user_login
+         where c.office_id = $1`,
+        [officeId],
+      );
+      return Object.fromEntries(
+        rows.map((row) => [
+          row.user_login,
+          {
+            ...(row.character_id ? { characterId: row.character_id } : {}),
+            ...(row.claimed_at ? { claimedAt: row.claimed_at.toISOString() } : {}),
+          },
+        ]),
+      );
+    },
     claim: async (officeId, login, deskId) => {
       try {
         await getPool().query(
@@ -92,7 +114,71 @@ export function createDb(connectionString: string | undefined) {
       await getPool().query('delete from office_desk_claims where office_id = $1 and user_login = $2', [officeId, login]);
     },
   };
+  const propColumns = 'id, kind_id, x, y, z, yaw_deg';
+  type PropRow = { id: string; kind_id: string; x: number; y: number; z: number; yaw_deg: number };
+  const placedProps: OfficePlacedProps = {
+    list: async (officeId) => {
+      const { rows } = await getPool().query<PropRow>(`select ${propColumns} from office_props where office_id = $1 order by created_at, id`, [officeId]);
+      return rows.map((r): PlacedProp => ({ id: r.id, kindId: r.kind_id as PlaceableKindId, position: [r.x, r.y, r.z], yawDeg: r.yaw_deg }));
+    },
+    add: async (officeId, prop, placedBy) => {
+      const client = await getPool().connect();
+      try {
+        await client.query('begin');
+        // The office row lock makes concurrent adds count one after another; under read committed the count alone would let them all pass.
+        await client.query('select 1 from offices where id = $1 for update', [officeId]);
+        const { rowCount } = await client.query(
+          `insert into office_props (office_id, id, kind_id, x, y, z, yaw_deg, placed_by)
+           select $1, $2, $3, $4, $5, $6, $7, $8
+           where (select count(*) from office_props where office_id = $1) < $9`,
+          [officeId, prop.id, prop.kindId, ...prop.position, prop.yawDeg, placedBy, MAX_PLACED_PROPS],
+        );
+        await client.query('commit');
+        return rowCount ? 'ok' : 'limit';
+      } catch (err) {
+        await client.query('rollback').catch(() => undefined);
+        throw err;
+      } finally {
+        client.release();
+      }
+    },
+    update: async (officeId, prop) => {
+      const { rowCount } = await getPool().query(
+        'update office_props set x = $3, y = $4, z = $5, yaw_deg = $6 where office_id = $1 and id = $2',
+        [officeId, prop.id, ...prop.position, prop.yawDeg],
+      );
+      return rowCount ? 'ok' : 'not-found';
+    },
+    remove: async (officeId, id) => {
+      const { rowCount } = await getPool().query('delete from office_props where office_id = $1 and id = $2', [officeId, id]);
+      return rowCount ? 'ok' : 'not-found';
+    },
+  };
+  const calendarLinks: CalendarLinks = {
+    getMany: async (logins) => {
+      const { rows } = await getPool().query<{ login: string; refresh_token_enc: string }>(
+        'select login, refresh_token_enc from calendar_links where login = any($1)',
+        [logins],
+      );
+      return Object.fromEntries(rows.map((row) => [row.login, row.refresh_token_enc]));
+    },
+    set: async (login, sealed) => {
+      await getPool().query(
+        `insert into calendar_links (login, refresh_token_enc) values ($1, $2)
+         on conflict (login) do update set refresh_token_enc = excluded.refresh_token_enc, updated_at = now()`,
+        [login, sealed],
+      );
+    },
+    remove: async (login, onlySealed) => {
+      const { rows } = await getPool().query<{ refresh_token_enc: string }>(
+        'delete from calendar_links where login = $1 and ($2::text is null or refresh_token_enc = $2) returning refresh_token_enc',
+        [login, onlySealed ?? null],
+      );
+      return rows[0]?.refresh_token_enc ?? null;
+    },
+  };
   const isLoginAllowed: IsLoginAllowed = (email) => pgAllowlist(getPool(), 'login_allowlist')(email);
+  const query = (text: string) => getPool().query<{ version: string }>(text);
   const close = async () => {
     const closing = pool;
     pool = undefined;
@@ -104,8 +190,14 @@ export function createDb(connectionString: string | undefined) {
     updateOffice,
     characters,
     deskClaims,
+    placedProps,
+    missions: pgMissions(getPool),
+    blocks: pgBlocks(getPool),
+    reports: pgReports(getPool),
+    calendarLinks,
     isLoginAllowed,
     sessionStore: () => pgSessionStore(getPool()),
+    query,
     close,
   };
 }

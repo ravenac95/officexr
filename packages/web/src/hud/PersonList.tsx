@@ -6,12 +6,15 @@ import { formatDistance } from './formatDistance';
 import { IconButton } from './IconButton';
 import type { PingSender } from '../ping/usePingSender';
 import { DEG, type PresencePlayer } from './personRows';
+import { relativeTime } from './relativeTime';
+import { PortraitFace } from './PortraitFace';
+import { usePlayerPortrait } from './playerPortrait';
 import { PRESENCE_INDICATOR } from './presenceColours';
 import { useNow } from './useNow';
 
 /** `mic` is absent where the list doesn't show it. */
 export type PersonRow = { id: PlayerId; label: string } & (
-  | { type: 'self'; status: PresenceStatus; mic?: MicState }
+  | { type: 'self'; status: PresenceStatus; statusText?: string | null; mic?: MicState }
   | ({ type: 'peer'; mic?: MicState } & Omit<PresencePlayer, 'id' | 'name'>)
   | ({ type: 'departed' } & Omit<DepartedPlayer, 'name'>)
   | { type: 'guest' }
@@ -102,14 +105,17 @@ function PersonRowItem({
   onGo: () => void;
   onPing?: { disabled: boolean; send: () => void };
 }) {
+  const portrait = usePlayerPortrait(row.id);
   const kind = row.type === 'guest' ? null : row.type === 'self' ? row.status : presenceIndicator(row, now);
   const indicator = kind && PRESENCE_INDICATOR[kind];
   const mic = (row.type === 'self' || row.type === 'peer') && row.mic ? MIC[row.mic] : null;
   const away = row.type === 'peer' && kind === 'away';
+  const idleMs = row.type === 'peer' && row.lastActiveAt !== undefined ? now - row.lastActiveAt : 0;
+  const activeText = idleMs >= 60_000 ? `Active ${relativeTime(idleMs)}` : null;
   return (
     <li className={`flex items-center gap-2 rounded-lg px-1.5 py-1 ${row.type === 'self' ? 'bg-hud-inset' : ''}`}>
-      <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-hud-edge text-[10px] font-bold text-hud-text uppercase">
-        <span aria-hidden>{row.label.charAt(0)}</span>
+      <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-hud-avatar text-[10px] font-bold text-hud-text uppercase">
+        <PortraitFace src={portrait} initial={row.label.charAt(0)} />
         {indicator && (
           <span
             role="img"
@@ -123,19 +129,30 @@ function PersonRowItem({
         <span className={`block truncate text-xs ${row.type === 'departed' ? 'text-hud-text-2' : 'text-hud-text'}`}>
           {row.label}
         </span>
-        {row.type === 'peer' && (noRoute || row.distanceM !== null) && (
-          <span className="flex items-center gap-0.5 text-[10px] text-hud-text-2 tabular-nums">
-            {noRoute && <span className="text-hud-amber-text">No route</span>}
+        {row.type === 'peer' && (noRoute || activeText || row.distanceM !== null) && (
+          // One line that never wraps: the status truncates, the distance keeps its room.
+          <span className="flex min-w-0 items-center gap-1 text-[10px] whitespace-nowrap text-hud-text-2 tabular-nums">
+            {(noRoute || (away && row.distanceM !== null) || activeText) && (
+              <span className="min-w-0 truncate">
+                {noRoute && <span className="mr-1 text-hud-amber-text">No route</span>}
+                {away && row.distanceM !== null && <span className="mr-1">Away ·</span>}
+                {activeText && (
+                  <span>
+                    {activeText}
+                    {row.distanceM !== null && ' ·'}
+                  </span>
+                )}
+              </span>
+            )}
             {row.distanceM !== null && (
-              <>
-                {away && <span>Away ·</span>}
+              <span className="flex shrink-0 items-center gap-0.5">
                 <ArrowUp
                   aria-hidden
                   className="h-2.5 w-2.5"
                   style={{ transform: `rotate(${Math.round(row.bearingDeg + viewYawDeg)}deg)` }}
                 />
                 <span>{formatDistance(row.distanceM)}</span>
-              </>
+              </span>
             )}
           </span>
         )}

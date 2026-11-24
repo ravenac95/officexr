@@ -11,14 +11,22 @@ import session from 'express-session';
 import { decodeProtectedHeader, jwtVerify } from 'jose';
 import type { Profile } from 'passport-google-oauth20';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { apiMiddleware, type CreateOffice, type OfficeCharacters, type OfficeDeskClaims, type QueryOffices, type ResolveIdentity, type UpdateOffice } from './api';
+import { MAX_PLACED_PROPS, type PlacedProp } from '@officexr/sdk';
+import { apiMiddleware, type CreateOffice, type OfficeCharacters, type OfficeDeskClaims, type OfficePlacedProps, type QueryOffices, type ResolveIdentity, type UpdateOffice } from './api';
 import { createApp } from './app';
+import { createCalendarService } from './calendarService';
+import { createGoogleCalendarClient } from './googleCalendar';
+import type { CalendarIntegration, SlackIntegration } from './integrations';
+import { integrationsFromEnv } from './integrationsConfig';
+import { createSecretBox } from './secretBox';
 import { isAllowedOrigin, parseFrontendOrigins } from './cors';
 import { JAAS_TOKEN_TTL_SECONDS, jaasConfigFromEnv, jaasUserId, type JaasConfig } from './jaasToken';
 import { PREVIEW_TOKEN_TTL_SECONDS, PreviewTokens } from './previewToken';
 import { PREVIEW_TOKEN_PARAM } from './previewTokenBrowser';
 import { createGoogleStrategy, createSessionReader, emailDomain, parseCookieDomain, safeReturnTarget, verifyGoogleProfile, type AuthConfig, type GoogleStrategyFactory, type IsLoginAllowed } from './auth';
 import type { Identity, Office } from './shared';
+import { createMemoryMissions } from './missionsStore';
+import { createMemoryBlocks, createMemoryReports } from './safetyStore';
 
 const ID = '11111111-1111-4111-8111-111111111111';
 const OTHER = '33333333-3333-4333-8333-333333333333';
@@ -62,11 +70,18 @@ const NECROMANCER = 'kaykit-skeletons/characters/gltf/Necromancer';
 const catalogKind = (id: string, category: string) => ({ id, label: id, gltfPath: `/models/${id}.glb`, swatch: '#64748b', category });
 writeFileSync(
   path.join(studioDataDir, 'world-object-kinds.json'),
-  JSON.stringify({ schemaVersion: 1, updatedAt: 1, kinds: [catalogKind(NECROMANCER, 'character'), catalogKind('kaykit-skeletons/assets/gltf/Skeleton_Axe', 'prop')] }),
+  JSON.stringify({ schemaVersion: 1, updatedAt: 1, kinds: [catalogKind(NECROMANCER, 'character'), catalogKind('kaykit-skeletons/assets/gltf/Skeleton_Axe', 'prop'), ...['prop_pool', 'prop_wand_stand'].map((id) => ({ ...catalogKind(id, 'prop'), dimensions: { width: 1.5, height: 1, depth: 1.5 }, localAABB: { min: { x: 0, y: 0, z: 0 }, max: { x: 1.5, y: 1, z: 1.5 } } }))] }),
 );
 const claimsByOffice = new Map<string, Map<string, string>>();
 const deskClaims: OfficeDeskClaims = {
   list: async (officeId) => Object.fromEntries(claimsByOffice.get(officeId) ?? []),
+  claimants: async (officeId) =>
+    Object.fromEntries(
+      [...(claimsByOffice.get(officeId)?.values() ?? [])].map((login) => {
+        const characterId = storedCharacters.get(`${officeId}/${login}`);
+        return [login, characterId ? { characterId } : {}];
+      }),
+    ),
   claim: async (officeId, login, deskId) => {
     const claims = claimsByOffice.get(officeId) ?? new Map<string, string>();
     claimsByOffice.set(officeId, claims);
@@ -89,6 +104,33 @@ const deskClaims: OfficeDeskClaims = {
       }
     }
   },
+};
+const pushed: { officeId: string; props: PlacedProp[] }[] = [];
+const placementFootprint = async () => (kindId: string, position: [number, number, number], yawDeg: number) =>
+  kindId === 'prop_pool' || kindId === 'prop_wand_stand'
+    ? { min: [position[0] * 2, position[1] * 2, position[2] * 2], max: [position[0] * 2 + 1.5, position[1] * 2 + 1, position[2] * 2 + 1.5 + yawDeg * 0] }
+    : null;
+const propsByOffice = new Map<string, Map<string, PlacedProp>>();
+const placedProps: OfficePlacedProps = {
+  list: async (officeId) => [...(propsByOffice.get(officeId)?.values() ?? [])],
+  add: async (officeId, prop) => {
+    const props = propsByOffice.get(officeId) ?? new Map<string, PlacedProp>();
+    propsByOffice.set(officeId, props);
+    if (props.size >= MAX_PLACED_PROPS) {
+      return 'limit';
+    }
+    props.set(prop.id, prop);
+    return 'ok';
+  },
+  update: async (officeId, prop) => {
+    const props = propsByOffice.get(officeId);
+    if (!props?.has(prop.id)) {
+      return 'not-found';
+    }
+    props.set(prop.id, prop);
+    return 'ok';
+  },
+  remove: async (officeId, id) => (propsByOffice.get(officeId)?.delete(id) ? 'ok' : 'not-found'),
 };
 const storedCharacters = new Map<string, string>();
 const characters: OfficeCharacters = {
@@ -145,16 +187,22 @@ interface StartOptions {
   cookieDomain?: string;
   studioDataDir?: string;
   jaas?: JaasConfig;
+  calendar?: CalendarIntegration;
+  slack?: SlackIntegration;
 }
 
 async function start(
   mode: Mode,
-  { devUser, auth = AUTH, sessionStore = new session.MemoryStore(), realtimeTokenSecret, frontendOrigins, cookieDomain, studioDataDir, jaas }: StartOptions = {},
+  { devUser, auth = AUTH, sessionStore = new session.MemoryStore(), realtimeTokenSecret, frontendOrigins, cookieDomain, studioDataDir, jaas, calendar, slack }: StartOptions = {},
 ): Promise<string> {
   const app = await createApp({
     queryOffices,
     characters,
     deskClaims,
+    placedProps,
+    missions: createMemoryMissions(),
+    blocks: createMemoryBlocks(),
+    reports: createMemoryReports(),
     createOffice,
     updateOffice,
     isLoginAllowed,
@@ -164,6 +212,8 @@ async function start(
     realtime: new RealtimeServer(),
     realtimeTokenSecret,
     jaas,
+    calendar,
+    slack,
     frontendOrigins,
     cookieDomain,
     modelsDir,
@@ -218,6 +268,9 @@ const apiDeps = {
   queryOffices,
   characters,
   deskClaims,
+  placedProps,
+  placementFootprint,
+  onPropsChanged: (officeId: string, props: PlacedProp[]) => void pushed.push({ officeId, props }),
   createOffice,
   updateOffice,
   mapExists: async () => true,
@@ -958,14 +1011,10 @@ describe('PATCH /api/offices/:id', () => {
     expect(await res.json()).toEqual({ ...offices[0], debug_enabled: true });
   });
 
-  it('is 403 for another login, and for an office without a creator', async () => {
-    const forbidden = { error: 'Only the office creator can change its settings' };
+  it('lets any signed-in login change the settings, also of an office without a creator', async () => {
     for (const [id, headers] of [[ID, bob], [OTHER, alice]] as const) {
-      const res = await patch(id, { name: 'Lab' }, headers);
-      expect(res.status).toBe(403);
-      expect(await res.json()).toEqual(forbidden);
+      expect((await patch(id, { name: 'Lab' }, headers)).status).toBe(200);
     }
-    expect(calls).toEqual([]);
   });
 
   it('is 401 without identity and 404 for unknown or invalid ids', async () => {
@@ -1077,12 +1126,21 @@ describe('/api/offices/:id/desk-claims', () => {
     bob = await signIn(base, 'b@example.com');
   });
 
+  it('lists each claimant with the character chosen in this office', async () => {
+    storedCharacters.set(`${ID}/a@example.com`, 'Mage');
+    await claim('d1');
+    await claim('d2', bob);
+    const body = await (await fetch(url(), { headers: me })).json();
+    expect(body.claimants).toEqual({ 'a@example.com': { characterId: 'Mage' }, 'b@example.com': {} });
+    storedCharacters.clear();
+  });
+
   it('claims, lists and moves a claim between desks', async () => {
     expect(await list()).toEqual({});
     const res = await claim('d1');
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ claims: { d1: 'a@example.com' } });
-    expect(await (await claim('d2')).json()).toEqual({ claims: { d2: 'a@example.com' } });
+    expect(await res.json()).toEqual({ claims: { d1: 'a@example.com' }, claimants: { 'a@example.com': {} } });
+    expect(await (await claim('d2')).json()).toEqual({ claims: { d2: 'a@example.com' }, claimants: { 'a@example.com': {} } });
     expect(await list(bob)).toEqual({ d2: 'a@example.com' });
   });
 
@@ -1124,7 +1182,7 @@ describe('/api/offices/:id/desk-claims', () => {
     for (let i = 0; i < 2; i++) {
       const res = await fetch(url(ID, '/me'), { method: 'DELETE', headers: me });
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ claims: {} });
+      expect(await res.json()).toEqual({ claims: {}, claimants: {} });
     }
   });
 
@@ -1146,7 +1204,7 @@ describe('/api/offices/:id/desk-claims', () => {
     expect(await list(headers)).toEqual({ d1: 'rt@example.com' });
     const released = await fetch(url(ID, '/me'), { method: 'DELETE', headers });
     expect(released.status).toBe(200);
-    expect(await released.json()).toEqual({ claims: {} });
+    expect(await released.json()).toEqual({ claims: {}, claimants: {} });
   });
 });
 
@@ -1246,5 +1304,183 @@ describe('createApp routing', () => {
     expect(await (await fetch(`${base}/rooms/${ID}/sessions?login=a@example.com`)).json()).toEqual({ connected: false, allowMulti: false });
     expect((await fetch(`${base}/api/nope`)).status).toBe(404);
     expect((await fetch(`${base}/`)).status).toBe(404);
+  });
+});
+
+describe('/api/offices/:id/props', () => {
+  let base: string;
+  let me: Record<string, string>;
+  const url = (officeId = ID) => `${base}/api/offices/${officeId}/props`;
+  const post = (body: unknown, headers = me, officeId = ID) => fetch(url(officeId), { method: 'POST', headers, body: JSON.stringify(body) });
+  const pool = { op: 'place', kindId: 'prop_pool', position: [4, 4, 6], yawDeg: 0 };
+  const list = async (headers = me) => (await (await fetch(url(), { headers })).json()).props;
+  beforeEach(async () => {
+    propsByOffice.clear();
+    base = await start('prod', { realtimeTokenSecret: 's3cret', studioDataDir });
+    me = await signIn(base, 'a@example.com');
+  });
+
+  it('is 401 without a session', async () => {
+    expect((await fetch(url())).status).toBe(401);
+    expect((await fetch(url(), { method: 'POST', body: JSON.stringify(pool) })).status).toBe(401);
+  });
+
+  it('places, turns, moves and removes a prop, returning the list each time', async () => {
+    const placed = await (await post(pool)).json();
+    expect(placed.props).toEqual([{ id: expect.stringMatching(/^placed:/), kindId: 'prop_pool', position: [4, 4, 6], yawDeg: 0 }]);
+    const { id } = placed.props[0];
+    const moved = await (await post({ op: 'update', id, kindId: 'prop_pool', position: [5, 4, 6.5], yawDeg: 90 })).json();
+    expect(moved.props[0]).toMatchObject({ id, position: [5, 4, 6.5], yawDeg: 90 });
+    expect(await list()).toEqual(moved.props);
+    expect(await (await post({ op: 'remove', id })).json()).toEqual({ props: [] });
+  });
+
+  it('lets any signed-in login remove a prop another login placed', async () => {
+    const bob = await signIn(base, 'b@example.com');
+    const { props } = await (await post(pool)).json();
+    expect((await post({ op: 'remove', id: props[0].id }, bob)).status).toBe(200);
+    expect(await list()).toEqual([]);
+  });
+
+  it('is 400 for a kind outside the curated set, an off-grid position or a diagonal yaw', async () => {
+    for (const bad of [
+      { ...pool, kindId: 'cube' },
+      { ...pool, position: [4.3, 4, 6] },
+      { ...pool, position: [4, 4, Number.NaN] },
+      { ...pool, yawDeg: 45 },
+      { op: 'place' },
+      { op: 'teleport' },
+    ]) {
+      expect((await post(bad)).status).toBe(400);
+    }
+    expect(await list()).toEqual([]);
+  });
+
+  it('is 409 past the limit, leaving the list alone', async () => {
+    for (let i = 0; i < MAX_PLACED_PROPS; i++) {
+      expect((await post({ ...pool, position: [i, 4, 0] })).status).toBe(200);
+    }
+    expect((await post(pool)).status).toBe(409);
+    expect(await list()).toHaveLength(MAX_PLACED_PROPS);
+  });
+
+  it('is 404 for a prop that is gone, and for an office that is not there', async () => {
+    expect((await post({ op: 'remove', id: 'placed:none' })).status).toBe(404);
+    expect((await post({ ...pool, op: 'update', id: 'placed:none' })).status).toBe(404);
+    expect((await post(pool, me, '99999999-9999-4999-8999-999999999999')).status).toBe(404);
+  });
+
+  it('is 400 for a spot that overlaps another prop, but allows a prop beside it and a prop on a free spot after a move', async () => {
+    const first = (await (await post(pool)).json()).props[0];
+    expect((await post(pool)).status).toBe(400);
+    expect((await post({ ...pool, position: [4, 4, 6.5] })).status).toBe(400);
+    expect((await post({ ...pool, position: [6, 4, 6] })).status).toBe(200);
+    expect((await post({ ...pool, op: 'update', id: first.id, position: [20, 4, 6] })).status).toBe(200);
+    expect((await post(pool)).status).toBe(200);
+  });
+
+  it('is 400 for a prop that is not on the height grid', async () => {
+    expect((await post({ ...pool, position: [4, 4.25, 6] })).status).toBe(400);
+    expect((await post({ ...pool, position: [4, 4.5, 6] })).status).toBe(200);
+  });
+
+  it('is 400 when an update changes the kind, and leaves the prop alone', async () => {
+    const { id } = (await (await post(pool)).json()).props[0];
+    const res = await post({ op: 'update', id, kindId: 'prop_wand_stand', position: [8, 4, 8], yawDeg: 0 });
+    expect(res.status).toBe(400);
+    expect((await list())[0]).toMatchObject({ kindId: 'prop_pool', position: [4, 4, 6] });
+  });
+
+  it('tells the live room the new list after each accepted write and only then', async () => {
+    const spy = vi.spyOn(RealtimeServer.prototype, 'pushOfficeProps');
+    const { id } = (await (await post(pool)).json()).props[0];
+    await post(pool);
+    await post({ op: 'remove', id });
+    expect(spy.mock.calls.map(([officeId, props]) => [officeId, props.length])).toEqual([[ID, 1], [ID, 0]]);
+    spy.mockRestore();
+  });
+
+  it('is 413 for an oversized body and 405 for other methods', async () => {
+    expect((await post({ ...pool, pad: 'x'.repeat(5000) })).status).toBe(413);
+    expect((await fetch(url(), { method: 'DELETE', headers: me })).status).toBe(405);
+  });
+});
+
+
+describe('calendar and slack integrations in the app', () => {
+  const claimUrl = (suffix = '') => `/api/offices/${ID}/desk-claims${suffix}`;
+  const fakeGoogleFetch = (busy: unknown[]) =>
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === 'https://oauth2.googleapis.com/token') {
+        return new Response(JSON.stringify(String(init?.body).includes('authorization_code') ? { refresh_token: 'rt', scope: 'https://www.googleapis.com/auth/calendar.freebusy' } : { access_token: 'at' }));
+      }
+      if (url === 'https://www.googleapis.com/calendar/v3/freeBusy') {
+        return new Response(JSON.stringify({ calendars: { primary: { busy } } }));
+      }
+      throw new Error(`unexpected request to ${url}`);
+    });
+
+  it('stays off without its env: no routes and no extra claimant fields', async () => {
+    const services = integrationsFromEnv({ env: {}, publicUrl: AUTH.publicUrl, googleClientId: 'id', googleClientSecret: 'secret', calendarLinks: { getMany: async () => ({}), set: async () => undefined, remove: async () => null } });
+    expect(services).toEqual({});
+    const base = await start('prod', { studioDataDir });
+    const me = await signIn(base, 'a@example.com');
+    expect((await fetch(`${base}/api/integrations`, { headers: me })).status).toBe(404);
+    claimsByOffice.clear();
+    await fetch(`${base}${claimUrl('/me')}`, { method: 'PUT', headers: me, body: JSON.stringify({ deskId: 'd1' }) });
+    expect((await (await fetch(`${base}${claimUrl()}`, { headers: me })).json()).claimants).toEqual({ 'a@example.com': {} });
+  });
+
+  it('turns calendar on with only the encryption secret, and rejects one that is too short', () => {
+    const links = { getMany: async () => ({}), set: async () => undefined, remove: async () => null };
+    const on = integrationsFromEnv({ env: { CALENDAR_ENCRYPTION_SECRET: 'a-long-test-secret-value' }, publicUrl: AUTH.publicUrl, googleClientId: 'id', googleClientSecret: 'secret', calendarLinks: links });
+    expect(on.calendar?.config.redirectUri).toBe('http://officexr.test/auth/google/calendar/callback');
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(integrationsFromEnv({ env: { CALENDAR_ENCRYPTION_SECRET: 'short' }, publicUrl: AUTH.publicUrl, googleClientId: 'id', googleClientSecret: 'secret', calendarLinks: links }).calendar).toBeUndefined();
+    expect(integrationsFromEnv({ env: { SLACK_BOT_TOKEN: 'x' }, publicUrl: AUTH.publicUrl, googleClientId: 'id', googleClientSecret: 'secret', calendarLinks: links }).slack).toBeUndefined();
+    expect(integrationsFromEnv({ env: { SLACK_BOT_TOKEN: 'x', SLACK_SIGNING_SECRET: 'y' }, publicUrl: AUTH.publicUrl, googleClientId: 'id', googleClientSecret: 'secret', calendarLinks: links }).slack).toBeDefined();
+  });
+
+  it('connects, adds the calendar status to the claimants payload and disconnects', async () => {
+    const stored = new Map<string, string>();
+    const google = fakeGoogleFetch([{ start: new Date(Date.now() - 600_000).toISOString(), end: new Date(Date.now() + 3_600_000).toISOString() }]);
+    const config = { clientId: 'id', clientSecret: 'secret', redirectUri: 'http://officexr.test/auth/google/calendar/callback' };
+    const service = createCalendarService({
+      client: createGoogleCalendarClient(config, google as unknown as typeof fetch),
+      links: {
+        getMany: async (logins) => Object.fromEntries(logins.filter((l) => stored.has(l)).map((l) => [l, stored.get(l)!])),
+        set: async (login, sealed) => void stored.set(login, sealed),
+        remove: async (login, onlySealed) => {
+          const sealed = stored.get(login) ?? null;
+          if (onlySealed !== undefined && sealed !== onlySealed) {
+            return null;
+          }
+          stored.delete(login);
+          return sealed;
+        },
+      },
+      box: createSecretBox('a-long-test-secret-value'),
+    });
+    const base = await start('prod', { studioDataDir, calendar: { service, config } });
+    const me = await signIn(base, 'a@example.com');
+    claimsByOffice.clear();
+    expect((await fetch(`${base}/api/integrations`, { headers: me })).status).toBe(200);
+
+    const consent = await fetch(`${base}/auth/google/calendar?next=${encodeURIComponent('/room/x')}`, { headers: me, redirect: 'manual' });
+    const state = new URL(consent.headers.get('location')!).searchParams.get('state')!;
+    const callback = await fetch(`${base}/auth/google/calendar/callback?code=c&state=${encodeURIComponent(state)}`, { headers: me, redirect: 'manual' });
+    expect(callback.headers.get('location')).toBe('/room/x?calendar=connected');
+    expect(stored.get('a@example.com')).toMatch(/^v1\./);
+    expect(stored.get('a@example.com')).not.toContain('rt');
+
+    await fetch(`${base}${claimUrl('/me')}`, { method: 'PUT', headers: me, body: JSON.stringify({ deskId: 'd1' }) });
+    const { claimants } = await (await fetch(`${base}${claimUrl()}`, { headers: me })).json();
+    expect(claimants['a@example.com'].calendar).toMatchObject({ busy: true });
+    expect(Date.parse(claimants['a@example.com'].calendar.until)).toBeGreaterThan(Date.now());
+
+    expect((await fetch(`${base}/api/calendar`, { method: 'DELETE', headers: me })).status).toBe(204);
+    expect(stored.size).toBe(0);
+    expect((await (await fetch(`${base}${claimUrl()}`, { headers: me })).json()).claimants['a@example.com'].calendar).toBeUndefined();
   });
 });
