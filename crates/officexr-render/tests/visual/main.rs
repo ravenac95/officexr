@@ -27,12 +27,12 @@ use bevy::time::TimeUpdateStrategy;
 use bevy::winit::WinitPlugin;
 use officexr_render::occlusion::{OcclusionInput, ViewOcclusion};
 use officexr_render::overlays::{Overlay, ViewOverlays};
-use officexr_render::screens::{ScreenInput, ViewScreens};
-use officexr_render::water::{ViewWater, WaterVolume};
 use officexr_render::picking::{Modifiers, PickHub, PointerMsg, PointerMsgAction};
 use officexr_render::placement::VOXEL_SIZE;
 use officexr_render::proximity::{Proximity, ViewProximity};
+use officexr_render::screens::{ScreenInput, ViewScreens};
 use officexr_render::views::View;
+use officexr_render::water::{ViewWater, WaterVolume};
 use officexr_render::{
     AssetBase, AvatarBound, LayoutIndex, ObjectKinds, OffscreenTarget, PlayerRender, Players,
     SceneCamera, Seat, WorldSceneData, offscreen_app, scene_sim, sim_input,
@@ -634,7 +634,12 @@ fn render(
         // Before `drive` moves on, so it sees the step about to render.
         .add_systems(
             PreUpdate,
-            (drive, add_overlays, add_effects, add_proximity.before(drive)),
+            (
+                drive,
+                add_overlays,
+                add_effects,
+                add_proximity.before(drive),
+            ),
         );
     app.run();
     let failed = failed.lock().unwrap();

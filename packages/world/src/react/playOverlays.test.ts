@@ -7,7 +7,7 @@ const box = { min: [8, 0, 8] as [number, number, number], max: [10, 1, 10] as [n
 describe('missionBeacon', () => {
   it('stands on the floor at the target, captioned with the metres to go', () => {
     const beacon = missionBeacon({ x: 3, z: 4, label: 'Stand-up' }, { x: 0, z: 0 });
-    expect(beacon).toMatchObject({ kind: 'beacon', at: [3, 1, 4], label: 'Stand-up · 5 m' });
+    expect(beacon).toMatchObject({ kind: 'beacon', at: [3, 1, 4], label: 'Stand-up - 5 m' });
     expect(missionBeacon({ x: 3, z: 4, label: 'Stand-up' }, null)).toMatchObject({ label: 'Stand-up' });
   });
 });

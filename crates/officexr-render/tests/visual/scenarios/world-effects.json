@@ -473,10 +473,10 @@
       "at": [
         -1,
         0,
-        6
+        2
       ],
       "color": "#0a84ff",
-      "label": "Mission: Stand-up · 9 m",
+      "label": "Mission: Stand-up - 6 m",
       "pickable": false
     },
     {
@@ -487,9 +487,9 @@
           "id": "__ghost__",
           "kindId": "prop_scooter_rack",
           "position": [
-            8,
+            12,
             0,
-            4
+            8
           ],
           "yawDeg": 90
         }

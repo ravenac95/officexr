@@ -12,6 +12,7 @@ const TARGET_COLOUR = '#ffd23fe6';
 const GHOST_ID = '__ghost__';
 
 /** The active mission's beacon, captioned with the whole metres to go once the player's position is known. */
+// ponytail: Bevy's built-in font has no middle dot, so the caption's separator is a hyphen; a bundled UI font would restore it.
 export function missionBeacon(target: MissionMarkerTarget, self: { x: number; z: number } | null): Overlay {
   const metres = self ? Math.hypot(self.x - target.x, self.z - target.z) : null;
   return {
@@ -19,7 +20,7 @@ export function missionBeacon(target: MissionMarkerTarget, self: { x: number; z:
     kind: 'beacon',
     at: [target.x, MISSION_FLOOR_Y_M, target.z],
     color: MISSION_COLOUR,
-    label: markerText(target.label, metres),
+    label: markerText(target.label, metres).replace(' · ', ' - '),
     pickable: false,
   };
 }

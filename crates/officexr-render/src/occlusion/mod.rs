@@ -15,13 +15,13 @@ pub mod math;
 use std::collections::{HashMap, HashSet};
 
 use bevy::light::NotShadowCaster;
-use bevy::mesh::VertexAttributeValues;
 use bevy::prelude::*;
 use serde::Deserialize;
 
 use crate::lighting::ObjectMaterial;
 use crate::objects::Placed;
 use crate::picking::PickTarget;
+use crate::screens::mesh_triangles;
 use crate::views::ViewCamera;
 use math::*;
 
@@ -307,30 +307,16 @@ struct MeshShape {
 }
 
 fn mesh_shape(mesh: &Mesh) -> Option<MeshShape> {
-    let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION)
-    else {
-        return None;
-    };
-    let points: Vec<Vec3> = positions.iter().map(|&p| Vec3::from(p)).collect();
-    let (min, max) = points
+    let triangles = mesh_triangles(mesh);
+    let (min, max) = triangles
         .iter()
-        .fold((Vec3::MAX, Vec3::MIN), |(lo, hi), &p| (lo.min(p), hi.max(p)));
-    if points.is_empty() {
+        .flatten()
+        .fold((Vec3::MAX, Vec3::MIN), |(lo, hi), &p| {
+            (lo.min(p), hi.max(p))
+        });
+    if triangles.is_empty() {
         return None;
     }
-    let corners = |i: [usize; 3]| Some([*points.get(i[0])?, *points.get(i[1])?, *points.get(i[2])?]);
-    let triangles: Vec<[Vec3; 3]> = match mesh.indices() {
-        Some(indices) => {
-            let indices: Vec<usize> = indices.iter().collect();
-            indices
-                .chunks_exact(3)
-                .filter_map(|c| corners([c[0], c[1], c[2]]))
-                .collect()
-        }
-        None => (0..points.len() / 3)
-            .filter_map(|t| corners([t * 3, t * 3 + 1, t * 3 + 2]))
-            .collect(),
-    };
     Some(MeshShape {
         min,
         max,
@@ -354,16 +340,19 @@ type Drawn = (
     Option<&'static mut Faded>,
 );
 
+/// A view's occlusion input, camera, marks and last stats.
+type OcclusionView = (
+    Entity,
+    Option<&'static ViewOcclusion>,
+    Option<&'static ViewCamera>,
+    Option<&'static mut OcclusionMarks>,
+    Option<&'static mut OcclusionStats>,
+);
+
 pub(crate) fn occlude(
     mut commands: Commands,
     time: Res<Time>,
-    mut views: Query<(
-        Entity,
-        Option<&ViewOcclusion>,
-        Option<&ViewCamera>,
-        Option<&mut OcclusionMarks>,
-        Option<&mut OcclusionStats>,
-    )>,
+    mut views: Query<OcclusionView>,
     mut drawn: Query<Drawn>,
     meshes: Res<Assets<Mesh>>,
     mut materials: ResMut<Assets<ObjectMaterial>>,
@@ -469,7 +458,13 @@ fn occluder<'a>(
         }
         PickTarget::Layout { .. } => {
             // ponytail: a layout mesh's node name isn't kept, so only an object's kind id names a roof.
-            let bounds = OccluderBox::new(world, shape.min, shape.max, shape.triangles.is_some(), false);
+            let bounds = OccluderBox::new(
+                world,
+                shape.min,
+                shape.max,
+                shape.triangles.is_some(),
+                false,
+            );
             if !bounds.fadeable && bounds.bottom <= MIN_OVERHEAD_BOTTOM {
                 return None;
             }
@@ -534,7 +529,9 @@ fn fade(
             (ghost, original)
         }
     };
-    let alpha = materials.get(&original).map_or(1.0, |m| m.base.base_color.alpha());
+    let alpha = materials
+        .get(&original)
+        .map_or(1.0, |m| m.base.base_color.alpha());
     if let Some(mut ghost) = materials.get_mut(&ghost) {
         ghost.base.base_color.set_alpha(alpha * opacity);
     }
@@ -546,7 +543,10 @@ fn fade(
 fn restore(commands: &mut Commands, entity: Entity, faded: &Faded) {
     commands
         .entity(entity)
-        .insert((MeshMaterial3d(faded.original.clone()), Visibility::Inherited))
+        .insert((
+            MeshMaterial3d(faded.original.clone()),
+            Visibility::Inherited,
+        ))
         .remove::<(Faded, NotShadowCaster)>();
 }
 
@@ -680,8 +680,11 @@ mod tests {
     }
 
     fn view(app: &mut App) -> Entity {
-        app.insert_resource(scene(&[("wall", [0.0, 0.0, 2.0]), ("far", [20.0, 0.0, 0.0])]))
-            .insert_resource(camera(0.0));
+        app.insert_resource(scene(&[
+            ("wall", [0.0, 0.0, 2.0]),
+            ("far", [20.0, 0.0, 0.0]),
+        ]))
+        .insert_resource(camera(0.0));
         app.update();
         app.update();
         crate::views::find_view(app.world_mut(), 0).unwrap()
@@ -696,7 +699,9 @@ mod tests {
     #[test]
     fn a_view_fades_the_object_hiding_its_target_and_restores_it_when_cleared() {
         let mut app = bare_app();
-        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(20)));
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+            20,
+        )));
         let view = view(&mut app);
         let wall = object(&mut app, "wall");
         let centre = app.world().get::<Transform>(wall).unwrap().translation;
@@ -720,10 +725,16 @@ mod tests {
         }
         let faded = app.world().get::<Faded>(wall).expect("the wall fades");
         assert!((faded.opacity - FADED_OPACITY).abs() < 1e-6);
-        let drawn = &app.world().get::<MeshMaterial3d<ObjectMaterial>>(wall).unwrap().0;
+        let drawn = &app
+            .world()
+            .get::<MeshMaterial3d<ObjectMaterial>>(wall)
+            .unwrap()
+            .0;
         assert_ne!(*drawn, shared);
         let materials = app.world().resource::<Assets<ObjectMaterial>>();
-        assert!((materials.get(drawn).unwrap().base.base_color.alpha() - FADED_OPACITY).abs() < 1e-6);
+        assert!(
+            (materials.get(drawn).unwrap().base.base_color.alpha() - FADED_OPACITY).abs() < 1e-6
+        );
         assert!(app.world().get::<NotShadowCaster>(wall).is_some());
         let far = object(&mut app, "far");
         assert!(app.world().get::<Faded>(far).is_none());
@@ -735,7 +746,13 @@ mod tests {
         app.update();
         assert!(app.world().get::<Faded>(wall).is_none());
         assert!(app.world().get::<NotShadowCaster>(wall).is_none());
-        assert_eq!(app.world().get::<MeshMaterial3d<ObjectMaterial>>(wall).unwrap().0, shared);
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<ObjectMaterial>>(wall)
+                .unwrap()
+                .0,
+            shared
+        );
         assert_eq!(app.world().get::<OcclusionStats>(view).unwrap().fading, 0);
     }
 }

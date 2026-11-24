@@ -174,7 +174,10 @@ mod tests {
         }
         assert!((v - FADED_OPACITY).abs() < 0.05);
         assert_eq!(step_toward(v, FADED_OPACITY, 1.0), FADED_OPACITY);
-        assert_eq!(step_toward(FADED_OPACITY, fade_target(false, false), 1.0), 1.0);
+        assert_eq!(
+            step_toward(FADED_OPACITY, fade_target(false, false), 1.0),
+            1.0
+        );
         assert_eq!(step_toward(1.0, fade_target(true, true), 1.0), 0.0);
     }
 

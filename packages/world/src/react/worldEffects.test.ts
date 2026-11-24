@@ -76,7 +76,7 @@ describe('WorldEffects', () => {
     state.players.me.pos = { x: 3, y: 1, z: 0 };
     effects.step(0.016);
     expect(sent.overlays[1].map((o) => o.kind)).toEqual(['beacon', 'ghost']);
-    expect(sent.overlays[1][0]).toMatchObject({ label: 'Go · 4 m' });
+    expect(sent.overlays[1][0]).toMatchObject({ label: 'Go - 4 m' });
     effects.dispose();
   });
 });

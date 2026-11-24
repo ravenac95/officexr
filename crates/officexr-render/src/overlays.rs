@@ -492,9 +492,7 @@ fn update_in_place(
                 height: new_height,
                 ..
             },
-        ) if (color, height) == (new_color, new_height)
-            && label.is_empty() == text.is_empty() =>
-        {
+        ) if (color, height) == (new_color, new_height) && label.is_empty() == text.is_empty() => {
             for label in parts.labels.get(root).into_iter().flat_map(|l| l.iter()) {
                 if let Ok(mut shown) = parts.texts.get_mut(label)
                     && shown.0 != *text
@@ -1176,7 +1174,13 @@ mod tests {
         let root = before["mission"];
         let parts = app.world().get::<Children>(root).unwrap().len();
         assert_eq!(parts, 2, "a column and a ring");
-        let label = app.world().get::<Labels>(root).unwrap().iter().next().unwrap();
+        let label = app
+            .world()
+            .get::<Labels>(root)
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap();
         let entities = app.world().iter_entities().count();
 
         set(&mut app, id, beacon(3.0, "Desk · 9 m"));

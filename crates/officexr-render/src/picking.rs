@@ -71,7 +71,10 @@ pub fn screen_at(camera: &SceneCamera, size: Vec2, point: Vec3) -> Option<Vec2> 
     }
     let half_height = (camera.fov_deg.to_radians() / 2.0).tan();
     let half_width = half_height * size.x / size.y;
-    let ndc = Vec2::new(local.x / (depth * half_width), local.y / (depth * half_height));
+    let ndc = Vec2::new(
+        local.x / (depth * half_width),
+        local.y / (depth * half_height),
+    );
     Some(Vec2::new(ndc.x + 1.0, 1.0 - ndc.y) / 2.0 * size)
 }
 
@@ -146,7 +149,11 @@ mod tests {
             let back = screen_at(&cam, size, ray.get_point(9.0)).unwrap();
             assert!(back.distance(screen) < 1e-2, "{screen} came back at {back}");
         }
-        assert_eq!(screen_at(&cam, size, Vec3::new(4.0, 11.0, 14.0)), None, "behind");
+        assert_eq!(
+            screen_at(&cam, size, Vec3::new(4.0, 11.0, 14.0)),
+            None,
+            "behind"
+        );
         assert_eq!(screen_at(&cam, Vec2::ZERO, Vec3::ZERO), None);
     }
 

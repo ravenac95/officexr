@@ -52,14 +52,19 @@ pub struct ScreenFace {
     pub triangles: Vec<[Vec3; 3]>,
 }
 
+/// A plane's summed area, area-weighted XZ normal and triangles.
+type Cluster = (f32, Vec2, Vec<[Vec3; 3]>);
+
 /// `findScreenFaces`: the model's largest coplanar near-vertical faces, biggest first.
 pub fn find_screen_faces(triangles: &[[Vec3; 3]]) -> Vec<ScreenFace> {
     let (lo, hi) = triangles
         .iter()
         .flatten()
-        .fold((Vec3::MAX, Vec3::MIN), |(lo, hi), &p| (lo.min(p), hi.max(p)));
+        .fold((Vec3::MAX, Vec3::MIN), |(lo, hi), &p| {
+            (lo.min(p), hi.max(p))
+        });
     let plane_step = (hi - lo).max_element() * 0.01;
-    let mut clusters: HashMap<(i32, i32, i32), (f32, Vec2, Vec<[Vec3; 3]>)> = HashMap::new();
+    let mut clusters: HashMap<(i32, i32, i32), Cluster> = HashMap::new();
     for t @ [a, b, c] in triangles {
         let n = (*b - *a).cross(*c - *a);
         let area = n.length() / 2.0;
@@ -114,7 +119,8 @@ pub fn choose_screen_face(faces: &[ScreenFace], rotation: Quat, toward: Vec2) ->
 
 /// A mesh's triangles in its own space; empty when it has no float positions.
 pub(crate) fn mesh_triangles(mesh: &Mesh) -> Vec<[Vec3; 3]> {
-    let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+    let Some(VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
     else {
         return vec![];
     };
@@ -124,8 +130,10 @@ pub(crate) fn mesh_triangles(mesh: &Mesh) -> Vec<[Vec3; 3]> {
         Some(indices) => {
             let indices: Vec<usize> = indices.iter().collect();
             indices
-                .chunks_exact(3)
-                .filter_map(|c| corners([c[0], c[1], c[2]]))
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .filter_map(|&c| corners(c))
                 .collect()
         }
         None => (0..positions.len() / 3)
@@ -350,7 +358,11 @@ mod tests {
         app.update();
         let lit = |app: &mut App| -> Vec<String> {
             let mut q = app.world_mut().query::<&ScreenIndex>();
-            q.single(app.world()).unwrap().lit().map(String::from).collect()
+            q.single(app.world())
+                .unwrap()
+                .lit()
+                .map(String::from)
+                .collect()
         };
         assert_eq!(lit(&mut app), ["monitor"]);
         let mut glows = app
