@@ -64,8 +64,10 @@ flowchart LR
 
 Everything 3D renders through Bevy. A view (`createView`) draws into one
 canvas; TypeScript feeds it the world (`setWorld`), players, proximity and
-editor overlays (`setOverlays`), and reads back picks, move intent and frame
-stats. The play view adds its world effects once a frame (`react/worldEffects.ts`):
+editor overlays (`setOverlays`), and reads back picks, move intent, frame
+stats and each head's on-screen anchor (`playerAnchors`), where the play view
+places its DOM name tags, bubbles and away-claimant cards
+(`react/PlayerOverheads.tsx`). The play view adds its world effects once a frame (`react/worldEffects.ts`):
 the occlusion input (`setOcclusion`: objects hiding the player fade, the roof
 over it is cut away), lit desk monitors (`setScreens`), and the mission beacon
 and build-mode placement preview as overlays; pools' water goes through

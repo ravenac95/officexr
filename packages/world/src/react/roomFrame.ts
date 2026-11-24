@@ -10,7 +10,7 @@ import type {
   Vec3,
   WorldObjects,
 } from '@officexr/sdk';
-import type { JoystickKind, MoveIntent, ProximityInput, WorldDiff } from '@officexr/render-wasm';
+import type { Effect, JoystickKind, MoveIntent, ProximityInput, WorldDiff } from '@officexr/render-wasm';
 import type { BotPool } from '../bot/BotPool.ts';
 import type { ActionInput } from '../input/action-input.ts';
 import type { InteractionStore } from '../input/interaction.ts';
@@ -25,6 +25,12 @@ import type { ExcludeInstance } from '../scenes/compile-map.ts';
 import { extrapolatePos } from '../sim/extrapolate.ts';
 import type { SimCore, SimPeer } from '../sim/SimCore.ts';
 import { SelfPlay } from './selfPlay.ts';
+import type { FrozenAvatar } from '../app/frozen-avatars.ts';
+import type { WaterVolume } from '../motion/water.ts';
+import { AvatarLooks, type AvatarLook } from '../renderer/avatarLooks.ts';
+import { EffectsTracker } from '../renderer/effectsTracker.ts';
+import { hexColor } from '../renderer/hexColor.ts';
+import { playerAccent } from '../renderer/occlusion/silhouetteColor.ts';
 import { isTypingTarget } from './useWorldFocus.ts';
 import { diffWorld, type BakedLayoutDiff, type SentWorld } from './worldDiff.ts';
 
@@ -46,15 +52,29 @@ export interface PlayerInput {
   bump: { count: number; normal: [number, number] };
   /** The character's clip-speed tunables; at 1 a walk or run plays at the rate that keeps its feet planted. */
   animSpeeds: { idle: number; walk: number; run: number };
+  /** An away claimant left at their desk (`frozenAvatarId`). */
+  frozen?: boolean;
+  /** `#rrggbb` the avatar shows through walls in. */
+  silhouette?: string | null;
 }
 
 export interface PlayersInput {
-  players: PlayerInput[];
+  players: (PlayerInput & Partial<AvatarLook>)[];
   charRadius: number;
   playerSpeed: number;
   runSpeed: number;
   bumpEasingMs: number;
+  turnSpeed?: number;
+  /** The page draws the overhead tags from `playerAnchors`. */
+  hostTags?: boolean;
+  effects?: Effect[];
 }
+
+/** The id an away claimant's frozen avatar is drawn and picked under. */
+export const frozenAvatarId = (login: string): string => `frozen:${login}`;
+
+/** The login of a frozen avatar's id, or `null` for a live player's. */
+export const frozenLoginOf = (id: string): string | null => (id.startsWith('frozen:') ? id.slice('frozen:'.length) : null);
 
 /** The calls one frame makes on its Bevy view. */
 export interface RoomView {
@@ -121,6 +141,12 @@ export interface RoomFrameOptions {
   excludeInstance?: ExcludeInstance;
   /** The objects as drawn, e.g. a stand whose wand is held as its empty kind; absent draws the store's. */
   drawnObjects?(worldObjects: WorldObjects): WorldObjects;
+  /** The away claimants to leave sitting at their desks. */
+  frozenAvatars?(state: OfficeState): readonly FrozenAvatar[];
+  /** The pools a swimmer floats in. */
+  waterVolumes?: readonly WaterVolume[];
+  /** The page draws the overhead tags from `playerAnchors`. */
+  hostTags?: boolean;
 }
 
 /** The warp detector's threshold: well above a frame of gravity or walking, below any real teleport. */
@@ -148,9 +174,12 @@ export class RoomFrame {
   private proximity: TrackerOutput | null = null;
   private sentWorld: SentWorld | null = null;
   private worldSources: unknown[] = [];
-  private readonly bumps = new Map<string, PlayerInput['bump']>();
+  private readonly bumps = new Map<string, PlayerInput['bump'] & { atMs: number }>();
   private readonly stopBumps: () => void;
   private readonly play: SelfPlay;
+  private readonly looks: AvatarLooks;
+  private readonly effects: EffectsTracker;
+  private dtSec = 0;
 
   constructor(
     private readonly deps: RoomFrameDeps,
@@ -159,12 +188,20 @@ export class RoomFrame {
     this.options = options;
     this.play = new SelfPlay({ actions: deps.actions, sync: deps.sync, selfId: deps.selfId });
     this.stopBumps = deps.bus.on('collision:char-bump', ({ selfId, normal }) => {
-      this.bumps.set(selfId, { count: (this.bumps.get(selfId)?.count ?? 0) + 1, normal: [normal.x, normal.z] });
+      this.bumps.set(selfId, {
+        count: (this.bumps.get(selfId)?.count ?? 0) + 1,
+        normal: [normal.x, normal.z],
+        atMs: performance.now(),
+      });
     });
+    this.looks = new AvatarLooks(deps.bus, deps.selfId, deps.store);
+    this.effects = new EffectsTracker(deps.bus, deps.store);
   }
 
   dispose(): void {
     this.stopBumps();
+    this.looks.dispose();
+    this.effects.dispose();
   }
 
   step(dtSec: number, nowMs: number): void {
@@ -175,6 +212,7 @@ export class RoomFrame {
     this.deps.onViewYaw?.(intent.yaw);
     this.simulate(intent, dtSec, nowMs);
     bots?.tick(dtSec * 1000);
+    this.dtSec = dtSec;
     this.draw(nowMs);
   }
 
@@ -403,9 +441,20 @@ export class RoomFrame {
         this.bumps.delete(id);
       }
     }
+    this.looks.prune(state.players);
+    const self = state.players[selfId];
+    // `Players.tsx`: silhouettes in the cameras that look down on the player, for the player and
+    // anyone within the outer proximity ring.
+    const silhouettes = cameraMode === 'fixed' || cameraMode === 'third-person';
+    const silhouetteOf = (p: PlayerState): string | null =>
+      silhouettes &&
+      (p.id === selfId ||
+        (self !== undefined && Math.hypot(p.pos.x - self.pos.x, p.pos.z - self.pos.z) <= ws.proximityOuterRadius))
+        ? hexColor(playerAccent(p.id))
+        : null;
     const players = Object.values(state.players)
       .filter((p) => p.id !== selfId || cameraMode !== 'first-person')
-      .map((p): PlayerInput => {
+      .map((p): PlayersInput['players'][number] => {
         const isSelf = p.id === selfId;
         const pos = isSelf ? p.pos : sim ? sim.extrapolatePeer(p, nowMs) : extrapolatePos(p, nowMs);
         const tun = resolveCharacterTunables(p.avatar.model ?? 'default', ws, state.characterConfigs);
@@ -413,22 +462,51 @@ export class RoomFrame {
           id: p.id,
           character: this.options.characterOf(p),
           pos: xyz(pos),
-          yaw: p.yaw,
+          yaw: this.looks.yawOf(p, nowMs),
           vel: xyz(p.vel),
           name: isSelf ? '' : p.name,
           airborne: isSelf ? this.airborne : p.isAirborne,
           seat: p.seat == null ? null : { pos: xyz(p.pos), yaw: p.yaw },
-          bump: this.bumps.get(p.id) ?? { count: 0, normal: [0, 0] },
+          bump: this.bumpOf(p.id),
           animSpeeds: { idle: tun.idleAnimSpeed, walk: tun.walkAnimSpeed, run: tun.runAnimSpeed },
+          silhouette: silhouetteOf(p),
+          ...this.looks.look(p, state, this.options.waterVolumes ?? [], nowMs, this.dtSec),
         };
       });
+    const frozen = (this.options.frozenAvatars?.(state) ?? []).map(
+      (f): PlayerInput => ({
+        id: frozenAvatarId(f.login),
+        character: f.model.url,
+        pos: xyz(f.pos),
+        yaw: f.yaw,
+        vel: [0, 0, 0],
+        name: '',
+        airborne: false,
+        seat: { pos: xyz(f.pos), yaw: f.yaw },
+        bump: { count: 0, normal: [0, 0] },
+        animSpeeds: { idle: 1, walk: 1, run: 1 },
+        frozen: true,
+      }),
+    );
     return {
-      players,
+      players: [...players, ...frozen],
       charRadius: ws.charRadius,
       playerSpeed: ws.playerSpeed,
       runSpeed: ws.playerSpeed * ws.runSpeedMultiplier,
       bumpEasingMs: ws.bumpEasingMs,
+      turnSpeed: ws.turnSpeed,
+      hostTags: this.options.hostTags ?? false,
+      effects: this.effects.effects(nowMs),
     };
+  }
+
+  /** A collision's or a poke's bumps, the later one's push winning. */
+  private bumpOf(id: string): PlayerInput['bump'] {
+    const collision = this.bumps.get(id);
+    const poke = this.looks.pokeBumpOf(id);
+    const count = (collision?.count ?? 0) + (poke?.count ?? 0);
+    const latest = poke && (!collision || poke.atMs > collision.atMs) ? poke : collision;
+    return { count, normal: latest?.normal ?? [0, 0] };
   }
 }
 

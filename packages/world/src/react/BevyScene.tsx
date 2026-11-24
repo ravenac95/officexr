@@ -45,7 +45,9 @@ import { PlacementFrame } from './placementFrame.ts';
 import { PlayInput } from './playInput.ts';
 import { pingBellPicks } from './pingBell.ts';
 import { frameStatsMeter } from './frameStatsMeter.ts';
-import { RoomFrame, type RoomView } from './roomFrame.ts';
+import { PlayerOverheads, type PlayerOverheadsHandle } from './PlayerOverheads.tsx';
+import { frozenLoginOf, RoomFrame, type RoomView } from './roomFrame.ts';
+import { useFrozenAvatars } from './useFrozenAvatars.ts';
 import { useCreateSim, type SimImplementation } from './useCreateSim.ts';
 import { setBevyReady, usePrimaryBevyView } from './usePrimaryBevyView.ts';
 import { useStoreSelector } from './useStoreSelector.ts';
@@ -359,6 +361,8 @@ export function BevyScene(props: BevySceneProps) {
     () => excludeRacks(racksInUse, excludeLayoutInstances(bakedLayouts)),
     [racksInUse, bakedLayouts],
   );
+  const frozen = useFrozenAvatars(store);
+  const overheads = useRef<PlayerOverheadsHandle>(null);
   const bakedLayoutDiffs = useMemo(() => (bakedLayouts ?? []).map(bakedLayoutDiff), [bakedLayouts]);
   const frame = useRef<RoomFrame | null>(null);
   const options = {
@@ -380,6 +384,9 @@ export function BevyScene(props: BevySceneProps) {
     bakedLayouts: bakedLayoutDiffs,
     excludeInstance,
     drawnObjects,
+    frozenAvatars: () => frozen,
+    waterVolumes: water,
+    hostTags: true,
   };
   // The frame reads the latest props each step; it keeps its own state across renders.
   useLayoutEffect(() => {
@@ -436,7 +443,19 @@ export function BevyScene(props: BevySceneProps) {
       return;
     }
     const { wasm, view } = bevy;
-    wasm.onPick(view, pingBellPicks(view, onPing), { bellClaimsOnly: true });
+    const bellPicks = pingBellPicks(view, onPing);
+    wasm.onPick(
+      view,
+      (event) => {
+        bellPicks(event);
+        // A click on an away claimant's avatar opens their card, as `FrozenAvatars.tsx`'s hit capsule did.
+        const login = event.kind === 'click' && event.target.type === 'player' ? frozenLoginOf(event.target.id) : null;
+        if (login !== null) {
+          overheads.current?.toggleFrozen(login);
+        }
+      },
+      { bellClaimsOnly: true },
+    );
     const room = new RoomFrame(
       {
         store,
@@ -463,6 +482,7 @@ export function BevyScene(props: BevySceneProps) {
       // After build mode moved its ghost, which the effects draw.
       worldEffects.step(dtSec);
       sounds.current?.step(nowMs);
+      overheads.current?.place(wasm.playerAnchors(view));
       if (!loading.done) {
         const { ready, pending } = wasm.isReady(view);
         loading.mostPending = Math.max(loading.mostPending, pending);
@@ -503,6 +523,7 @@ export function BevyScene(props: BevySceneProps) {
           <InteractionPromptAnchor interactions={props.interactions} bevy={bevy} />
         </div>
       )}
+      <PlayerOverheads ref={overheads} store={store} bus={bus} selfId={selfId} frozen={frozen} onPingFrozen={props.onPingFrozen} />
     </>
   );
 }

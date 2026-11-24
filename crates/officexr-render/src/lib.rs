@@ -9,6 +9,7 @@
 
 mod avatars;
 mod compressed_gltf;
+pub mod effects;
 mod layouts;
 mod lighting;
 #[cfg(feature = "mugshot")]
@@ -42,8 +43,9 @@ use bevy::prelude::*;
 use bevy::ui::UiSystems;
 
 pub use avatars::{
-    AnimSpeeds, AnimationState, Bound as AvatarBound, Bump, Motion, PlayerAnimation, PlayerRender,
-    Players, Seat, next_motion,
+    AnimSpeeds, AnimationState, BodyOffset, Bound as AvatarBound, Bump, FALLBACK_HEIGHT_M, Motion,
+    NamedClip, OVERHEAD_GAP_M, PlayerAnimation, PlayerRender, Players, Seat, SilhouetteMaterial,
+    Tint, next_motion,
 };
 pub use layouts::LayoutIndex;
 pub use lighting::{HemisphereFill, ObjectMaterial, snap_to_shadow_texel};
@@ -53,6 +55,7 @@ pub use objects::{ObjectIndex, ObjectKinds, apply_overrides};
 pub use offscreen::{OffscreenTarget, offscreen_app, straight_rgba};
 pub use scene::*;
 pub use sky::{SkyMaterial, sun_sky_params};
+pub use views::PlayerAnchor;
 use views::{View, ViewCamera, ViewScene};
 
 const CAMERA_FAR: f32 = 2000.0;
@@ -134,6 +137,8 @@ impl Plugin for OfficeXrRenderPlugin {
             MaterialPlugin::<water::WaterMaterial>::default(),
             lighting::plugin,
             avatars::plugin,
+            avatars::render_plugin,
+            effects::plugin,
             scene_systems,
             #[cfg(feature = "picking")]
             picking::plugin,
@@ -173,7 +178,14 @@ fn gltf_loader(app: &App) -> GltfLoader {
 fn scene_systems(app: &mut App) {
     app.add_plugins(views::plugin)
         .init_resource::<proximity::GlowMeshes>()
-        .add_systems(PostUpdate, apply_camera.before(TransformSystems::Propagate))
+        // Before the camera system sizes the new projection to its target:
+        // after it, the frusta would cull with the projection's default aspect.
+        .add_systems(
+            PostUpdate,
+            apply_camera
+                .before(TransformSystems::Propagate)
+                .before(bevy::camera::CameraUpdateSystems),
+        )
         // After the controls posed this frame's camera; shows and hides before visibility propagates.
         .add_systems(
             PostUpdate,

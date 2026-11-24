@@ -1,10 +1,11 @@
 #!/usr/bin/env tsx
 /**
  * Renders a head-and-shoulders portrait of every built-in character with the runtime portrait
- * renderer and writes them to src/characters/portraits/<id>.webp, plus manifest.json with the
- * SHA-256 of each model so a test can tell when a model changed and the portraits are stale.
+ * renderer (Bevy, through `@officexr/render-wasm`, in headless Chromium on SwiftShader's WebGL2) and
+ * writes them to src/characters/portraits/<id>.webp, plus manifest.json with the SHA-256 of each
+ * model so a test can tell when a model changed and the portraits are stale.
  *
- * Usage: pnpm --filter @officexr/world bake:portraits
+ * Usage: pnpm --filter @officexr/render-wasm build && pnpm --filter @officexr/world bake:portraits
  */
 
 import { createHash } from 'node:crypto';

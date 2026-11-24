@@ -57,7 +57,8 @@ fn show_bells(
         let named = players
             .players
             .iter()
-            .any(|p| &p.id == id && !p.name.is_empty());
+            // An away claimant is pinged from their card instead.
+            .any(|p| &p.id == id && !p.name.is_empty() && !p.frozen);
         let near = pointers.iter().any(|(pointer, state, v)| {
             v.parent() == view
                 && (hover.get(pointer).is_some_and(|hits| {

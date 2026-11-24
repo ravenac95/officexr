@@ -1,0 +1,175 @@
+{
+  "size": [
+    640,
+    360
+  ],
+  "instances": [
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        0
+      ]
+    }
+  ],
+  "characters": [
+    {
+      "character": "Knight",
+      "spawn": [
+        -2.2,
+        0,
+        0.5
+      ],
+      "yaw": 2.541593,
+      "moves": [
+        {
+          "frames": 60
+        }
+      ],
+      "look": {
+        "clip": {
+          "name": "Idle_A",
+          "speed": 1
+        },
+        "body": {
+          "lift": 0.21,
+          "pitch": 0.1
+        },
+        "vehicle": "/models/props/scooter.gltf"
+      }
+    },
+    {
+      "character": "Mage",
+      "spawn": [
+        0,
+        0,
+        0.5
+      ],
+      "yaw": 2.541593,
+      "moves": [
+        {
+          "frames": 60
+        }
+      ],
+      "look": {
+        "clip": {
+          "name": "Sit_Chair_Idle",
+          "speed": 1
+        },
+        "body": {
+          "lift": 0.544,
+          "pitch": 0.05
+        },
+        "vehicle": "/models/props/tricycle.gltf"
+      }
+    },
+    {
+      "character": "Barbarian",
+      "spawn": [
+        2.4,
+        0,
+        0.5
+      ],
+      "yaw": 1.570796,
+      "moves": [
+        {
+          "frames": 60
+        }
+      ],
+      "look": {
+        "clip": {
+          "name": "Running_B",
+          "speed": 1
+        },
+        "body": {
+          "lift": 0.5,
+          "pitch": 1.5,
+          "forward": -0.7
+        }
+      }
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "position": [
+        0,
+        2.4,
+        7
+      ],
+      "lookAt": [
+        0,
+        0.8,
+        0.5
+      ],
+      "fov": 45
+    }
+  ],
+  "captures": [
+    59
+  ],
+  "assert": [
+    {
+      "type": "feetOn",
+      "frame": 59,
+      "surfaceY": 0
+    }
+  ]
+}
