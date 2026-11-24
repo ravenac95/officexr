@@ -64,8 +64,10 @@ flowchart LR
 
 Everything 3D renders through Bevy. A view (`createView`) draws into one
 canvas; TypeScript feeds it the world (`setWorld`), players, proximity and
-editor overlays (`setOverlays`), and reads back picks, move intent and frame
-stats. Rendering, cameras and input live in Rust (`officexr-render`,
+editor overlays (`setOverlays`), and reads back picks, move intent, frame
+stats and each head's on-screen anchor (`playerAnchors`), where the play view
+places its DOM name tags, bubbles and away-claimant cards
+(`react/PlayerOverheads.tsx`). Rendering, cameras and input live in Rust (`officexr-render`,
 `officexr-controls`); `pnpm lint:no-three` keeps three.js,
 react-three-fiber and Leva out of the TypeScript packages.
 

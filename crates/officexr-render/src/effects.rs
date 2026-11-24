@@ -315,13 +315,21 @@ struct AuraOf(Aura);
 #[derive(Component)]
 struct Bead(usize);
 
-#[derive(Resource)]
-struct SphereMesh(Handle<Mesh>);
+/// The unit sphere every bead draws, made with the first effect: a scene with
+/// none adds no mesh, so it draws exactly as before effects existed.
+#[derive(Resource, Default)]
+struct SphereMesh(Option<Handle<Mesh>>);
+
+impl SphereMesh {
+    fn get(&mut self, meshes: &mut Assets<Mesh>) -> Handle<Mesh> {
+        self.0
+            .get_or_insert_with(|| meshes.add(Sphere::new(1.0).mesh().uv(10, 8)))
+            .clone()
+    }
+}
 
 pub(crate) fn plugin(app: &mut App) {
-    app.add_systems(Startup, |mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>| {
-        commands.insert_resource(SphereMesh(meshes.add(Sphere::new(1.0).mesh().uv(10, 8))));
-    })
+    app.init_resource::<SphereMesh>()
     .add_systems(
         Update,
         (sync_effects, sync_auras)
@@ -363,7 +371,8 @@ fn sync_effects(
     mut commands: Commands,
     views: Query<(Entity, &ViewPlayers), Changed<ViewPlayers>>,
     effects: Query<(Entity, &EffectOf, &ChildOf)>,
-    mesh: Res<SphereMesh>,
+    mut mesh: ResMut<SphereMesh>,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     for (view, players) in &views {
@@ -387,7 +396,8 @@ fn sync_effects(
                     ChildOf(view),
                 ))
                 .id();
-            spawn_spheres(&mut commands, entity, effect.particle_count(), &mesh.0, &mut materials);
+            let sphere = mesh.get(&mut meshes);
+            spawn_spheres(&mut commands, entity, effect.particle_count(), &sphere, &mut materials);
         }
     }
 }
@@ -398,7 +408,8 @@ fn sync_auras(
     views: Query<&ViewPlayers>,
     avatars: Query<(Entity, &Avatar, &ChildOf, Option<&Children>)>,
     auras: Query<&AuraOf>,
-    mesh: Res<SphereMesh>,
+    mut mesh: ResMut<SphereMesh>,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     for (entity, avatar, view, children) in &avatars {
@@ -423,7 +434,7 @@ fn sync_auras(
             let parent = commands
                 .spawn((AuraOf(aura), Transform::default(), Visibility::default(), ChildOf(entity)))
                 .id();
-            spawn_spheres(&mut commands, parent, count, &mesh.0, &mut materials);
+            spawn_spheres(&mut commands, parent, count, &mesh.get(&mut meshes), &mut materials);
         }
     }
 }

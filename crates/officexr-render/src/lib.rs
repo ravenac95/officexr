@@ -173,7 +173,14 @@ fn gltf_loader(app: &App) -> GltfLoader {
 fn scene_systems(app: &mut App) {
     app.add_plugins(views::plugin)
         .init_resource::<proximity::GlowMeshes>()
-        .add_systems(PostUpdate, apply_camera.before(TransformSystems::Propagate))
+        // Before the camera system sizes the new projection to its target:
+        // after it, the frusta would cull with the projection's default aspect.
+        .add_systems(
+            PostUpdate,
+            apply_camera
+                .before(TransformSystems::Propagate)
+                .before(bevy::camera::CameraUpdateSystems),
+        )
         // With this frame's camera and anchor poses, before the UI lays the labels out.
         .add_systems(
             PostUpdate,
