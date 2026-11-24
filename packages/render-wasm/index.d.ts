@@ -231,6 +231,28 @@ export interface MoveIntent {
   deflection: number;
 }
 
+/**
+ * A one-off effect in `setPlayers`' `effects`, keyed by `id` across frames and drawn as a function
+ * of its `age` (seconds); leave it out once done (a spark at 0.65 s, a bolt 0.9 s after it lands).
+ */
+export type Effect =
+  /** A poke's burst at `at`, facing the camera. */
+  | { kind: 'pokeSpark'; id: number; at: Vec3; age: number }
+  /** A spell bolt from `origin` along the unit `dir`, landing `distance` metres on at `speed` m/s, then bursting. */
+  | { kind: 'bolt'; id: number; origin: Vec3; dir: Vec3; distance: number; speed: number; color: HexColor; fire: boolean; age: number };
+
+/** Where a player's overhead stack stands, as `playerAnchors` reports it. */
+export interface PlayerAnchor {
+  id: string;
+  /** CSS pixels from the canvas's top left of the point just over the head; `null` behind the camera. */
+  x: number | null;
+  y: number | null;
+  /** The character model's measured height (metres); 2.3 until it has loaded. */
+  height: number;
+  /** The ping bell shows just over the head, so a stack drawn there should sit above it. */
+  bell: boolean;
+}
+
 /** The wasm-bindgen module of one backend, already instantiated by `loadRenderer`. */
 export interface RendererModule {
   /**
@@ -256,8 +278,20 @@ export interface RendererModule {
    * omitted) multiplies its clip rate: a walk or run plays at its ground speed over the clip's authored ground
    * speed, so at 1 the planted foot doesn't slide. `paused` draws every player in its bind pose without name tags,
    * as a `setWorld` mugshot does.
+   *
+   * Optional per player, each off when omitted: `clip` (`{ name, speed }`, a rig clip looped over the motion's, as a
+   * swim stroke or a ride's), `body` (`{ lift, forward, pitch, roll, scale }`, the body's offset from its feet in the
+   * avatar's frame), `vehicle` (a model path drawn under the rider), `wand` (held in the right hand), `pokes` and
+   * `casts` (each increase points or waves the wand once), `tint` (`{ color: HexColor, strength, glow }`, a spell's
+   * colour), `aura` (`'smoke' | 'sparkles'`), `frozen` (grey, translucent, rimmed, no tag, bell or reactions: an away
+   * claimant at their desk) and `silhouette` (a `HexColor` the avatar shows through whatever hides it in).
+   * Optional on the whole: `turnSpeed` (rad/s an avatar turns toward its yaw; omitted snaps), `hostTags` (the page
+   * draws name tags from `playerAnchors`, so Bevy draws none and hangs the ping bell just over the head) and
+   * `effects` (`Effect[]`).
    */
   setPlayers(id: ViewId, players: unknown): void;
+  /** Each drawn player's overhead anchor as of the view's last frame. Throws for a destroyed view. */
+  playerAnchors(id: ViewId): PlayerAnchor[];
   setCamera(id: ViewId, pose: CameraPose): void;
   /** `ready` once every model has loaded and settled; `pending` counts the models still loading. */
   isReady(id: ViewId): { ready: boolean; pending: number };

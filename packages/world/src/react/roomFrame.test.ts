@@ -10,7 +10,7 @@ import { RIDE_STRATEGIES } from '../motion/ride.ts';
 import { SWIM_STRATEGIES } from '../motion/swim.ts';
 import type { SelfWorld } from '../renderer/useMotionWorld.ts';
 import type { SimCore, SimInput, SimStepResult } from '../sim/SimCore.ts';
-import { RoomFrame, type PlayersInput, type RoomFrameOptions, type RoomView } from './roomFrame.ts';
+import { frozenAvatarId, frozenLoginOf, RoomFrame, type PlayersInput, type RoomFrameOptions, type RoomView } from './roomFrame.ts';
 
 const STILL: MoveIntent = { dir: [0, 0], run: false, jump: false, yaw: 0, deflection: 0 };
 
@@ -293,6 +293,68 @@ describe('RoomFrame', () => {
     expect(alice!.bump).toEqual({ count: 0, normal: [0, 0] });
     expect(bob!.seat).toEqual({ pos: [bob!.pos[0], bob!.pos[1], bob!.pos[2]], yaw: bob!.yaw });
     expect(bob!.bump).toEqual({ count: 2, normal: [1, 0] });
+  });
+
+  it("sends a pose's clip and vehicle, the wand, pokes and casts, and a poke's bump and spark", async () => {
+    const { frame, players, actions, bus } = await setup();
+    actions.upsertPlayer({ id: 'bob', pose: 'scooter', held: 'wand', pos: { x: 0, y: 0, z: -1 } });
+    bus.emit({ kind: 'poke:received', fromId: 'alice', targetId: 'bob', at: 0 });
+    bus.emit({
+      kind: 'spell:cast',
+      casterId: 'bob',
+      cast: { spell: 'fireball', origin: { x: 0, y: 1, z: 0 }, dir: { x: 1, y: 0, z: 0 }, distance: 4, targetId: null },
+      at: 0,
+    });
+
+    frame.step(0.016, performance.now());
+
+    const sent = players[0]!;
+    const [alice, bob] = sent.players;
+    expect(alice!.pokes).toBe(1);
+    expect(bob).toMatchObject({ clip: { name: 'Idle_A', speed: 1 }, vehicle: '/models/props/scooter.gltf', wand: true, casts: 1 });
+    expect(bob!.body!.lift).toBeGreaterThan(0);
+    expect(bob!.bump.count).toBe(1);
+    expect(sent.effects!.map((e) => e.kind).sort()).toEqual(['bolt', 'pokeSpark']);
+    expect(sent.hostTags).toBe(false);
+  });
+
+  it('leaves frozen avatars sitting at their desks and silhouettes the players near the local one', async () => {
+    const { frame, players, actions, store } = await setup({
+      options: {
+        hostTags: true,
+        frozenAvatars: () => [
+          {
+            login: 'cat@x.co',
+            deskId: 'd',
+            name: 'Cat',
+            pos: { x: 9, y: 0, z: 9 },
+            yaw: 1,
+            model: { url: '/models/characters/Mage.glb', ghost: false, fallbackUrl: '/models/characters/Mage.glb' },
+          },
+        ],
+      },
+    });
+
+    const self = store.getState().players.alice!.pos;
+    actions.upsertPlayer({ id: 'bob', pos: { x: self.x + 1, y: self.y, z: self.z + 1 } });
+    actions.upsertPlayer({ id: 'dan', name: 'Dan', pos: { x: self.x + 20, y: self.y, z: self.z } });
+    frame.step(0.016, 1000);
+
+    const sent = players[0]!;
+    expect(sent.players.find((p) => p.id === 'dan')!.silhouette).toBeNull();
+    const frozen = sent.players.find((p) => p.id === frozenAvatarId('cat@x.co'))!;
+    expect(frozen).toMatchObject({ frozen: true, name: '', character: '/models/characters/Mage.glb', seat: { pos: [9, 0, 9], yaw: 1 } });
+    expect(frozenLoginOf(frozen.id)).toBe('cat@x.co');
+    expect(frozenLoginOf('bob')).toBeNull();
+    const [alice, bob] = sent.players;
+    expect(alice!.silhouette).toMatch(/^#[\da-f]{6}$/);
+    // Inside the outer proximity ring, where Dan is not.
+    expect(bob!.silhouette).toMatch(/^#[\da-f]{6}$/);
+    expect(sent.hostTags).toBe(true);
+
+    frame.options = { ...frame.options, cameraMode: 'top-down' };
+    frame.step(0.016, 1016);
+    expect(players[1]!.players.every((p) => !p.silhouette)).toBe(true);
   });
 
   it("sends each player's character clip-speed tunables", async () => {
