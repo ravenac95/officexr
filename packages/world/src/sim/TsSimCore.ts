@@ -153,6 +153,16 @@ export class TsSimCore implements SimCore {
     );
   }
 
+  wallDistance(origin: Vec3, dir: Vec3, maxDistance: number): number {
+    const hit = this.world.castRay(
+      new RAPIER.Ray(origin, dir),
+      maxDistance,
+      true,
+      RAPIER.QueryFilterFlags.ONLY_FIXED | RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+    );
+    return hit ? Math.min(hit.timeOfImpact, maxDistance) : maxDistance;
+  }
+
   teleport(pos: Vec3): void {
     this.body.setNextKinematicTranslation(pos);
     this.commit();

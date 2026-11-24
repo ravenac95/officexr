@@ -297,6 +297,14 @@ impl SimCore {
             .ball_intersects(centre, char_radius, Some(self.body))
     }
 
+    /// How far a ray from `origin` along unit `dir` travels before a wall or other static
+    /// collider stops it, capped at `max_distance`. Characters don't stop it.
+    pub fn wall_distance(&self, origin: Vec3, dir: Vec3, max_distance: f64) -> f64 {
+        self.world
+            .cast_ray_toi_static(origin, dir.to_rapier(), max_distance)
+            .map_or(max_distance, |toi| toi.min(max_distance))
+    }
+
     /// Moves the player to `pos` and clears its fall and jump state.
     pub fn teleport(&mut self, pos: Vec3) {
         self.world.bodies[self.body].set_next_kinematic_translation(pos.to_rapier());
@@ -673,6 +681,35 @@ mod tests {
             }
         }
         panic!("never climbed");
+    }
+
+    #[test]
+    fn a_wall_stops_the_wall_ray_but_the_player_and_open_space_dont() {
+        let sim = stairs();
+        // Past the stairs toward +Z: the wall's face at z = 2.5 is 0.5 m ahead.
+        let origin = Vec3 {
+            x: 10.0,
+            y: 1.0,
+            z: 2.0,
+        };
+        let toward_wall = Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        };
+        assert!((sim.wall_distance(origin, toward_wall, 10.0) - 0.5).abs() < 1e-4);
+        let away = Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: -1.0,
+        };
+        // From inside the player's own ball.
+        let from_player = Vec3 {
+            x: 10.0,
+            y: -0.5 + BODY_Y,
+            z: 2.0,
+        };
+        assert_eq!(sim.wall_distance(from_player, away, 3.0), 3.0);
     }
 
     #[test]

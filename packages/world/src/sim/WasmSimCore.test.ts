@@ -6,7 +6,7 @@ import type { Vec3 } from '@officexr/sdk';
 import { TsSimCore } from './TsSimCore.ts';
 import { WasmSimCore } from './WasmSimCore.ts';
 import { recordProximityTrace, recordTrace, type ProximityFrameOutput, type ProximityTrace, type SimTrace } from './trace.ts';
-import type { SimCore, SimStepResult } from './SimCore.ts';
+import type { SimCore, SimInput, SimStepResult } from './SimCore.ts';
 
 /** The Rust replay's tolerance (`crates/officexr-sim/tests/replay_traces.rs`). */
 const TOLERANCE = 1e-4;
@@ -120,6 +120,46 @@ describe.each(Object.entries(IMPLEMENTATIONS))('%s SimCore standingAt', (_impl, 
     const sim = simOn();
     sim.teleport({ x: 0, y: 0.15, z: 0 });
     expect(sim.standingAt({ x: 0, y: 0, z: 0 }, R)).toBe(true);
+    sim.dispose();
+  });
+});
+
+describe.each(Object.entries(IMPLEMENTATIONS))('%s SimCore wallDistance', (_impl, create) => {
+  const R = 0.4;
+  const box = (id: string, size: Vec3) => ({ id, localAABB: { min: { x: 0, y: 0, z: 0 }, max: size } });
+  const kinds = { voxelSize: 1, kinds: [box('wall', { x: 1, y: 3, z: 10 })] };
+  const wall = { id: 'wall', sourceCommandId: 't', kindId: 'wall', position: [5, 0, -5] as [number, number, number] };
+  const STILL: SimInput = {
+    dtSec: 1 / 60,
+    nowMs: 0,
+    dir: { x: 0, z: 0 },
+    speed: 0,
+    running: false,
+    yaw: 0,
+    jump: false,
+    settings: {
+      charRadius: R,
+      movementBlockThreshold: 0.9,
+      jumpVelocity: 8,
+      airControl: 0.2,
+      maxJumps: 2,
+      landingEaseMs: 120,
+      stepUpSpeedFactor: 1,
+      climbAnimFactor: 1,
+    },
+    spawnPoints: [],
+  };
+
+  it('stops at a wall and passes characters, the player included', () => {
+    const sim = create(R);
+    sim.setStaticColliders({ cubeSize: 1, instances: [wall] }, kinds, []);
+    sim.teleport({ x: 2, y: 0, z: 0 });
+    sim.syncPeers([{ id: 'bob', pos: { x: 3.5, y: 0, z: 0 } }], R);
+    sim.step(STILL);
+    const east = { x: 1, y: 0, z: 0 };
+    expect(sim.wallDistance({ x: 2, y: 0.9, z: 0 }, east, 20)).toBeCloseTo(3, 4);
+    expect(sim.wallDistance({ x: 2, y: 0.9, z: 0 }, { x: -1, y: 0, z: 0 }, 20)).toBe(20);
+    expect(sim.wallDistance({ x: 2, y: 0.9, z: 0 }, east, 2)).toBe(2);
     sim.dispose();
   });
 });

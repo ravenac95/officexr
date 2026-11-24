@@ -67,6 +67,18 @@ impl WasmSim {
         Ok(self.0.standing_at(feet, char_radius))
     }
 
+    #[wasm_bindgen(js_name = wallDistance)]
+    pub fn wall_distance(
+        &self,
+        origin: JsValue,
+        dir: JsValue,
+        max_distance: f64,
+    ) -> Result<f64, JsError> {
+        let origin: Vec3 = from_js(origin)?;
+        let dir: Vec3 = from_js(dir)?;
+        Ok(self.0.wall_distance(origin, dir, max_distance))
+    }
+
     pub fn teleport(&mut self, pos: JsValue) -> Result<(), JsError> {
         let pos: Vec3 = from_js(pos)?;
         self.0.teleport(pos);

@@ -113,6 +113,20 @@ impl PhysicsWorld {
             .map(|(_, toi)| f64::from(toi))
     }
 
+    /// Distance to the first static (fixed or parentless) non-sensor a solid ray hits within
+    /// `max_toi`; characters, the player's own body among them, never block it.
+    pub fn cast_ray_toi_static(
+        &self,
+        origin: Vec3,
+        dir: Vector<Real>,
+        max_toi: f64,
+    ) -> Option<f64> {
+        let ray = Ray::new(origin.to_rapier().into(), dir);
+        self.query_pipeline(QueryFilter::only_fixed().exclude_sensors())
+            .cast_ray(&ray, max_toi as Real, true)
+            .map(|(_, toi)| f64::from(toi))
+    }
+
     /// Whether a ball at `centre` overlaps a non-sensor outside `exclude`.
     pub fn ball_intersects(
         &self,
