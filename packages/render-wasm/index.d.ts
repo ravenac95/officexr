@@ -167,7 +167,57 @@ export type Overlay = { tag: string; pickable?: boolean } & (
   | { kind: 'zone'; shape: ZoneShape; y: number; color: HexColor }
   /** White text centred on `at`. */
   | { kind: 'label'; at: Vec3; text: string }
+  /**
+   * A translucent column rising `height` (default 6 m) from the floor point `at`, a ring at its
+   * foot and, unless empty, `label` on a `color` pill over its top. Moving it or changing the
+   * label's text updates it in place.
+   */
+  | { kind: 'beacon'; at: Vec3; color: HexColor; label?: string; height?: number }
 );
+
+/** What the play camera must keep in sight this frame (`setOcclusion`). */
+export interface OcclusionInput {
+  /** World points the camera must see, e.g. the local player's head and chest. */
+  targets: Vec3[];
+  /** Object ids that never occlude: the seat, ridden rack or pool the player is in. */
+  ignore?: string[];
+  /** A point the player occupies (seat, ride, pool): an object holding it never occludes. */
+  anchor?: Vec3 | null;
+  /** The local player's feet: set, the cover overhead is cut away around them (roof cutaway). */
+  cutaway?: Vec3 | null;
+  /** Other players in a seat, ride or pool: `occlusionStats` names those only that hides. */
+  occupants?: { id: string; targets: Vec3[]; ignore?: string[]; anchor?: Vec3 | null }[];
+}
+
+export interface OcclusionStats {
+  /** Objects and layout meshes drawn faded or cut away. */
+  fading: number;
+  /** Those cut away over the player. */
+  cutaway: number;
+  /** The `occupants` nothing but their own seat, ride or pool hides: their silhouette shouldn't show. */
+  silhouetteSuppressed: string[];
+}
+
+/** A pool's water, as `motion/water.ts`'s `WaterVolume`. */
+export interface WaterVolumeInput {
+  id: string;
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  baseY?: number;
+  surfaceY: number;
+}
+
+/** A desk screen to light (`setScreens`). */
+export interface ScreenInput {
+  /** The object instance that is the screen. */
+  id: string;
+  /** 0 off to 1 fully on. */
+  glow: number;
+  /** World XZ from the screen toward its chair: the model's broad face pointing this way lights. */
+  toward: [number, number];
+}
 
 /** The plane `normal · p + constant = 0`. */
 export interface Plane {
@@ -192,6 +242,8 @@ export interface CameraConfig {
     distanceM?: number | null;
     /** A world point to orbit and look at instead of the followed player. */
     lookAt?: [number, number, number] | null;
+    /** Keeps the followed player's chest at the screen centre, ignoring the conversation. Ignored with `lookAt`. */
+    centred?: boolean;
   };
   /** The orbit mode. The defaults are the scene editor's. */
   orbit?: {
@@ -284,6 +336,22 @@ export interface RendererModule {
    * text, moving a ghost's objects or an outline's lines updates it in place; any other change redraws it.
    */
   setOverlays(id: ViewId, overlays: Overlay[]): void;
+  /**
+   * Where the view's camera sees `point`, in CSS pixels from its canvas's top left, from the pose last
+   * drawn (as `rayAtScreen`); `null` when it is behind the camera.
+   */
+  projectToScreen(id: ViewId, point: Vec3): [number, number] | null;
+  /**
+   * Objects and baked-layout meshes crossing the camera's line of sight to `targets` fade, and with
+   * `cutaway` the roof over the player is cut away; send it every frame. `null` restores them all.
+   */
+  setOcclusion(id: ViewId, input: OcclusionInput | null): void;
+  /** What occlusion did on the view's last frame. */
+  occlusionStats(id: ViewId): OcclusionStats;
+  /** Replaces the view's pools' water surfaces. */
+  setWater(id: ViewId, volumes: WaterVolumeInput[]): void;
+  /** Replaces the view's lit desk screens; a screen left out is off. Send it as their glow changes. */
+  setScreens(id: ViewId, screens: ScreenInput[]): void;
   /**
    * Replaces the view's proximity output, drawn as ground discs under the view's
    * players and its meeting-area glow. The glow eases toward it, so send it every frame.

@@ -65,7 +65,12 @@ flowchart LR
 Everything 3D renders through Bevy. A view (`createView`) draws into one
 canvas; TypeScript feeds it the world (`setWorld`), players, proximity and
 editor overlays (`setOverlays`), and reads back picks, move intent and frame
-stats. Rendering, cameras and input live in Rust (`officexr-render`,
+stats. The play view adds its world effects once a frame (`react/worldEffects.ts`):
+the occlusion input (`setOcclusion`: objects hiding the player fade, the roof
+over it is cut away), lit desk monitors (`setScreens`), and the mission beacon
+and build-mode placement preview as overlays; pools' water goes through
+`setWater`, and `projectToScreen` anchors DOM labels such as the interaction
+prompt to world points. Rendering, cameras and input live in Rust (`officexr-render`,
 `officexr-controls`); `pnpm lint:no-three` keeps three.js,
 react-three-fiber and Leva out of the TypeScript packages.
 

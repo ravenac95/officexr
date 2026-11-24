@@ -5,6 +5,7 @@ import type { CameraConfig, JoystickKind, RendererModule, ViewId } from '@office
 import type {
   Actions,
   Bus,
+  OfficeState,
   PlayerState,
   RuleRegistry,
   SnapshotHandshake,
@@ -33,6 +34,8 @@ import { placementTransform } from '../renderer/placement-transform.ts';
 import type { SeatingSource } from '../renderer/seated.ts';
 import { useBakedColliders, type SceneBakedLayout } from '../renderer/useBakedColliders.ts';
 import { useStoreWorldObjects } from '../renderer/useStoreWorldObjects.ts';
+import { useWaterVolumes } from '../renderer/useWaterVolumes.ts';
+import { deskScreenLinks } from '../app/desk-screens.ts';
 import { excludeLayoutInstances } from '../scenes/compile-map.ts';
 import type { SimBakedColliders, SimCore } from '../sim/SimCore.ts';
 import { useApplication, useCatalog, useCatalogCharacters } from './application-context.tsx';
@@ -48,6 +51,9 @@ import { setBevyReady, usePrimaryBevyView } from './usePrimaryBevyView.ts';
 import { useStoreSelector } from './useStoreSelector.ts';
 import { hasCommandModifier, isTypingTarget } from './useWorldFocus.ts';
 import type { ExcludeInstance } from '../scenes/compile-map.ts';
+import { InteractionPromptAnchor } from './InteractionPromptAnchor.tsx';
+import { useCameraProbe } from './useCameraProbe.ts';
+import { WorldEffects, type EffectsView, type WorldEffectsOptions } from './worldEffects.ts';
 import type { ViewYaw } from './viewYaw.tsx';
 import type { BakedLayoutDiff } from './worldDiff.ts';
 
@@ -106,13 +112,18 @@ const NO_SPAWNS: readonly Vec3[] = [];
 const selectCharRadius = (s: { worldSettings: { charRadius: number } }) => s.worldSettings.charRadius;
 const selectRacksInUse = (s: { players: Parameters<typeof occupiedRacks>[0] }) => occupiedRacks(s.players);
 const selectHeldStands = (s: { players: Parameters<typeof heldStands>[0] }) => heldStands(s.players);
+const selectDeskAreas = (s: { deskAreas: OfficeState['deskAreas'] }) => s.deskAreas;
 
 // ponytail: no bake version in the URL, so Bevy keeps drawing a layout re-baked mid-session until a reload.
 function bakedLayoutDiff(p: SceneBakedLayout): BakedLayoutDiff {
   return { gltfPath: bakedLayoutGlbUrl(p.gltfPath), position: p.position, rotationY: p.rotationY };
 }
 
-function cameraConfig(c: WorldConstants, charRadius: number, invertLook: boolean): CameraConfig {
+function cameraConfig(
+  c: WorldConstants & { fixedCamera: FixedCameraViewConfig },
+  charRadius: number,
+  invertLook: boolean,
+): CameraConfig {
   const f = c.fixedCamera;
   return {
     // Field by field: the controls reject keys they don't know.
@@ -125,6 +136,7 @@ function cameraConfig(c: WorldConstants, charRadius: number, invertLook: boolean
       lateralFrac: f.lateralFrac,
       fov: f.fov,
       movementYawOffsetDeg: f.movementYawOffsetDeg,
+      centred: f.centred ?? false,
     },
     conversationDistance: c.proximity.conversationDistance,
     conversationHeight: c.proximity.conversationHeight,
@@ -153,6 +165,15 @@ function roomView(wasm: RendererModule, view: ViewId): RoomView {
     setFollowTarget: (pos, yaw) => wasm.setFollowTarget(view, pos, yaw),
     setConversationFocus: (point) => wasm.setConversationFocus(view, point),
     setProximity: (proximity) => wasm.setProximity(view, proximity),
+  };
+}
+
+function effectsView(wasm: RendererModule, view: ViewId): EffectsView {
+  return {
+    setOcclusion: (input) => wasm.setOcclusion(view, input),
+    occlusionStats: () => wasm.occlusionStats(view),
+    setScreens: (screens) => wasm.setScreens(view, screens),
+    setOverlays: (overlays) => wasm.setOverlays(view, overlays),
   };
 }
 
@@ -281,11 +302,31 @@ export function BevyScene(props: BevySceneProps) {
   useEffect(() => {
     bevy?.wasm.setCameraConfig(bevy.view, cameraConfig(constants, charRadius, invertLook));
   }, [bevy, constants, charRadius, invertLook]);
-  // ponytail: the Bevy stick stays anchored bottom-left while the look is locked; the DOM one floats.
+  // Look-locked, a touch drag doesn't turn the view and the Bevy stick floats to the finger.
   const lookLocked = props.lookLocked ?? false;
   useEffect(() => {
     bevy?.wasm.setLookLocked(bevy.view, lookLocked);
   }, [bevy, lookLocked]);
+  useCameraProbe(bevy, container, store, selfId);
+
+  const water = useWaterVolumes(store);
+  useEffect(() => {
+    bevy?.wasm.setWater(bevy.view, [...water]);
+  }, [bevy, water]);
+  const deskAreas = useStoreSelector(store, selectDeskAreas);
+  const deskScreens = useMemo(
+    () => deskScreenLinks(deskAreas, worldObjects.instances, catalog, geometry),
+    [deskAreas, worldObjects, catalog, kinds, geometry],
+  );
+  const effects = useRef<WorldEffects | null>(null);
+  const effectsOptions: WorldEffectsOptions = {
+    cameraMode,
+    water,
+    deskScreens,
+    missionMarker: props.missionMarker ?? null,
+    placement: props.placement,
+    geometry,
+  };
 
   // ponytail: no recenter; `motionLook.recenterKey` is ignored on the Bevy view.
   // A reading with nulls would reset the view's previous pose, so only the cleanup sends one.
@@ -345,6 +386,9 @@ export function BevyScene(props: BevySceneProps) {
     if (frame.current) {
       frame.current.options = options;
     }
+    if (effects.current) {
+      effects.current.options = effectsOptions;
+    }
   });
 
   const onProgress = useEffectEvent((percent: number) => props.onLoadProgress?.(percent));
@@ -373,7 +417,6 @@ export function BevyScene(props: BevySceneProps) {
     if (!placement) {
       return;
     }
-    // ponytail: nothing draws the ghost yet; the view will take `placementPreview(placement.mode.get(), …)`.
     const created = new PlacementFrame({
       host: placement,
       getState: () => store.getState(),
@@ -410,11 +453,15 @@ export function BevyScene(props: BevySceneProps) {
       options,
     );
     frame.current = room;
+    const worldEffects = new WorldEffects({ store, selfId, view: effectsView(wasm, view) }, effectsOptions);
+    effects.current = worldEffects;
     const loading = { done: false, mostPending: 0, percent: -1 };
     const meterStats = frameStatsMeter(() => wasm.frameStats(view), onFrameStats);
     const loop = new FrameLoop({ actions, store, rules, bus, sync, handshake }, (dtSec, nowMs) => {
       room.step(dtSec, nowMs);
       building.current?.step();
+      // After build mode moved its ghost, which the effects draw.
+      worldEffects.step(dtSec);
       sounds.current?.step(nowMs);
       if (!loading.done) {
         const { ready, pending } = wasm.isReady(view);
@@ -437,6 +484,8 @@ export function BevyScene(props: BevySceneProps) {
       loop.stop();
       frame.current = null;
       room.dispose();
+      effects.current = null;
+      worldEffects.dispose();
       wasm.onPick(view, null);
       onFrameStats(null);
     };
@@ -446,5 +495,14 @@ export function BevyScene(props: BevySceneProps) {
 
   // The right button turns the view in first and third person, so it opens no menu there.
   const onContextMenu = isYawPitchMode(cameraMode) ? (e: React.MouseEvent) => e.preventDefault() : undefined;
-  return <div ref={container} onContextMenu={onContextMenu} style={{ position: 'absolute', inset: 0, touchAction: 'none' }} />;
+  return (
+    <>
+      <div ref={container} onContextMenu={onContextMenu} style={{ position: 'absolute', inset: 0, touchAction: 'none' }} />
+      {props.interactions && (
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+          <InteractionPromptAnchor interactions={props.interactions} bevy={bevy} />
+        </div>
+      )}
+    </>
+  );
 }

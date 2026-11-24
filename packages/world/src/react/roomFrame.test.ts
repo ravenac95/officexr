@@ -556,7 +556,7 @@ describe('RoomFrame gameplay', () => {
     expect(sentNet.casts).toHaveLength(1);
   });
 
-  it('offers what is in reach to the prompt, unanchored, a few times a second, and nothing while auto-walking', async () => {
+  it('offers what is in reach to the prompt, anchored on its object, a few times a second, and nothing while auto-walking', async () => {
     const interactions = new InteractionStore();
     const seating = { sit: vi.fn(), stand: vi.fn(), setStandingCheck: vi.fn(), getState: () => ({ nearbySeatId: 'chair-1' }) };
     const autoWalk = { intent: vi.fn((): { x: number; z: number } | null => null), cancel: vi.fn() };
@@ -565,7 +565,7 @@ describe('RoomFrame gameplay', () => {
     });
 
     frame.step(0.016, 1000);
-    expect(interactions.get()).toEqual({ options: [expect.objectContaining({ kind: 'sit', key: 'E' })], anchor: null });
+    expect(interactions.get()).toEqual({ options: [expect.objectContaining({ kind: 'sit', key: 'E' })], anchor: { x: 1, y: 1, z: 1 } });
 
     autoWalk.intent.mockReturnValue({ x: 1, z: 0 });
     frame.step(0.016, 1100);

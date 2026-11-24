@@ -12,7 +12,7 @@ use officexr_controls::{ControlsSystems, PointerClaimed};
 use officexr_render::SceneCamera;
 use officexr_render::picking::{
     Modifiers, PickHub, PointerMsg, PointerMsgAction, TargetPressed, intersect_plane as plane_hit,
-    ray_at,
+    ray_at, screen_at,
 };
 use officexr_render::views::{View, ViewCamera, ViewId};
 use serde::{Deserialize, Serialize};
@@ -303,6 +303,26 @@ pub fn intersect_plane(id: ViewId, x: f32, y: f32, plane: JsValue) -> Result<JsV
     }
     let point = plane_hit(view_ray(id, x, y)?, normal, plane.constant).map(<[f32; 3]>::from);
     point
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(js_err)
+}
+
+/// Where the view's camera sees `point`, in CSS pixels from its canvas's top
+/// left, or `null` when it is behind the camera. From the pose last drawn,
+/// as `rayAtScreen`.
+#[wasm_bindgen(js_name = projectToScreen)]
+pub fn project_to_screen(id: ViewId, point: JsValue) -> Result<JsValue, JsError> {
+    let point: [f32; 3] = serde_wasm_bindgen::from_value(point).map_err(js_err)?;
+    let size = size(&view_canvas(id)?);
+    let screen = CAMERAS
+        .with(|c| {
+            c.borrow()
+                .get(&id)
+                .map(|camera| screen_at(camera, size, Vec3::from(point)))
+        })
+        .ok_or_else(|| js_err(format!("view {id} has no camera")))?;
+    screen
+        .map(<[f32; 2]>::from)
         .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
         .map_err(js_err)
 }

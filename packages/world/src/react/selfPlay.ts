@@ -8,7 +8,7 @@ import {
   type SyncEngine,
   type Vec3,
 } from '@officexr/sdk';
-import { interactionPrompt, NO_PROMPT, type InteractionPrompt, type InteractionStore } from '../input/interaction.ts';
+import { interactionPrompt, NO_PROMPT, type InteractionStore } from '../input/interaction.ts';
 import { buildCast } from '../motion/cast.ts';
 import { POKE_COOLDOWN_S, pokeFacing } from '../motion/poke.ts';
 import { newItemsState, stepSelfItems, type ItemsAction } from '../motion/self-items.ts';
@@ -205,18 +205,10 @@ export class SelfPlay {
     f.interactions.offer(
       f.autoWalking
         ? NO_PROMPT
-        : unanchored(
-            interactionPrompt(
-              { pose: this.motion.pose, seatedOn: f.self.seat ?? null, nearbySeatId, feet, holdingWand: f.self.held === 'wand' },
-              f.world,
-            ),
+        : interactionPrompt(
+            { pose: this.motion.pose, seatedOn: f.self.seat ?? null, nearbySeatId, feet, holdingWand: f.self.held === 'wand' },
+            f.world,
           ),
     );
   }
-}
-
-// ponytail: the Bevy view draws no pill above the object yet, so every prompt goes to the HUD's
-// unanchored panel; keep the anchor once the view can place a label over it.
-function unanchored(prompt: InteractionPrompt): InteractionPrompt {
-  return prompt.anchor === null ? prompt : { ...prompt, anchor: null };
 }

@@ -1,7 +1,8 @@
 //! `officexr-render` in the browser, one view per canvas, fed from JS:
 //! `init` once, then `createView` per canvas and `setWorld`, `setCamera`,
 //! `setPlayers` and the editors' [`overlays`] on each; a world view's camera
-//! can instead follow the local player through the [`controls`] API.
+//! can instead follow the local player through the [`controls`] API, and the
+//! play view adds its world [`effects`].
 //!
 //! A view on the canvas given to `init` draws straight into Bevy's primary
 //! window. With WebGPU every other view is a Bevy window on its own canvas.
@@ -35,6 +36,7 @@ use wasm_bindgen::prelude::*;
 mod blob_assets;
 mod capture;
 mod controls;
+mod effects;
 mod overlays;
 mod picking;
 mod proximity;
@@ -214,6 +216,7 @@ pub fn init(origin: String, primary_canvas: JsValue) -> Result<(), JsError> {
     ));
     picking::add(&mut app);
     capture::add(&mut app);
+    effects::add(&mut app);
     #[cfg(feature = "webgl2")]
     image_views::add(&mut app);
     controls::add(&mut app);
@@ -287,6 +290,7 @@ pub fn destroy_view(id: ViewId) -> Result<(), JsError> {
     }
     picking::forget(id);
     capture::forget(id);
+    effects::forget(id);
     // So the id finds no canvas: `onPick` and the ray queries on it then fail.
     if let Ok(canvas) =
         query_selector(&format!("canvas[data-officexr-view=\"{id}\"]")).dyn_into::<Canvas>()
