@@ -191,7 +191,7 @@ pub(crate) fn read_touches(
             .filter(|f| Some(f.id) != state.stick_touch)
             .collect();
         match gesture.as_slice() {
-            [f] => controls.look_by(f.pos - f.prev, TOUCH_SENSITIVITY),
+            [f] if !controls.look_locked => controls.look_by(f.pos - f.prev, TOUCH_SENSITIVITY),
             [a, b] => apply_zoom(
                 pinch_factor(a.prev.distance(b.prev), a.pos.distance(b.pos)),
                 &mut controls.look.offsets,

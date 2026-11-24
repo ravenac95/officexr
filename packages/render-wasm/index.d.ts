@@ -268,7 +268,7 @@ export interface RendererModule {
    * Sends `callback` the view's pick events, from pointer events on its canvas, replacing any callback
    * it had; `null` stops them. A view without a callback does no picking. A throwing callback is logged
    * with `console.error` and the frame's other events are still delivered. Throws for a destroyed view.
-   * A left press on any target but the ground doesn't take the controls' pointer lock,
+   * A left press on any target but the ground doesn't start the controls' mouse-look drag,
    * unless `bellClaimsOnly`: then only a press on a ping bell doesn't.
    */
   onPick(id: ViewId, callback: ((event: PickEvent) => void) | null, options?: { bellClaimsOnly?: boolean }): void;
@@ -294,8 +294,10 @@ export interface RendererModule {
   // `setCamera`, in every frame its mode has something to frame. Top-down, free-fly and orbit always do;
   // first-person, third-person and fixed need a follow target (fixed, or its `lookAt`), and until
   // then `setCamera` still applies. Keys are heard page-wide and reach every view with input
-  // enabled; pointer lock and mouse-look reach only a view drawing into a Bevy window (with WebGL2,
-  // the primary canvas's). Drags and the wheel reach every view from its own canvas.
+  // enabled; mouse-look reaches only a view drawing into a Bevy window (with WebGL2, the primary
+  // canvas's): in first- and third-person the right button held, or a left drag past 4 CSS px, turns
+  // the view, with the pointer locked only while turning. Drags and the wheel reach every view from
+  // its own canvas.
   /** The movement since the last call, to step the sim with. */
   takeIntent(id: ViewId): MoveIntent;
   /** The local player's body root and yaw, after stepping the sim. */
@@ -330,6 +332,8 @@ export interface RendererModule {
    * Returns whether the view can show the Bevy stick: only the primary canvas's view can.
    */
   setJoystickKind(id: ViewId, kind: JoystickKind): boolean;
+  /** On, a finger dragging on the view no longer turns it; the mouse still does. */
+  setLookLocked(id: ViewId, locked: boolean): void;
 }
 
 export type JoystickKind = 'bevy' | 'dom';

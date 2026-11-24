@@ -14,7 +14,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { group: 'Movement', keys: 'F', description: 'Ride a scooter or tricycle, get off, take the wand or put it back' },
   { group: 'Movement', keys: 'Alt/⌥ + D', description: 'Return to your desk and sit' },
   { group: 'Camera', keys: 'Alt/⌥ + P', description: 'Cycle camera mode' },
-  { group: 'Camera', keys: 'Click world', description: 'Look around (first and third person)' },
+  { group: 'Camera', keys: 'Right-drag or drag world', description: 'Look around (first and third person)' },
   { group: 'Camera', keys: 'Esc', description: 'Release the mouse' },
   { group: 'Voice', keys: 'Alt/⌥ + M', description: 'Mute or unmute your microphone (zone calls start muted)' },
   { group: 'Chat', keys: 'Enter', description: 'Open chat, send a message, or close an empty chat' },
