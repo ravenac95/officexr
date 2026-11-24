@@ -88,7 +88,9 @@ officexr/
 - **World.** A room renders the office's studio map through `@officexr/world`:
   `<PlayView>` mounts `<BevyScene>`, which draws through the Bevy renderer
   (`@officexr/render-wasm`) and steps the local player's `SimCore` in a
-  `requestAnimationFrame` loop (`react/frameLoop.ts`, `react/roomFrame.ts`). The headless state and protocol live in
+  `requestAnimationFrame` loop (`react/frameLoop.ts`, `react/roomFrame.ts`). The frame's gameplay beside walking
+  (sit, wand and spells, pokes, swimming, rides, the interaction prompt) is `react/selfPlay.ts`; build mode's is
+  `react/placementFrame.ts` and the sound effects' `audio/soundFrame.ts`. The headless state and protocol live in
   `@officexr/sdk`; `@officexr/core-refactor`'s `createStack` builds the channel +
   voice adapter for a session.
 - **Realtime.** Presence, position and chat sync go over a `WsChannel` to the

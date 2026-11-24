@@ -1,9 +1,26 @@
 import React, { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { SoundFrame } from '../audio/soundFrame.ts';
+import { useSfx } from '../audio/sfx-context.tsx';
 import type { CameraConfig, JoystickKind, RendererModule, ViewId } from '@officexr/render-wasm';
-import type { Actions, Bus, PlayerState, RuleRegistry, SnapshotHandshake, Store, SyncEngine, Vec3, WorldConstants } from '@officexr/sdk';
+import type {
+  Actions,
+  Bus,
+  PlayerState,
+  RuleRegistry,
+  SnapshotHandshake,
+  Store,
+  SyncEngine,
+  Vec3,
+  WorldConstants,
+  WorldObjects,
+} from '@officexr/sdk';
 import type { BotPool } from '../bot/BotPool.ts';
 import { resolveCharacter } from '../characters/registry.ts';
 import type { CameraMode } from '../renderer/config.ts';
+import { isYawPitchMode } from '../renderer/lookControls.ts';
+import { excludeRacks, occupiedRacks } from '../renderer/occupiedRacks.ts';
+import { useMotionWorld } from '../renderer/useMotionWorld.ts';
+import { heldStands, swapHeldStands } from '../motion/wand.ts';
 import type { ActionInput } from '../input/action-input.ts';
 import type { InteractionStore } from '../input/interaction.ts';
 import type { PlacementHost } from '../motion/place-mode.ts';
@@ -21,6 +38,8 @@ import type { SimBakedColliders, SimCore } from '../sim/SimCore.ts';
 import { useApplication, useCatalog, useCatalogCharacters } from './application-context.tsx';
 import { bakedLayoutGlbUrl } from './bevyRenderer.ts';
 import { FrameLoop } from './frameLoop.ts';
+import { PlacementFrame } from './placementFrame.ts';
+import { PlayInput } from './playInput.ts';
 import { pingBellPicks } from './pingBell.ts';
 import { frameStatsMeter } from './frameStatsMeter.ts';
 import { RoomFrame, type RoomView } from './roomFrame.ts';
@@ -28,6 +47,7 @@ import { useCreateSim, type SimImplementation } from './useCreateSim.ts';
 import { setBevyReady, usePrimaryBevyView } from './usePrimaryBevyView.ts';
 import { useStoreSelector } from './useStoreSelector.ts';
 import { hasCommandModifier, isTypingTarget } from './useWorldFocus.ts';
+import type { ExcludeInstance } from '../scenes/compile-map.ts';
 import type { ViewYaw } from './viewYaw.tsx';
 import type { BakedLayoutDiff } from './worldDiff.ts';
 
@@ -84,6 +104,8 @@ const SCROLL_KEYS = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'Arro
 const NO_SPAWNS: readonly Vec3[] = [];
 
 const selectCharRadius = (s: { worldSettings: { charRadius: number } }) => s.worldSettings.charRadius;
+const selectRacksInUse = (s: { players: Parameters<typeof occupiedRacks>[0] }) => occupiedRacks(s.players);
+const selectHeldStands = (s: { players: Parameters<typeof heldStands>[0] }) => heldStands(s.players);
 
 // ponytail: no bake version in the URL, so Bevy keeps drawing a layout re-baked mid-session until a reload.
 function bakedLayoutDiff(p: SceneBakedLayout): BakedLayoutDiff {
@@ -109,6 +131,15 @@ function cameraConfig(c: WorldConstants, charRadius: number, invertLook: boolean
     invertLook,
     charRadius,
   };
+}
+
+/** `worldObjects` less the instances `exclude` drops; the same object when it drops none. */
+function without(worldObjects: WorldObjects, exclude: ExcludeInstance | undefined): WorldObjects {
+  if (!exclude) {
+    return worldObjects;
+  }
+  const instances = worldObjects.instances.filter((i) => !exclude(i));
+  return instances.length === worldObjects.instances.length ? worldObjects : { ...worldObjects, instances };
 }
 
 function roomView(wasm: RendererModule, view: ViewId): RoomView {
@@ -165,10 +196,15 @@ export function BevyScene(props: BevySceneProps) {
     [seating, sim, store],
   );
 
-  const { catalog, voxelSize } = useApplication();
+  const { catalog, voxelSize, geometry } = useApplication();
   const kinds = useCatalog();
   const characters = useCatalogCharacters();
-  const worldObjects = useStoreWorldObjects(store);
+  // A ridden rack's vehicle goes with its rider: the rack is neither drawn nor solid.
+  const racksInUse = useStoreSelector(store, selectRacksInUse);
+  const ridden = useMemo(() => excludeRacks(racksInUse, undefined), [racksInUse]);
+  const storeWorldObjects = useStoreWorldObjects(store);
+  const worldObjects = useMemo(() => without(storeWorldObjects, ridden), [storeWorldObjects, ridden]);
+  const motionWorld = useMotionWorld(store);
   const loadedBakedColliders = useBakedColliders(bakedLayouts, props.onError);
   const bakedColliders = useMemo(
     (): SimBakedColliders[] =>
@@ -207,27 +243,34 @@ export function BevyScene(props: BevySceneProps) {
     notifyCollidersReady(bakedColliders.map((b) => b.roomInstanceId));
   }, [sim, worldObjects, voxelSize, catalog, kinds, bakedColliders]);
 
-  // E sits (walking, jumping and the stick stand up again through the frame). Space and the arrows
-  // would scroll the page. Bevy hears the keys itself; this only adds what it doesn't do.
-  const sitsOnE = props.cameraMode !== 'free-fly' ? seating : undefined;
+  // Space and the arrows would scroll the page. Bevy hears the movement keys itself, and the frame
+  // reads the gameplay keys (E, F, Q, the digits) from `playInput`.
   useEffect(() => {
     if (!props.worldFocused) {
       return;
     }
     const onKeyDown = (e: KeyboardEvent) => {
-      if (isTypingTarget(e.target) || hasCommandModifier(e)) {
-        return;
-      }
-      if (SCROLL_KEYS.has(e.code)) {
+      if (!isTypingTarget(e.target) && !hasCommandModifier(e) && SCROLL_KEYS.has(e.code)) {
         e.preventDefault();
-      }
-      if (e.code === 'KeyE' && !e.repeat) {
-        sitsOnE?.sit();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [sitsOnE, props.worldFocused]);
+  }, [props.worldFocused]);
+  const [playInput, setPlayInput] = useState<PlayInput | null>(null);
+  useEffect(() => {
+    const surface = container.current;
+    if (!surface) {
+      return;
+    }
+    const created = new PlayInput(window, surface);
+    setPlayInput(created);
+    return () => {
+      setPlayInput(null);
+      created.dispose();
+    };
+  }, []);
+  useEffect(() => playInput?.setEnabled(props.worldFocused), [playInput, props.worldFocused]);
 
   const charRadius = useStoreSelector(store, selectCharRadius);
   const { cameraMode, view: constants } = props;
@@ -238,6 +281,11 @@ export function BevyScene(props: BevySceneProps) {
   useEffect(() => {
     bevy?.wasm.setCameraConfig(bevy.view, cameraConfig(constants, charRadius, invertLook));
   }, [bevy, constants, charRadius, invertLook]);
+  // ponytail: the Bevy stick stays anchored bottom-left while the look is locked; the DOM one floats.
+  const lookLocked = props.lookLocked ?? false;
+  useEffect(() => {
+    bevy?.wasm.setLookLocked(bevy.view, lookLocked);
+  }, [bevy, lookLocked]);
 
   // ponytail: no recenter; `motionLook.recenterKey` is ignored on the Bevy view.
   // A reading with nulls would reset the view's previous pose, so only the cleanup sends one.
@@ -259,7 +307,17 @@ export function BevyScene(props: BevySceneProps) {
     };
   }, [bevy, motionLook]);
 
-  const excludeInstance = useMemo(() => excludeLayoutInstances(bakedLayouts), [bakedLayouts]);
+  const held = useStoreSelector(store, selectHeldStands);
+  const drawnObjects = useMemo(() => {
+    const stands = new Set(held ? held.split('|') : []);
+    return (w: WorldObjects) => swapHeldStands(w, catalog, stands);
+    // `kinds` changes when the catalog's kinds do; `catalog` keeps its identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [held, catalog, kinds]);
+  const excludeInstance = useMemo(
+    () => excludeRacks(racksInUse, excludeLayoutInstances(bakedLayouts)),
+    [racksInUse, bakedLayouts],
+  );
   const bakedLayoutDiffs = useMemo(() => (bakedLayouts ?? []).map(bakedLayoutDiff), [bakedLayouts]);
   const frame = useRef<RoomFrame | null>(null);
   const options = {
@@ -272,11 +330,15 @@ export function BevyScene(props: BevySceneProps) {
     joystickKind: props.joystickKind,
     autoWalk: props.autoWalk,
     seating,
+    actionInput: props.actionInput,
+    interactions: props.interactions,
+    motionWorld,
     // The model's URL, not its id: a catalog character's id names no `/models/characters/` file.
     characterOf: (p: PlayerState) => resolveCharacter(p.id, p.avatar.model, characters).url,
     kinds,
     bakedLayouts: bakedLayoutDiffs,
     excludeInstance,
+    drawnObjects,
   };
   // The frame reads the latest props each step; it keeps its own state across renders.
   useLayoutEffect(() => {
@@ -291,8 +353,43 @@ export function BevyScene(props: BevySceneProps) {
   const onDomJoystick = useEffectEvent((dom: boolean) => props.onDomJoystick?.(dom));
   const onFrameStats = useEffectEvent((sample: FrameStatsSample | null) => props.onFrameStats?.(sample));
   const { actions, rules, bus, handshake, bots, viewYaw } = props;
+  const sfx = useSfx();
+  const sounds = useRef<SoundFrame | null>(null);
   useEffect(() => {
-    if (!bevy) {
+    if (!sfx) {
+      return;
+    }
+    const created = new SoundFrame(() => store.getState(), bus, sfx);
+    sounds.current = created;
+    return () => {
+      sounds.current = null;
+      created.dispose();
+    };
+  }, [sfx, store, bus]);
+
+  const { placement } = props;
+  const building = useRef<PlacementFrame | null>(null);
+  useEffect(() => {
+    if (!placement) {
+      return;
+    }
+    // ponytail: nothing draws the ghost yet; the view will take `placementPreview(placement.mode.get(), …)`.
+    const created = new PlacementFrame({
+      host: placement,
+      getState: () => store.getState(),
+      geometry,
+      target: window,
+      pointerLocked: () => document.pointerLockElement !== null,
+    });
+    building.current = created;
+    return () => {
+      building.current = null;
+      created.dispose();
+    };
+  }, [placement, store, geometry]);
+
+  useEffect(() => {
+    if (!bevy || !playInput) {
       return;
     }
     const { wasm, view } = bevy;
@@ -302,9 +399,11 @@ export function BevyScene(props: BevySceneProps) {
         store,
         actions,
         bus,
+        sync,
         bots,
         selfId,
         view: roomView(wasm, view),
+        keys: playInput,
         onViewYaw: (yaw) => viewYaw?.set(yaw),
         onDomJoystick: (dom) => onDomJoystick(dom),
       },
@@ -315,6 +414,8 @@ export function BevyScene(props: BevySceneProps) {
     const meterStats = frameStatsMeter(() => wasm.frameStats(view), onFrameStats);
     const loop = new FrameLoop({ actions, store, rules, bus, sync, handshake }, (dtSec, nowMs) => {
       room.step(dtSec, nowMs);
+      building.current?.step();
+      sounds.current?.step(nowMs);
       if (!loading.done) {
         const { ready, pending } = wasm.isReady(view);
         loading.mostPending = Math.max(loading.mostPending, pending);
@@ -341,7 +442,9 @@ export function BevyScene(props: BevySceneProps) {
     };
     // The frame takes every other input through `options`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bevy, store, actions, rules, bus, sync, handshake, bots, selfId, viewYaw]);
+  }, [bevy, playInput, store, actions, rules, bus, sync, handshake, bots, selfId, viewYaw]);
 
-  return <div ref={container} style={{ position: 'absolute', inset: 0, touchAction: 'none' }} />;
+  // The right button turns the view in first and third person, so it opens no menu there.
+  const onContextMenu = isYawPitchMode(cameraMode) ? (e: React.MouseEvent) => e.preventDefault() : undefined;
+  return <div ref={container} onContextMenu={onContextMenu} style={{ position: 'absolute', inset: 0, touchAction: 'none' }} />;
 }
