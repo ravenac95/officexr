@@ -9,7 +9,7 @@ use crate::lighting::{HemisphereFill, ObjectMaterial};
 use crate::scene::LightingConfig;
 
 /// The right hand bone the wand and finger hang from.
-pub(super) const HAND: &str = "handr";
+pub(super) const HAND: &str = "hand.r";
 const WAND_TIP_COLOR: Srgba = Srgba::rgb(1.0, 0.886, 0.478);
 const WAND_SHAFT_COLOR: Srgba = Srgba::rgb(0.42, 0.247, 0.114);
 const FINGER_COLOR: Srgba = Srgba::rgb(0.949, 0.757, 0.604);

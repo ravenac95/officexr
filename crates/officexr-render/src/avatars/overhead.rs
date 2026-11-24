@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn a_models_height_is_its_highest_vertex_through_its_transforms() {
         let mut app = App::new();
-        app.init_asset::<Mesh>();
+        app.init_resource::<Assets<Mesh>>();
         let mesh = app
             .world_mut()
             .resource_mut::<Assets<Mesh>>()

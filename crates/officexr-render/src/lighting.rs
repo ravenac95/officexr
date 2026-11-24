@@ -40,9 +40,6 @@ pub type ObjectMaterial = ExtendedMaterial<StandardMaterial, HemisphereFill>;
 pub struct HemisphereFill {
     #[uniform(100)]
     pub irradiance: HemisphereIrradiance,
-    /// Zero for everything but an avatar under a spell or frozen at its desk.
-    #[uniform(101)]
-    pub look: AvatarLook,
 }
 
 /// What an avatar's spell or absence does to its colours (`Adventurer.tsx`'s
@@ -50,7 +47,7 @@ pub struct HemisphereFill {
 // ISP bend: every object material carries this uniform though only avatars
 // set it. A second extension type would need its own pipeline and a material
 // swap whenever a spell lands; one zeroed uniform is cheaper.
-#[derive(ShaderType, Reflect, Debug, Clone, Copy, Default, PartialEq)]
+#[derive(ShaderType, Reflect, Debug, Clone, Copy, PartialEq)]
 pub struct AvatarLook {
     /// Linear RGB the base colour is multiplied toward, by `tint.a`.
     pub tint: LinearRgba,
@@ -62,10 +59,24 @@ pub struct AvatarLook {
     pub rim: LinearRgba,
 }
 
+impl Default for AvatarLook {
+    /// No tint, glow, greying or rim (`LinearRgba`'s own default is opaque white).
+    fn default() -> Self {
+        Self {
+            tint: LinearRgba::NONE,
+            glow: 0.0,
+            desaturate: 0.0,
+            rim: LinearRgba::NONE,
+        }
+    }
+}
+
 #[derive(ShaderType, Reflect, Debug, Clone, Copy, Default)]
 pub struct HemisphereIrradiance {
     pub sky: LinearRgba,
     pub ground: LinearRgba,
+    /// Zero for everything but an avatar under a spell or frozen at its desk.
+    pub look: AvatarLook,
 }
 
 impl MaterialExtension for HemisphereFill {
@@ -80,8 +91,11 @@ impl HemisphereFill {
         let sky = hemisphere_color(HEMISPHERE_SKY) * lighting.ambient_intensity + fill;
         let ground = hemisphere_color(HEMISPHERE_GROUND) * lighting.ambient_intensity + fill;
         Self {
-            irradiance: HemisphereIrradiance { sky, ground },
-            look: AvatarLook::default(),
+            irradiance: HemisphereIrradiance {
+                sky,
+                ground,
+                look: AvatarLook::default(),
+            },
         }
     }
 }
@@ -134,7 +148,10 @@ pub(crate) fn sync_lighting(
             .collect();
         for id in handles {
             if let Some(mut material) = materials.get_mut(id) {
-                material.extension.irradiance = fill.irradiance;
+                // An avatar's look is its own.
+                let irradiance = &mut material.extension.irradiance;
+                irradiance.sky = fill.irradiance.sky;
+                irradiance.ground = fill.irradiance.ground;
             }
         }
         commands.entity(view).insert(Lit(scene.lighting.clone()));

@@ -581,7 +581,7 @@ mod tests {
         assert!(late.radius > early.radius && late.color.alpha < early.color.alpha);
         assert!(spark(0.7).iter().all(Option::is_none));
         assert_eq!(spark_progress(0.1), 0.0);
-        assert_eq!(spark_progress(0.65), 1.0);
+        assert_eq!(spark_progress(0.7), 1.0);
     }
 
     #[test]

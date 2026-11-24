@@ -35,7 +35,7 @@ pub(super) fn look_of(player: &PlayerRender) -> AvatarLook {
 
 /// Gives `material` the look, and makes it translucent while frozen.
 pub(super) fn apply(material: &mut ObjectMaterial, look: AvatarLook, frozen: bool) {
-    material.extension.look = look;
+    material.extension.irradiance.look = look;
     let base = &mut material.base;
     if frozen {
         base.alpha_mode = AlphaMode::Blend;
@@ -53,7 +53,9 @@ mod tests {
 
     #[test]
     fn a_plain_player_changes_nothing() {
-        assert_eq!(look_of(&PlayerRender::default()), AvatarLook::default());
+        let plain = look_of(&PlayerRender::default());
+        assert_eq!(plain, AvatarLook::default());
+        assert_eq!((plain.tint.alpha, plain.rim.alpha, plain.glow), (0.0, 0.0, 0.0));
     }
 
     #[test]

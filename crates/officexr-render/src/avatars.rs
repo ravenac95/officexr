@@ -830,7 +830,6 @@ struct ModelParts<'w, 's> {
     mesh3d: Query<'w, 's, &'static Mesh3d>,
     skins: Query<'w, 's, &'static SkinnedMesh>,
     standard: Query<'w, 's, &'static MeshMaterial3d<StandardMaterial>>,
-    meshes: Res<'w, Assets<Mesh>>,
 }
 
 /// The character GLBs carry no animations, so Bevy's loader gives their
@@ -887,7 +886,7 @@ fn bind_avatars(
             &parts.parents,
             &parts.transforms,
             &parts.mesh3d,
-            &parts.meshes,
+            &meshes,
         ) {
             state.height = height;
         }
