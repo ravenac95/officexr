@@ -51,6 +51,9 @@ pub struct FixedCamera {
     pub distance_m: Option<f32>,
     /// A world point to orbit and look at instead of the followed player.
     pub look_at: Option<[f32; 3]>,
+    /// Orbits the character's chest rigidly at the pitch-aligned distance, so
+    /// it stays at the screen centre at any aspect ratio. Ignored with `look_at`.
+    pub centred: bool,
 }
 
 impl Default for FixedCamera {
@@ -66,6 +69,7 @@ impl Default for FixedCamera {
             movement_yaw_offset_deg: 0.0,
             distance_m: None,
             look_at: None,
+            centred: false,
         }
     }
 }

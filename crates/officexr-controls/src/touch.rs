@@ -44,6 +44,8 @@ struct Finger {
 pub(crate) struct TouchState {
     fingers: HashMap<Entity, Vec<Finger>>,
     stick_touch: Option<u64>,
+    /// Where a floating stick sits while a finger holds it.
+    stick_origin: Option<Vec2>,
 }
 
 #[derive(Component)]
@@ -66,6 +68,13 @@ pub fn joystick_vector(offset: Vec2, radius: f32, dead_zone: f32) -> Vec2 {
 /// As `lookControls.ts`: the zoom factor for two fingers moving from `prev` to `next` apart.
 pub fn pinch_factor(prev: f32, next: f32) -> f32 {
     if prev > 0.0 { next / prev } else { 1.0 }
+}
+
+/// As `joystick.ts`' `floatingOrigin`: a floating stick centred on `point`,
+/// kept `half` px inside a window of `size`.
+pub fn floating_origin(point: Vec2, size: Vec2, half: f32) -> Vec2 {
+    let clamp = |v: f32, max: f32| v.max(half).min((max - half).max(half));
+    Vec2::new(clamp(point.x, size.x), clamp(point.y, size.y))
 }
 
 /// The stick's centre in window px (y down), for a window of `size`.
@@ -118,6 +127,11 @@ pub(crate) fn read_touches(
     let bevy_stick = views
         .iter()
         .any(|(id, w)| Some(*w) == primary && hub[id].joystick == JoystickKind::Bevy);
+    // A view a drag can't turn (look-locked) lets the stick start under any finger.
+    let floating = bevy_stick
+        && views
+            .iter()
+            .any(|(id, w)| Some(*w) == primary && hub[id].look_locked);
 
     let state = &mut *state;
     for fingers in state.fingers.values_mut() {
@@ -137,12 +151,17 @@ pub(crate) fn read_touches(
                     prev: at,
                     pos: at,
                 });
-                if bevy_stick
-                    && Some(event.window) == primary
-                    && state.stick_touch.is_none()
-                    && on_stick(at, size)
-                {
+                if !bevy_stick || Some(event.window) != primary {
+                    continue;
+                }
+                if state.stick_touch.is_none() && (floating || on_stick(at, size)) {
                     state.stick_touch = Some(event.id);
+                    state.stick_origin =
+                        floating.then(|| floating_origin(at, size, BASE_SIZE / 2.0));
+                } else if state.stick_origin.is_some() {
+                    // A second finger makes a floating stick's finger half of a pinch.
+                    state.stick_touch = None;
+                    state.stick_origin = None;
                 }
             }
             TouchPhase::Moved => {
@@ -154,6 +173,7 @@ pub(crate) fn read_touches(
                 fingers.retain(|f| f.id != event.id);
                 if Some(event.window) == primary && state.stick_touch == Some(event.id) {
                     state.stick_touch = None;
+                    state.stick_origin = None;
                 }
             }
         }
@@ -162,6 +182,10 @@ pub(crate) fn read_touches(
     if !bevy_stick {
         state.stick_touch = None;
     }
+    if state.stick_touch.is_none() || !floating {
+        state.stick_origin = None;
+    }
+    let centre = state.stick_origin.unwrap_or_else(|| stick_centre(size));
     let no_fingers = Vec::new();
     let on_primary = primary
         .and_then(|w| state.fingers.get(&w))
@@ -170,7 +194,7 @@ pub(crate) fn read_touches(
         .stick_touch
         .and_then(|id| on_primary.iter().find(|f| f.id == id))
         .map_or(Vec2::ZERO, |f| {
-            joystick_vector(f.pos - stick_centre(size), TRAVEL, DEAD_ZONE)
+            joystick_vector(f.pos - centre, TRAVEL, DEAD_ZONE)
         });
 
     for (id, window) in &views {
@@ -202,7 +226,6 @@ pub(crate) fn read_touches(
 
     // Stays shown once a touch device has revealed it.
     let show = bevy_stick && !on_primary.is_empty();
-    let centre = stick_centre(size);
     let knob_at = centre + Vec2::new(stick.x, -stick.y) * TRAVEL;
     for (part, mut node, mut visibility) in &mut parts {
         match part {
@@ -265,6 +288,16 @@ mod tests {
         assert!((d - Vec2::new(-0.05, 0.0)).length() < 1e-6);
         let inverted = drag_look_delta(Vec2::new(10.0, 0.0), TOUCH_SENSITIVITY, 1.0);
         assert!((inverted - Vec2::new(0.05, 0.0)).length() < 1e-6);
+    }
+
+    #[test]
+    fn a_floating_stick_centres_on_the_finger_inside_the_window() {
+        let window = Vec2::new(200.0, 300.0);
+        let at = |x: f32, y: f32| floating_origin(Vec2::new(x, y), window, 55.0);
+        // `joystick.test.ts`'s cases.
+        assert_eq!(at(100.0, 150.0), Vec2::new(100.0, 150.0));
+        assert_eq!(at(5.0, 295.0), Vec2::new(55.0, 245.0));
+        assert_eq!(at(199.0, 2.0), Vec2::new(145.0, 55.0));
     }
 
     #[test]

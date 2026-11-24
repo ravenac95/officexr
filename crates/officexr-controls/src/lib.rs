@@ -1578,6 +1578,55 @@ mod tests {
     }
 
     #[test]
+    fn with_look_locked_a_finger_anywhere_floats_the_stick_and_never_looks() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| {
+            c.mode = CameraMode::Fixed;
+            c.look_locked = true;
+        });
+        let window = window(&mut app);
+        let at = Vec2::new(400.0, 200.0);
+        touch(&mut app, window, 0, TouchPhase::Started, at);
+        app.update();
+        touch(
+            &mut app,
+            window,
+            0,
+            TouchPhase::Moved,
+            at + Vec2::new(0.0, -32.0),
+        );
+        app.update();
+        let (offsets, stick) = controls(&app, id, |c| (c.look.offsets, c.stick));
+        assert_eq!(offsets.fixed_azimuth_offset_rad, 0.0);
+        assert_eq!(
+            stick,
+            Vec2::new(0.0, 1.0),
+            "full forward from where the finger landed"
+        );
+
+        // A second finger turns the pair into a pinch.
+        touch(
+            &mut app,
+            window,
+            1,
+            TouchPhase::Started,
+            at + Vec2::new(100.0, -32.0),
+        );
+        app.update();
+        touch(
+            &mut app,
+            window,
+            1,
+            TouchPhase::Moved,
+            at + Vec2::new(200.0, -32.0),
+        );
+        app.update();
+        let (zoom, stick) = controls(&app, id, |c| (c.look.offsets.zoom, c.stick));
+        assert!((zoom - 2.0).abs() < 1e-5);
+        assert_eq!(stick, Vec2::ZERO);
+    }
+
+    #[test]
     fn touches_on_another_window_leave_the_view_alone() {
         let (mut app, id) = app();
         controls(&app, id, |c| c.mode = CameraMode::FirstPerson);

@@ -214,6 +214,28 @@ pub fn fixed_leash(base_pitch_rad: f32, fixed: &FixedCamera, offsets: &ViewOffse
     }
 }
 
+/// Height of the character's chest above its body root.
+pub fn chest_rise(char_radius: f32) -> f32 {
+    BODY_Y as f32 - char_radius + CHAR_HEIGHT_M / 2.0
+}
+
+/// `lookControls.ts`' `centredFixedPose`: a fixed camera that keeps the
+/// character's chest on its look axis, as the fixed config to frame the
+/// chest with (`height` above it, at the XZ `distance_m` where the look ray
+/// at `pitch_deg` meets it) and the chest's rise above the body root. Zoom
+/// and elevation offsets scale the pose about the chest ([`fixed_leash`]),
+/// so the character stays centred under them too.
+pub fn centred_fixed(fixed: &FixedCamera, char_radius: f32) -> (FixedCamera, f32) {
+    let rise = chest_rise(char_radius);
+    let above_chest = fixed.height - rise;
+    let centred = FixedCamera {
+        height: above_chest,
+        distance_m: Some(above_chest / fixed.pitch_deg.abs().to_radians().tan()),
+        ..fixed.clone()
+    };
+    (centred, rise)
+}
+
 /// Yaw of the fixed camera for camera-relative movement. The camera sits at
 /// `(sin az, -cos az)` from the reference, so turning the view right (a
 /// positive azimuth offset) lowers the yaw.

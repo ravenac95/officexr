@@ -134,6 +134,9 @@ impl Rig {
         focus: Option<Vec3>,
         dt: f32,
     ) -> Option<SceneCamera> {
+        let centred = mode == CameraMode::Fixed && config.fixed.centred;
+        // A centred view never swings to the conversation: the player would leave the centre.
+        let focus = focus.filter(|_| !centred);
         if let Some(focus) = focus {
             self.last_focus = focus;
         }
@@ -166,10 +169,19 @@ impl Rig {
                 let ahead = fly.pos + look::forward(fly.yaw, fly.pitch);
                 Some(pose(fly.pos, ahead, FREE_FLY_FOV))
             }
-            CameraMode::Fixed => {
-                let reference = config.fixed.look_at.map(Vec3::from).or(target)?;
-                Some(self.fixed(reference, config, look))
-            }
+            CameraMode::Fixed => match config.fixed.look_at {
+                Some(point) => Some(self.fixed(point.into(), config, look)),
+                None if centred => {
+                    let (fixed, rise) = look::centred_fixed(&config.fixed, config.char_radius);
+                    let chest = target? + Vec3::Y * rise;
+                    let config = CameraConfig {
+                        fixed,
+                        ..config.clone()
+                    };
+                    Some(self.fixed(chest, &config, look))
+                }
+                None => Some(self.fixed(target?, config, look)),
+            },
             CameraMode::Orbit => {
                 let orbit = &config.orbit;
                 self.orbit_goal = self.orbit_goal.clamped(orbit);
@@ -422,6 +434,77 @@ mod tests {
         fly.drag(Vec2::new(100.0, 1000.0));
         assert!((fly.yaw + 0.5).abs() < EPS);
         assert_eq!(fly.pitch, PITCH_MIN);
+    }
+
+    /// Where the camera's look axis passes nearest `point`, as a distance.
+    fn off_axis(camera: &SceneCamera, point: Vec3) -> f32 {
+        let from = Vec3::from(camera.position);
+        let axis = (Vec3::from(camera.look_at) - from).normalize();
+        let to = point - from;
+        (to - axis * to.dot(axis)).length()
+    }
+
+    #[test]
+    fn a_centred_fixed_camera_keeps_the_chest_on_its_axis_as_the_player_moves_and_zooms() {
+        let mut config = CameraConfig::default();
+        config.fixed.centred = true;
+        let mut rig = Rig::default();
+        let mut look = Look::default();
+        let chest = |body: Vec3| body + Vec3::Y * look::chest_rise(config.char_radius);
+        for (body, zoom) in [
+            (Vec3::new(2.0, 1.0, -3.0), 1.0),
+            (Vec3::new(9.0, 1.0, 4.0), 1.0),
+            (Vec3::new(9.0, 1.0, 4.0), 2.5),
+        ] {
+            look.offsets.zoom = zoom;
+            let camera = rig
+                .step(
+                    CameraMode::Fixed,
+                    &config,
+                    &mut look,
+                    Some(body),
+                    None,
+                    1.0 / 60.0,
+                )
+                .unwrap();
+            assert!(
+                off_axis(&camera, chest(body)) < EPS,
+                "{body} at zoom {zoom}"
+            );
+            if zoom == 1.0 {
+                assert!((camera.position[1] - (body.y + config.fixed.height)).abs() < EPS);
+            }
+        }
+        // Straight down, as the Map and Bird's-eye views look.
+        config.fixed.pitch_deg = -89.9;
+        let body = Vec3::new(-4.0, 1.0, 6.0);
+        let camera = Rig::default()
+            .step(CameraMode::Fixed, &config, &mut look, Some(body), None, 0.0)
+            .unwrap();
+        assert!(off_axis(&camera, chest(body)) < 0.1);
+    }
+
+    #[test]
+    fn a_centred_fixed_camera_ignores_the_conversation() {
+        let mut config = CameraConfig::default();
+        config.fixed.centred = true;
+        let body = Vec3::new(2.0, 1.0, -3.0);
+        let mut rig = Rig::default();
+        let mut look = Look::default();
+        let focus = Some(Vec3::new(6.0, 0.0, 0.0));
+        let mut camera = None;
+        for _ in 0..120 {
+            camera = rig.step(
+                CameraMode::Fixed,
+                &config,
+                &mut look,
+                Some(body),
+                focus,
+                1.0 / 60.0,
+            );
+        }
+        let chest = body + Vec3::Y * look::chest_rise(config.char_radius);
+        assert!(off_axis(&camera.unwrap(), chest) < EPS);
     }
 
     #[test]
