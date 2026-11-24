@@ -57,6 +57,26 @@ pub(crate) fn label(
     )
 }
 
+/// Text on a rounded `background` pill, as the mission marker's caption.
+pub(crate) fn pill(
+    text: String,
+    font_size: f32,
+    background: Color,
+    anchor: Entity,
+    offset: Vec3,
+) -> impl Bundle {
+    let node = Node {
+        padding: UiRect::axes(Val::Px(12.0), Val::Px(4.0)),
+        border_radius: BorderRadius::MAX,
+        ..default()
+    };
+    (
+        anchored(anchor, offset, node, background),
+        Text::new(text),
+        TextFont::from_font_size(font_size),
+    )
+}
+
 /// A round `badge_px` badge holding `icon` at `icon_px`.
 pub(crate) fn icon_badge(
     icon: Handle<Image>,

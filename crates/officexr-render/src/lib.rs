@@ -14,14 +14,17 @@ mod lighting;
 #[cfg(feature = "mugshot")]
 mod mugshot;
 mod objects;
+pub mod occlusion;
 mod offscreen;
 pub mod overlays;
 pub mod picking;
 pub mod placement;
 pub mod proximity;
 pub mod scene;
+pub mod screens;
 mod sky;
 pub mod views;
+pub mod water;
 mod world_label;
 
 use bevy::asset::embedded_asset;
@@ -121,12 +124,14 @@ impl Plugin for OfficeXrRenderPlugin {
         embedded_asset!(app, "grid.wesl");
         embedded_asset!(app, "bell.png");
         embedded_asset!(app, "proximity.wesl");
+        embedded_asset!(app, "water.wesl");
         app.add_plugins((
             MaterialPlugin::<ObjectMaterial>::default(),
             MaterialPlugin::<SkyMaterial>::default(),
             MaterialPlugin::<overlays::OverlayMaterial>::default(),
             MaterialPlugin::<overlays::GridMaterial>::default(),
             MaterialPlugin::<proximity::GlowMaterial>::default(),
+            MaterialPlugin::<water::WaterMaterial>::default(),
             lighting::plugin,
             avatars::plugin,
             scene_systems,
@@ -169,6 +174,13 @@ fn scene_systems(app: &mut App) {
     app.add_plugins(views::plugin)
         .init_resource::<proximity::GlowMeshes>()
         .add_systems(PostUpdate, apply_camera.before(TransformSystems::Propagate))
+        // After the controls posed this frame's camera; shows and hides before visibility propagates.
+        .add_systems(
+            PostUpdate,
+            occlusion::occlude
+                .before(TransformSystems::Propagate)
+                .before(VisibilitySystems::VisibilityPropagate),
+        )
         // With this frame's camera and anchor poses, before the UI lays the labels out.
         .add_systems(
             PostUpdate,
@@ -188,6 +200,7 @@ fn scene_systems(app: &mut App) {
                     overlays::sync_overlays,
                     proximity::sync_glow,
                     proximity::sync_bubbles,
+                    water::sync_water,
                 )
                     .chain(),
                 (
@@ -196,6 +209,7 @@ fn scene_systems(app: &mut App) {
                     overlays::dress_ghosts,
                     overlays::pulse_ghosts,
                     layouts::spawn_loaded_layouts,
+                    screens::sync_screens,
                 )
                     .chain(),
                 (
@@ -321,6 +335,7 @@ pub(crate) mod tests {
         .init_asset::<overlays::OverlayMaterial>()
         .init_asset::<overlays::GridMaterial>()
         .init_asset::<proximity::GlowMaterial>()
+        .init_asset::<water::WaterMaterial>()
         .init_asset::<Gltf>()
         .init_asset::<GltfNode>()
         .init_asset::<GltfMesh>()

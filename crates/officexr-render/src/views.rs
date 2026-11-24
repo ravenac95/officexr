@@ -17,8 +17,11 @@ use bevy::window::{PrimaryWindow, WindowOccluded, WindowRef};
 
 use crate::avatars::{Bound, Replaced};
 use crate::lighting::ObjectMaterial;
+use crate::occlusion::{OcclusionInput, ViewOcclusion};
 use crate::overlays::{Overlay, OverlayIndex, ViewOverlays};
 use crate::proximity::{Proximity, ViewProximity};
+use crate::screens::{ScreenInput, ViewScreens};
+use crate::water::{ViewWater, WaterVolume};
 use crate::{
     LayoutIndex, ObjectIndex, ObjectKinds, Players, SceneCamera, WorldDiff, WorldSceneData,
 };
@@ -53,6 +56,12 @@ pub enum ViewMsg {
     Camera(SceneCamera),
     Overlays(Vec<Overlay>),
     Proximity(Proximity),
+    /// What the camera must keep in sight; `None` restores every occluder.
+    Occlusion(Option<OcclusionInput>),
+    /// The pools' water surfaces.
+    Water(Vec<WaterVolume>),
+    /// The desk screens to light.
+    Screens(Vec<ScreenInput>),
     /// For an image view: its new size, zero to pause it.
     Resize(UVec2),
 }
@@ -258,6 +267,15 @@ pub(crate) fn drain_hub(world: &mut World) {
             }
             (ViewMsg::Proximity(proximity), Some(view)) => {
                 world.entity_mut(view).insert(ViewProximity(proximity));
+            }
+            (ViewMsg::Occlusion(input), Some(view)) => {
+                world.entity_mut(view).insert(ViewOcclusion(input));
+            }
+            (ViewMsg::Water(volumes), Some(view)) => {
+                world.entity_mut(view).insert(ViewWater(volumes));
+            }
+            (ViewMsg::Screens(screens), Some(view)) => {
+                world.entity_mut(view).insert(ViewScreens(screens));
             }
             (ViewMsg::Resize(size), Some(view)) => resize(world, view, size),
         }

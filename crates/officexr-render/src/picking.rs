@@ -54,6 +54,27 @@ pub fn ray_at(camera: &SceneCamera, size: Vec2, screen: Vec2) -> Option<Ray3d> {
     ))
 }
 
+/// Where `camera` sees `point`, in pixels from the top left of a view `size`
+/// pixels big: the inverse of [`ray_at`]. `None` when the point is at or
+/// behind the camera's near plane, or the view has no size.
+pub fn screen_at(camera: &SceneCamera, size: Vec2, point: Vec3) -> Option<Vec2> {
+    if size.x <= 0.0 || size.y <= 0.0 {
+        return None;
+    }
+    let local = crate::camera_transform(camera)
+        .to_matrix()
+        .inverse()
+        .transform_point3(point);
+    let depth = -local.z;
+    if depth <= camera.near {
+        return None;
+    }
+    let half_height = (camera.fov_deg.to_radians() / 2.0).tan();
+    let half_width = half_height * size.x / size.y;
+    let ndc = Vec2::new(local.x / (depth * half_width), local.y / (depth * half_height));
+    Some(Vec2::new(ndc.x + 1.0, 1.0 - ndc.y) / 2.0 * size)
+}
+
 /// Where `ray` meets the plane `normal · p + constant = 0` (three.js's
 /// `Plane`, `normal` need not be unit), or `None` when it doesn't ahead of
 /// the ray's origin, or `normal` is zero.
@@ -114,6 +135,19 @@ mod tests {
             let miss = distance_to(ray, position + in_view);
             assert!(miss < 1e-4, "{screen}: misses {in_view} by {miss}");
         }
+    }
+
+    #[test]
+    fn a_point_projects_back_to_the_screen_its_ray_came_from() {
+        let cam = camera(Vec3::new(2.0, 6.0, 7.0), Vec3::new(0.0, 1.0, 0.0), 50.0);
+        let size = Vec2::new(320.0, 180.0);
+        for screen in [Vec2::new(40.0, 30.0), Vec2::new(300.0, 170.0), size / 2.0] {
+            let ray = ray_at(&cam, size, screen).unwrap();
+            let back = screen_at(&cam, size, ray.get_point(9.0)).unwrap();
+            assert!(back.distance(screen) < 1e-2, "{screen} came back at {back}");
+        }
+        assert_eq!(screen_at(&cam, size, Vec3::new(4.0, 11.0, 14.0)), None, "behind");
+        assert_eq!(screen_at(&cam, Vec2::ZERO, Vec3::ZERO), None);
     }
 
     #[test]

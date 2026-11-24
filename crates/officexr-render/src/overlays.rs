@@ -60,6 +60,13 @@ const SPAWN_TIP_SELECTED: Srgba = Srgba::rgb(
     0xc3 as f32 / 255.0,
 );
 const LABEL_FONT_SIZE: f32 = 12.0;
+const BEACON_HEIGHT: f32 = 6.0;
+const BEACON_RADIUS: f32 = 0.35;
+const BEACON_OPACITY: f32 = 0.22;
+const BEACON_RING: (f32, f32) = (0.7, 0.9);
+const BEACON_RING_OPACITY: f32 = 0.8;
+/// The label's gap above the column.
+const BEACON_LABEL_GAP: f32 = 0.4;
 /// `GhostLayer.tsx`'s pulse: ±50% of the opacity at 4 rad/s.
 const PULSE_RATE: f32 = 4.0;
 /// Transparent draws sort by view depth plus a material's bias, so these
@@ -151,6 +158,21 @@ pub enum OverlayKind {
         at: [f32; 3],
         text: String,
     },
+    /// `MissionMarker.tsx`: a translucent column rising from the floor point
+    /// `at`, a ring around its foot and, unless empty, `label` over its top.
+    Beacon {
+        at: [f32; 3],
+        #[serde(deserialize_with = "hex")]
+        color: Color,
+        #[serde(default)]
+        label: String,
+        #[serde(default = "beacon_height")]
+        height: f32,
+    },
+}
+
+fn beacon_height() -> f32 {
+    BEACON_HEIGHT
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Debug)]
@@ -421,7 +443,9 @@ fn root_transform(kind: &OverlayKind) -> Transform {
         OverlayKind::Marker { pos, yaw, .. } => {
             Transform::from_translation((*pos).into()).with_rotation(Quat::from_rotation_y(*yaw))
         }
-        OverlayKind::Label { at, .. } => Transform::from_translation((*at).into()),
+        OverlayKind::Label { at, .. } | OverlayKind::Beacon { at, .. } => {
+            Transform::from_translation((*at).into())
+        }
         _ => Transform::IDENTITY,
     }
 }
@@ -447,6 +471,30 @@ fn update_in_place(
         .unwrap_or_default();
     match (&old.kind, &new.kind) {
         (K::Label { .. }, K::Label { text, .. }) => {
+            for label in parts.labels.get(root).into_iter().flat_map(|l| l.iter()) {
+                if let Ok(mut shown) = parts.texts.get_mut(label)
+                    && shown.0 != *text
+                {
+                    shown.0.clone_from(text);
+                }
+            }
+        }
+        (
+            K::Beacon {
+                color,
+                label,
+                height,
+                ..
+            },
+            K::Beacon {
+                color: new_color,
+                label: text,
+                height: new_height,
+                ..
+            },
+        ) if (color, height) == (new_color, new_height)
+            && label.is_empty() == text.is_empty() =>
+        {
             for label in parts.labels.get(root).into_iter().flat_map(|l| l.iter()) {
                 if let Ok(mut shown) = parts.texts.get_mut(label)
                     && shown.0 != *text
@@ -719,8 +767,70 @@ fn spawn(
                 Vec3::ZERO,
             ));
         }
+        OverlayKind::Beacon {
+            color,
+            label,
+            height,
+            ..
+        } => spawn_beacon(commands, root, *color, label, *height, assets),
     }
     root
+}
+
+/// A beacon's column, ring and label under `root`, which stands on the floor point.
+fn spawn_beacon(
+    commands: &mut Commands,
+    root: Entity,
+    color: Color,
+    label: &str,
+    height: f32,
+    assets: &mut OverlayAssets,
+) {
+    let mut glass = |opacity: f32| {
+        assets.standard.add(StandardMaterial {
+            base_color: color.with_alpha(opacity),
+            unlit: true,
+            alpha_mode: AlphaMode::Blend,
+            double_sided: true,
+            cull_mode: None,
+            ..default()
+        })
+    };
+    let column = glass(BEACON_OPACITY);
+    let ring = glass(BEACON_RING_OPACITY);
+    let column_mesh = Cylinder::new(BEACON_RADIUS, height)
+        .mesh()
+        .resolution(24)
+        .without_caps()
+        .build();
+    let ring_mesh = Annulus::new(BEACON_RING.0, BEACON_RING.1)
+        .mesh()
+        .resolution(40)
+        .build();
+    commands.spawn((
+        Mesh3d(assets.meshes.add(column_mesh)),
+        MeshMaterial3d(column),
+        Transform::from_xyz(0.0, height / 2.0, 0.0),
+        NotShadowCaster,
+        ChildOf(root),
+    ));
+    commands.spawn((
+        Mesh3d(assets.meshes.add(ring_mesh)),
+        MeshMaterial3d(ring),
+        Transform::from_xyz(0.0, 0.03, 0.0)
+            .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+        NotShadowCaster,
+        ChildOf(root),
+    ));
+    if !label.is_empty() {
+        commands.spawn(world_label::pill(
+            label.to_string(),
+            LABEL_FONT_SIZE,
+            color,
+            root,
+            Vec3::Y * (height + BEACON_LABEL_GAP),
+        ));
+    }
 }
 
 /// The line-list positions of the boxes' edges, each edge once, so flush
@@ -1050,5 +1160,34 @@ mod tests {
             .unwrap()
             .base;
         assert_eq!(material.base_color.alpha(), 0.5, "still dressed as a ghost");
+    }
+
+    #[test]
+    fn a_beacon_follows_its_point_and_retexts_its_label_in_place() {
+        let mut app = bare_app();
+        let (id, view) = view(&mut app);
+        let beacon = |x: f32, label: &str| {
+            serde_json::json!([
+                {"tag": "mission", "kind": "beacon", "at": [x, 1, 0], "color": "#0a84ff", "label": label},
+            ])
+        };
+        set(&mut app, id, beacon(0.0, "Desk · 12 m"));
+        let before = drawn(&mut app, view);
+        let root = before["mission"];
+        let parts = app.world().get::<Children>(root).unwrap().len();
+        assert_eq!(parts, 2, "a column and a ring");
+        let label = app.world().get::<Labels>(root).unwrap().iter().next().unwrap();
+        let entities = app.world().iter_entities().count();
+
+        set(&mut app, id, beacon(3.0, "Desk · 9 m"));
+        assert_eq!(drawn(&mut app, view), before);
+        assert_eq!(app.world().iter_entities().count(), entities);
+        let at = app.world().get::<Transform>(root).unwrap().translation;
+        assert_eq!(at, Vec3::new(3.0, 1.0, 0.0));
+        assert_eq!(app.world().get::<Text>(label).unwrap().0, "Desk · 9 m");
+
+        set(&mut app, id, beacon(3.0, ""));
+        let respawned = drawn(&mut app, view)["mission"];
+        assert!(app.world().get::<Labels>(respawned).is_none());
     }
 }

@@ -25,7 +25,10 @@ use bevy::render::RenderPlugin;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::time::TimeUpdateStrategy;
 use bevy::winit::WinitPlugin;
+use officexr_render::occlusion::{OcclusionInput, ViewOcclusion};
 use officexr_render::overlays::{Overlay, ViewOverlays};
+use officexr_render::screens::{ScreenInput, ViewScreens};
+use officexr_render::water::{ViewWater, WaterVolume};
 use officexr_render::picking::{Modifiers, PickHub, PointerMsg, PointerMsgAction};
 use officexr_render::placement::VOXEL_SIZE;
 use officexr_render::proximity::{Proximity, ViewProximity};
@@ -81,6 +84,15 @@ struct Scenario {
     /// The sim frame `proximity` is sent on.
     #[serde(default)]
     proximity_from: usize,
+    /// As `setOcclusion` takes it, from the first step.
+    #[serde(default)]
+    occlusion: Option<Value>,
+    /// As `setWater` takes them.
+    #[serde(default)]
+    water: Vec<Value>,
+    /// As `setScreens` takes them; instances are `i<index>`, layout ones first.
+    #[serde(default)]
+    screens: Vec<Value>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -535,6 +547,29 @@ fn add_overlays(
     }
 }
 
+/// The scenario's world effects, as the play view's `setOcclusion`, `setWater` and `setScreens` send them.
+#[derive(Resource)]
+struct ScenarioEffects {
+    occlusion: Option<OcclusionInput>,
+    water: Vec<WaterVolume>,
+    screens: Vec<ScreenInput>,
+}
+
+/// Gives the primary view the scenario's world effects once it exists.
+fn add_effects(
+    mut commands: Commands,
+    effects: Res<ScenarioEffects>,
+    views: Query<Entity, (With<View>, Without<ViewWater>)>,
+) {
+    for view in &views {
+        commands.entity(view).insert((
+            ViewOcclusion(effects.occlusion.clone()),
+            ViewWater(effects.water.clone()),
+            ViewScreens(effects.screens.clone()),
+        ));
+    }
+}
+
 /// Renders `steps`; fails for each model that didn't load.
 fn render(
     scenario: &Scenario,
@@ -580,6 +615,15 @@ fn render(
         .insert_resource(ScenarioOverlays(
             serde_json::from_value(Value::from(scenario.overlays.clone())).expect("overlays"),
         ))
+        .insert_resource(ScenarioEffects {
+            occlusion: scenario
+                .occlusion
+                .clone()
+                .map(|o| serde_json::from_value(o).expect("occlusion")),
+            water: serde_json::from_value(Value::from(scenario.water.clone())).expect("water"),
+            screens: serde_json::from_value(Value::from(scenario.screens.clone()))
+                .expect("screens"),
+        })
         .insert_resource(ScenarioProximity(
             scenario
                 .proximity
@@ -590,7 +634,7 @@ fn render(
         // Before `drive` moves on, so it sees the step about to render.
         .add_systems(
             PreUpdate,
-            (drive, add_overlays, add_proximity.before(drive)),
+            (drive, add_overlays, add_effects, add_proximity.before(drive)),
         );
     app.run();
     let failed = failed.lock().unwrap();
