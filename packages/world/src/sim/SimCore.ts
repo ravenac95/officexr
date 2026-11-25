@@ -38,7 +38,14 @@ export interface SimPeer {
 
 export type SimSettings = Pick<
   WorldSettings,
-  'charRadius' | 'movementBlockThreshold' | 'jumpVelocity' | 'airControl' | 'maxJumps' | 'landingEaseMs'
+  | 'charRadius'
+  | 'movementBlockThreshold'
+  | 'jumpVelocity'
+  | 'airControl'
+  | 'maxJumps'
+  | 'landingEaseMs'
+  | 'stepUpSpeedFactor'
+  | 'climbAnimFactor'
 >;
 
 /** One frame of the local player's intent, as plain data. */
@@ -100,6 +107,11 @@ export interface SimCore {
    * `feet`, so a spot on a floor slab above a chair's footprint reads as free.
    */
   standingAt(feet: Vec3, charRadius: number): boolean;
+  /**
+   * How far a ray from `origin` along unit `dir` travels before a wall or other
+   * static collider stops it, capped at `maxDistance`. Characters don't stop it.
+   */
+  wallDistance(origin: Vec3, dir: Vec3, maxDistance: number): number;
   /** Moves the player to `pos` and clears its fall and jump state. */
   teleport(pos: Vec3): void;
   /** Off pins the player: no gravity and no jumping. */

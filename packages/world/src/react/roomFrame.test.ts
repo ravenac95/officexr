@@ -2,10 +2,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createMultiClientHarness } from '@officexr/sdk/test-harness';
 import type { MoveIntent, ProximityInput } from '@officexr/render-wasm';
-import type { TrackerOutput, Vec3 } from '@officexr/sdk';
+import { SPELL_IDS, type SpellCast, type TrackerOutput, type Vec3 } from '@officexr/sdk';
 import type { BotPool } from '../bot/BotPool.ts';
+import { ActionInput } from '../input/action-input.ts';
+import { InteractionStore, NO_PROMPT } from '../input/interaction.ts';
+import { RIDE_STRATEGIES } from '../motion/ride.ts';
+import { SWIM_STRATEGIES } from '../motion/swim.ts';
+import type { SelfWorld } from '../renderer/useMotionWorld.ts';
 import type { SimCore, SimInput, SimStepResult } from '../sim/SimCore.ts';
-import { RoomFrame, type PlayersInput, type RoomFrameOptions, type RoomView } from './roomFrame.ts';
+import { frozenAvatarId, frozenLoginOf, RoomFrame, type PlayersInput, type RoomFrameOptions, type RoomView } from './roomFrame.ts';
 
 const STILL: MoveIntent = { dir: [0, 0], run: false, jump: false, yaw: 0, deflection: 0 };
 
@@ -28,6 +33,7 @@ function fakeSim(log: string[], start: Vec3) {
       } as unknown as TrackerOutput;
     },
     extrapolatePeer: (p: { pos: Vec3 }) => p.pos,
+    wallDistance: (_origin: Vec3, _dir: Vec3, max: number) => Math.min(4, max),
     position: () => pos,
     teleport: (p: Vec3) => {
       pos = p;
@@ -84,6 +90,26 @@ function fakeView(log: string[], intent: MoveIntent = STILL, bevyStick = true) {
   return { view, players, inputEnabled, sent, proximity, state };
 }
 
+/** A world with nothing to swim in, ride or pick up; tests override what they need. */
+function emptyWorld(over: Partial<SelfWorld> = {}): SelfWorld {
+  return { waterAt: () => null, rideNear: () => null, wandStandNear: () => null, anchorOf: () => null, ...over };
+}
+
+function fakeKeys() {
+  const state = { held: new Set<string>(), clicked: false };
+  return {
+    state,
+    keys: {
+      held: () => state.held,
+      takeClick: () => {
+        const clicked = state.clicked;
+        state.clicked = false;
+        return clicked;
+      },
+    },
+  };
+}
+
 async function setup(opts: { intent?: MoveIntent; options?: Partial<RoomFrameOptions>; bevyStick?: boolean } = {}) {
   const harness = createMultiClientHarness();
   const alice = await harness.add('alice');
@@ -103,8 +129,21 @@ async function setup(opts: { intent?: MoveIntent; options?: Partial<RoomFrameOpt
   alice.bus.on('proximity:entering', () => log.push('bus.emit'));
   const domJoystick: boolean[] = [];
   const bots = { tick: () => log.push('bots.tick') } as unknown as BotPool;
+  const sentNet = { pokes: [] as (string | null)[], casts: [] as SpellCast[] };
+  const sync = { sendPoke: (id: string | null) => sentNet.pokes.push(id), sendCast: (c: SpellCast) => sentNet.casts.push(c) };
+  const { keys, state: keyState } = fakeKeys();
   const frame = new RoomFrame(
-    { store: alice.store, actions: alice.actions, bus: alice.bus, bots, selfId: 'alice', view, onDomJoystick: (dom) => domJoystick.push(dom) },
+    {
+      store: alice.store,
+      actions: alice.actions,
+      bus: alice.bus,
+      sync,
+      bots,
+      selfId: 'alice',
+      view,
+      keys,
+      onDomJoystick: (dom) => domJoystick.push(dom),
+    },
     {
       sim,
       cameraMode: 'fixed',
@@ -115,6 +154,7 @@ async function setup(opts: { intent?: MoveIntent; options?: Partial<RoomFrameOpt
       characterOf: (p) => `char-${p.id}`,
       kinds: [],
       bakedLayouts: [],
+      motionWorld: emptyWorld(),
       ...opts.options,
     },
   );
@@ -131,6 +171,14 @@ async function setup(opts: { intent?: MoveIntent; options?: Partial<RoomFrameOpt
     actions: alice.actions,
     bus: alice.bus,
     store: alice.store,
+    sentNet,
+    /** Holds exactly `held` this frame, as `KeyboardEvent.key`s. */
+    hold: (...held: string[]) => {
+      keyState.held = new Set(held);
+    },
+    click: () => {
+      keyState.clicked = true;
+    },
     setIntent: (intent: MoveIntent) => {
       viewState.intent = intent;
     },
@@ -245,6 +293,68 @@ describe('RoomFrame', () => {
     expect(alice!.bump).toEqual({ count: 0, normal: [0, 0] });
     expect(bob!.seat).toEqual({ pos: [bob!.pos[0], bob!.pos[1], bob!.pos[2]], yaw: bob!.yaw });
     expect(bob!.bump).toEqual({ count: 2, normal: [1, 0] });
+  });
+
+  it("sends a pose's clip and vehicle, the wand, pokes and casts, and a poke's bump and spark", async () => {
+    const { frame, players, actions, bus } = await setup();
+    actions.upsertPlayer({ id: 'bob', pose: 'scooter', held: 'wand', pos: { x: 0, y: 0, z: -1 } });
+    bus.emit({ kind: 'poke:received', fromId: 'alice', targetId: 'bob', at: 0 });
+    bus.emit({
+      kind: 'spell:cast',
+      casterId: 'bob',
+      cast: { spell: 'fireball', origin: { x: 0, y: 1, z: 0 }, dir: { x: 1, y: 0, z: 0 }, distance: 4, targetId: null },
+      at: 0,
+    });
+
+    frame.step(0.016, performance.now());
+
+    const sent = players[0]!;
+    const [alice, bob] = sent.players;
+    expect(alice!.pokes).toBe(1);
+    expect(bob).toMatchObject({ clip: { name: 'Idle_A', speed: 1 }, vehicle: '/models/props/scooter.gltf', wand: true, casts: 1 });
+    expect(bob!.body!.lift).toBeGreaterThan(0);
+    expect(bob!.bump.count).toBe(1);
+    expect(sent.effects!.map((e) => e.kind).sort()).toEqual(['bolt', 'pokeSpark']);
+    expect(sent.hostTags).toBe(false);
+  });
+
+  it('leaves frozen avatars sitting at their desks and silhouettes the players near the local one', async () => {
+    const { frame, players, actions, store } = await setup({
+      options: {
+        hostTags: true,
+        frozenAvatars: () => [
+          {
+            login: 'cat@x.co',
+            deskId: 'd',
+            name: 'Cat',
+            pos: { x: 9, y: 0, z: 9 },
+            yaw: 1,
+            model: { url: '/models/characters/Mage.glb', ghost: false, fallbackUrl: '/models/characters/Mage.glb' },
+          },
+        ],
+      },
+    });
+
+    const self = store.getState().players.alice!.pos;
+    actions.upsertPlayer({ id: 'bob', pos: { x: self.x + 1, y: self.y, z: self.z + 1 } });
+    actions.upsertPlayer({ id: 'dan', name: 'Dan', pos: { x: self.x + 20, y: self.y, z: self.z } });
+    frame.step(0.016, 1000);
+
+    const sent = players[0]!;
+    expect(sent.players.find((p) => p.id === 'dan')!.silhouette).toBeNull();
+    const frozen = sent.players.find((p) => p.id === frozenAvatarId('cat@x.co'))!;
+    expect(frozen).toMatchObject({ frozen: true, name: '', character: '/models/characters/Mage.glb', seat: { pos: [9, 0, 9], yaw: 1 } });
+    expect(frozenLoginOf(frozen.id)).toBe('cat@x.co');
+    expect(frozenLoginOf('bob')).toBeNull();
+    const [alice, bob] = sent.players;
+    expect(alice!.silhouette).toMatch(/^#[\da-f]{6}$/);
+    // Inside the outer proximity ring, where Dan is not.
+    expect(bob!.silhouette).toMatch(/^#[\da-f]{6}$/);
+    expect(sent.hostTags).toBe(true);
+
+    frame.options = { ...frame.options, cameraMode: 'top-down' };
+    frame.step(0.016, 1016);
+    expect(players[1]!.players.every((p) => !p.silhouette)).toBe(true);
   });
 
   it("sends each player's character clip-speed tunables", async () => {
@@ -382,5 +492,156 @@ describe('RoomFrame', () => {
 
     expect(inputEnabled).toEqual([true, false, true]);
     input.remove();
+  });
+});
+
+const WALK_EAST: MoveIntent = { dir: [1, 0], run: false, jump: false, yaw: 0, deflection: 0 };
+const POOL = { id: 'pool', minX: -50, maxX: 50, minZ: -50, maxZ: 50, baseY: -5, surfaceY: 50 };
+
+describe('RoomFrame gameplay', () => {
+  it('swims in water: the pose is broadcast, the swim speed replaces the walk and Space does nothing', async () => {
+    const { frame, steps, store } = await setup({
+      intent: { ...WALK_EAST, run: true, jump: true },
+      options: { motionWorld: emptyWorld({ waterAt: () => POOL }) },
+    });
+
+    frame.step(0.016, 1000);
+
+    expect(store.getState().players.alice!.pose).toBe('swim');
+    expect(steps[0]).toMatchObject({ dir: { x: 1, z: 0 }, speed: SWIM_STRATEGIES.stroke.speed, jump: false });
+  });
+
+  it('F mounts the ride in reach, which then accelerates from rest; F again gets off', async () => {
+    const rideNear = vi.fn(() => ({ vehicle: 'scooter' as const, rackId: 'rack-1' }));
+    const { frame, steps, store, hold } = await setup({ intent: WALK_EAST, options: { motionWorld: emptyWorld({ rideNear }) } });
+
+    hold('f');
+    frame.step(0.1, 1000);
+    expect(store.getState().players.alice).toMatchObject({ pose: 'scooter', poseRack: 'rack-1' });
+    expect(steps[0]!.speed).toBeCloseTo(RIDE_STRATEGIES.scooter.accel * 0.1);
+
+    frame.step(0.1, 1100);
+    expect(steps[1]!.speed).toBeCloseTo(RIDE_STRATEGIES.scooter.accel * 0.2);
+
+    hold();
+    frame.step(0.1, 1200);
+    hold('f');
+    frame.step(0.1, 1300);
+    expect(store.getState().players.alice!.pose ?? null).toBeNull();
+  });
+
+  it('E sits, and E again while seated stands up', async () => {
+    const seating = { sit: vi.fn(), stand: vi.fn(), setStandingCheck: vi.fn() };
+    const { frame, actions, hold } = await setup({ options: { seating } });
+
+    hold('e');
+    frame.step(0.016, 1000);
+    frame.step(0.016, 1016);
+    expect(seating.sit).toHaveBeenCalledOnce();
+
+    actions.upsertPlayer({ id: 'alice', seat: 'chair-1' });
+    hold();
+    frame.step(0.016, 1032);
+    hold('e');
+    frame.step(0.016, 1048);
+    expect(seating.stand).toHaveBeenCalledOnce();
+    expect(seating.sit).toHaveBeenCalledOnce();
+  });
+
+  it('runs the touch buttons as their keys: Jump jumps once per tap, Sprint runs', async () => {
+    const actionInput = new ActionInput();
+    const { frame, steps, store } = await setup({ intent: WALK_EAST, options: { actionInput } });
+
+    actionInput.press('jump');
+    actionInput.press('sprint');
+    frame.step(0.016, 1000);
+    frame.step(0.016, 1016);
+
+    const { playerSpeed, runSpeedMultiplier } = store.getState().worldSettings;
+    expect(steps.map((s) => s.jump)).toEqual([true, false]);
+    expect(steps[0]).toMatchObject({ running: true, speed: playerSpeed * runSpeedMultiplier });
+  });
+
+  it('Q pokes the player in front once per cooldown', async () => {
+    const { frame, actions, store, sentNet, bus, hold } = await setup();
+    const { pos } = store.getState().players.alice!;
+    // Yaw 0 faces -Z.
+    actions.upsertPlayer({ id: 'bob', pos: { x: pos.x, y: pos.y, z: pos.z - 1 } });
+    const received: (string | null)[] = [];
+    bus.on('poke:received', ({ targetId }) => received.push(targetId));
+
+    hold('q');
+    frame.step(0.016, 1000);
+    hold();
+    frame.step(0.016, 1100);
+    hold('q');
+    frame.step(0.016, 1200);
+    hold();
+    frame.step(0.016, 2000);
+    hold('q');
+    frame.step(0.016, 2100);
+
+    expect(sentNet.pokes).toEqual(['bob', 'bob']);
+    expect(received).toEqual(['bob', 'bob']);
+  });
+
+  it('F takes the wand from a stand, the digits pick a spell and Q casts it as far as the wall', async () => {
+    const { frame, store, sentNet, hold } = await setup({
+      options: { motionWorld: emptyWorld({ wandStandNear: () => 'stand-1' }) },
+    });
+
+    hold('f');
+    frame.step(0.016, 1000);
+    expect(store.getState().players.alice).toMatchObject({ held: 'wand', heldStand: 'stand-1' });
+
+    hold('2');
+    frame.step(0.016, 1016);
+    expect(store.getState().selectedSpell).toBe(SPELL_IDS[1]);
+
+    hold('q');
+    frame.step(0.016, 1032);
+    expect(sentNet.pokes).toEqual([]);
+    expect(sentNet.casts).toEqual([expect.objectContaining({ spell: SPELL_IDS[1], distance: 4 })]);
+  });
+
+  it('a click on the canvas casts in first and third person only', async () => {
+    const { frame, sentNet, click, actions } = await setup({ options: { cameraMode: 'fixed' } });
+    actions.setSelfHeld('wand', 'stand-1');
+
+    click();
+    frame.step(0.016, 1000);
+    expect(sentNet.casts).toHaveLength(0);
+
+    frame.options = { ...frame.options, cameraMode: 'third-person' };
+    click();
+    frame.step(0.016, 3000);
+    expect(sentNet.casts).toHaveLength(1);
+  });
+
+  it('offers what is in reach to the prompt, anchored on its object, a few times a second, and nothing while auto-walking', async () => {
+    const interactions = new InteractionStore();
+    const seating = { sit: vi.fn(), stand: vi.fn(), setStandingCheck: vi.fn(), getState: () => ({ nearbySeatId: 'chair-1' }) };
+    const autoWalk = { intent: vi.fn((): { x: number; z: number } | null => null), cancel: vi.fn() };
+    const { frame } = await setup({
+      options: { interactions, seating, autoWalk, motionWorld: emptyWorld({ anchorOf: () => ({ x: 1, y: 1, z: 1 }) }) },
+    });
+
+    frame.step(0.016, 1000);
+    expect(interactions.get()).toEqual({ options: [expect.objectContaining({ kind: 'sit', key: 'E' })], anchor: { x: 1, y: 1, z: 1 } });
+
+    autoWalk.intent.mockReturnValue({ x: 1, z: 0 });
+    frame.step(0.016, 1100);
+    expect(interactions.get().options).toHaveLength(1);
+    frame.step(0.016, 1200);
+    expect(interactions.get()).toBe(NO_PROMPT);
+  });
+
+  it('a spell that holds the player still stops it walking and jumping', async () => {
+    const { frame, steps, store } = await setup({ intent: { ...WALK_EAST, jump: true } });
+    store.setState(() => ({ spellEffects: { alice: { spell: 'levitate', casterId: 'bob', startsAt: 0, endsAt: 1e9 } } }));
+
+    frame.step(0.016, 1000);
+
+    expect(steps[0]).toMatchObject({ speed: 0, jump: false });
   });
 });

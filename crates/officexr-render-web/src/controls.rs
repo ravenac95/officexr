@@ -200,3 +200,9 @@ pub fn set_joystick_kind(id: ViewId, kind: JsValue) -> Result<bool, JsError> {
     })?;
     Ok(super::PRIMARY_VIEW.get() == Some(id))
 }
+
+/// On, a finger dragging on the view no longer turns it (the mouse still does).
+#[wasm_bindgen(js_name = setLookLocked)]
+pub fn set_look_locked(id: ViewId, locked: bool) -> Result<(), JsError> {
+    with(id, |c| c.look_locked = locked)
+}

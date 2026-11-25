@@ -10,6 +10,8 @@ use crate::views::View;
 #[derive(Component)]
 pub(crate) struct WorldLabel {
     pub offset: Vec3,
+    /// Logical pixels the label moves by once centred on its point.
+    pub nudge: Vec2,
     pub shown: bool,
 }
 
@@ -27,6 +29,7 @@ fn anchored(anchor: Entity, offset: Vec3, node: Node, background: Color) -> impl
     (
         WorldLabel {
             offset,
+            nudge: Vec2::ZERO,
             shown: true,
         },
         LabelOf(anchor),
@@ -48,6 +51,26 @@ pub(crate) fn label(
 ) -> impl Bundle {
     let node = Node {
         padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+        ..default()
+    };
+    (
+        anchored(anchor, offset, node, background),
+        Text::new(text),
+        TextFont::from_font_size(font_size),
+    )
+}
+
+/// Text on a rounded `background` pill, as the mission marker's caption.
+pub(crate) fn pill(
+    text: String,
+    font_size: f32,
+    background: Color,
+    anchor: Entity,
+    offset: Vec3,
+) -> impl Bundle {
+    let node = Node {
+        padding: UiRect::axes(Val::Px(12.0), Val::Px(4.0)),
+        border_radius: BorderRadius::MAX,
         ..default()
     };
     (
@@ -162,8 +185,8 @@ pub(crate) fn place_labels(
         match at {
             Some(xy) if label.shown && computed.size() != Vec2::ZERO => {
                 let half = computed.size() * computed.inverse_scale_factor() / 2.0;
-                node.left = Val::Px(xy.x - half.x);
-                node.top = Val::Px(xy.y - half.y);
+                node.left = Val::Px(xy.x - half.x + label.nudge.x);
+                node.top = Val::Px(xy.y - half.y + label.nudge.y);
                 *visibility = Visibility::Inherited;
             }
             _ => *visibility = Visibility::Hidden,

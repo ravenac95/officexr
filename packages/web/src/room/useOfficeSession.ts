@@ -6,8 +6,9 @@ import {
   type OfficeSync,
   type PersistentLocalState,
 } from '@officexr/core-refactor';
-import type { ViewMode } from '@officexr/sdk';
+import { HELD_DENIED_KIND, INTEGRATION_NOTICE_KIND, MISSIONS_CHANGED_KIND, ZIntegrationNotice, ZMissionsChanged } from '@officexr/sdk';
 import type { Identity } from '@officexr/server/shared';
+import { createPropOpRequester, type PropOpRequester, type RequestPropOp } from '../place/requestPropOp';
 import { createDeskClaimRequester, type DeskClaimRequester, type RequestDeskClaim } from '../desk/requestDeskClaim';
 import { wsUrl } from '../apiOrigin';
 import { fetchJaasToken, jaasTokenSource } from '../voice/jaasToken';
@@ -16,9 +17,11 @@ import { getJaasAppId } from '../voice/runtimeConfig';
 import { loadCharacter } from './character';
 import { fetchRealtimeToken } from './realtimeToken';
 
+export type SubscribeMissionsChanged = (listener: (officeId: string) => void) => () => void;
+
 export type OfficeSession =
   | { type: 'connecting' }
-  | { type: 'ready'; local: PersistentLocalState; office: OfficeSync; voice: JaasVoiceAdapter | null; requestDeskClaim: RequestDeskClaim }
+  | { type: 'ready'; local: PersistentLocalState; office: OfficeSync; voice: JaasVoiceAdapter | null; requestDeskClaim: RequestDeskClaim; requestPropOp: RequestPropOp; subscribeMissionsChanged?: SubscribeMissionsChanged }
   | { type: 'replaced' }
   | { type: 'error'; message: string };
 
@@ -44,15 +47,15 @@ async function createJaasVoice(officeId: string, displayName: string): Promise<J
 /**
  * Joins `officeId` on the realtime server (proxied at `/ws`) as player `selfId` of `me`, once `enabled`, with JaaS
  * voice when `/config.js` has an app id and the server mints a voice token. The self player stays unannounced until
- * `office.sync.releaseSelf()`.
+ * `office.sync.releaseSelf()`. Raising `attempt` joins again.
  */
 export function useOfficeSession(
   officeId: string,
   me: Identity,
   selfId: string,
   enabled: boolean,
-  viewMode: ViewMode,
   start: typeof startOfficeSync = startOfficeSync,
+  attempt = 0,
 ): OfficeSession {
   const [session, setSession] = useState<OfficeSession>({ type: 'connecting' });
   useEffect(() => {
@@ -84,6 +87,9 @@ export function useOfficeSession(
       });
       let office: OfficeSync | undefined;
       let deskClaims: DeskClaimRequester | undefined;
+      let propOps: PropOpRequester | undefined;
+      let offHeldDenied: (() => void) | undefined;
+      let offNotice: (() => void) | undefined;
       const character = loadCharacter(officeId, me.login);
       start({ local, channel, voice: voiceAdapter, holdSelf: true }).then(
         async (started) => {
@@ -98,9 +104,25 @@ export function useOfficeSession(
             return;
           }
           // After start, so the sync engine announces the name and character to the office.
-          local.actions.upsertPlayer({ id: selfId, name: me.name, avatar: { model, viewMode } });
+          local.actions.upsertPlayer({ id: selfId, name: me.name, avatar: { model } });
           deskClaims = createDeskClaimRequester(channel);
-          setSession({ type: 'ready', local, office: started, voice, requestDeskClaim: deskClaims.request });
+          propOps = createPropOpRequester(channel);
+          offHeldDenied = channel.onCustom(HELD_DENIED_KIND, () => local.actions.setSelfHeld(null));
+          let noticeCount = 0;
+          offNotice = channel.onCustom(INTEGRATION_NOTICE_KIND, (payload) => {
+            const notice = ZIntegrationNotice.safeParse(payload);
+            if (notice.success) {
+              local.actions.applyRemoteChat({ id: `notice:${Date.now()}:${noticeCount++}`, authorId: notice.data.from, text: notice.data.text, t: Date.now() });
+            }
+          });
+          const subscribeMissionsChanged: SubscribeMissionsChanged = (listener) =>
+            channel.onCustom(MISSIONS_CHANGED_KIND, (payload) => {
+              const changed = ZMissionsChanged.safeParse(payload);
+              if (changed.success) {
+                listener(changed.data.officeId);
+              }
+            });
+          setSession({ type: 'ready', local, office: started, voice, requestDeskClaim: deskClaims.request, requestPropOp: propOps.request, subscribeMissionsChanged });
         },
         (err: Error) => {
           if (cancelled) {
@@ -117,6 +139,9 @@ export function useOfficeSession(
       return () => {
         office?.stop();
         deskClaims?.dispose();
+        propOps?.dispose();
+        offHeldDenied?.();
+        offNotice?.();
         voiceAdapter.dispose();
         channel.close();
       };
@@ -126,6 +151,6 @@ export function useOfficeSession(
       cancelled = true;
       teardown?.();
     };
-  }, [officeId, me.login, me.name, selfId, enabled, viewMode, start]);
+  }, [officeId, me.login, me.name, selfId, enabled, start, attempt]);
   return session;
 }

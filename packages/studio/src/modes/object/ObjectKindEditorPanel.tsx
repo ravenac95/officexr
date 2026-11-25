@@ -2,8 +2,11 @@ import React from 'react';
 import {
   CUBE_KIND_CATEGORIES,
   type CubeKindCategory,
+  RIDE_VEHICLES,
   type OptimizationMode,
+  type RideVehicle,
   type SeatSpec,
+  type WaterSpec,
   type WorldObjectKind,
 } from '@officexr/world';
 
@@ -197,18 +200,33 @@ export function ObjectKindEditorPanel({ kind, applyPatch }: ObjectKindEditorPane
       <Section title="Seating">
         <Toggle
           label="sittable"
-          value={kind.seat !== undefined}
-          onChange={(sittable) => applyPatch({ seat: sittable ? defaultSeat(kind) : undefined })}
+          value={kind.seats !== undefined}
+          onChange={(sittable) => applyPatch({ seats: sittable ? [defaultSeat(kind)] : undefined })}
           hint="Offset is in metres from the model's min corner, unrotated: the seated avatar's root rests on the seat surface, so y is the cushion top."
         />
-        {kind.seat && (
-          <SeatFields seat={kind.seat} onChange={(seat) => applyPatch({ seat })} />
-        )}
+        {kind.seats && <SeatList seats={kind.seats} kind={kind} onChange={(seats) => applyPatch({ seats })} />}
         <Toggle
           label="is desk"
           value={kind.isDesk ?? false}
           onChange={(isDesk) => applyPatch({ isDesk: isDesk || undefined })}
         />
+      </Section>
+
+      <Section title="Water and rides">
+        <Toggle
+          label="water"
+          value={kind.water !== undefined}
+          onChange={(on) => applyPatch({ water: on ? DEFAULT_WATER : undefined })}
+          hint="Players inside the footprint, minus the rim, swim. The rim is the part of the footprint kept dry, in metres."
+        />
+        {kind.water && <WaterFields water={kind.water} onChange={(water) => applyPatch({ water })} />}
+        <SelectInput
+          label="ride"
+          value={kind.ride?.vehicle ?? NO_RIDE}
+          options={[NO_RIDE, ...RIDE_VEHICLES] as readonly (RideVehicle | typeof NO_RIDE)[]}
+          onChange={(vehicle) => applyPatch({ ride: vehicle === NO_RIDE ? undefined : { vehicle } })}
+        />
+        <Readonly label="" value="a rack: players next to it press F to ride" />
       </Section>
 
       <Section title="Optimization">
@@ -229,21 +247,74 @@ function defaultSeat(kind: WorldObjectKind): SeatSpec {
   return { offset: { x: width / 2, y: height * 0.45, z: depth / 2 }, yawDeg: 0 };
 }
 
-function SeatFields({ seat, onChange }: { seat: SeatSpec; onChange: (seat: SeatSpec) => void }) {
+const NO_RIDE = 'none';
+const DEFAULT_WATER: WaterSpec = { surfaceHeight: 0.4, rim: 0.4 };
+
+function WaterFields({ water, onChange }: { water: WaterSpec; onChange: (water: WaterSpec) => void }) {
+  return (
+    <>
+      <NumberInput
+        label="surface height"
+        value={water.surfaceHeight}
+        step={0.05}
+        onChange={(surfaceHeight) => onChange({ ...water, surfaceHeight: Math.max(0.05, surfaceHeight) })}
+      />
+      <NumberInput
+        label="rim"
+        value={water.rim}
+        step={0.05}
+        onChange={(rim) => onChange({ ...water, rim: Math.max(0.05, rim) })}
+      />
+    </>
+  );
+}
+
+interface SeatListProps {
+  seats: SeatSpec[];
+  kind: WorldObjectKind;
+  onChange: (seats: SeatSpec[] | undefined) => void;
+}
+
+function SeatList({ seats, kind, onChange }: SeatListProps) {
+  const many = seats.length > 1;
+  return (
+    <>
+      {seats.map((seat, i) => (
+        <React.Fragment key={i}>
+          <SeatFields
+            seat={seat}
+            label={many ? `seat ${i + 1} ` : ''}
+            onChange={(next) => onChange(seats.map((s, j) => (j === i ? next : s)))}
+          />
+          {many && (
+            <Button variant="secondary" size="sm" onClick={() => onChange(seats.filter((_, j) => j !== i))}>
+              Remove seat {i + 1}
+            </Button>
+          )}
+        </React.Fragment>
+      ))}
+      <Button variant="secondary" size="sm" onClick={() => onChange([...seats, defaultSeat(kind)])}>
+        Add seat
+      </Button>
+    </>
+  );
+}
+
+function SeatFields({ seat, label, onChange }: { seat: SeatSpec; label: string; onChange: (seat: SeatSpec) => void }) {
   const axes = ['x', 'y', 'z'] as const;
   return (
     <>
       {axes.map((axis) => (
         <NumberInput
           key={axis}
-          label={`offset ${axis}`}
+          label={`${label}offset ${axis}`}
           value={seat.offset[axis]}
           step={0.05}
           onChange={(v) => onChange({ ...seat, offset: { ...seat.offset, [axis]: v } })}
         />
       ))}
       <NumberInput
-        label="yaw"
+        label={`${label}yaw`}
         value={seat.yawDeg}
         step={15}
         onChange={(yawDeg) => onChange({ ...seat, yawDeg })}

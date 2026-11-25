@@ -17,6 +17,7 @@
 
 import type { Vec3 } from '@officexr/sdk';
 import { FLOOR_PROBE_RANGE } from './rules.ts';
+import { climbBroadcast } from './step-up.ts';
 import type { CharacterMovement, CharacterMoveResult } from './character-movement.ts';
 import type { BotPhysicsWorld } from '../bot/BotPhysicsWorld.ts';
 
@@ -30,6 +31,10 @@ export interface BotMovementTunables {
    * "if less than 10 % of intent survived, treat as blocked / idle."
    */
   movementBlockThreshold: number;
+  /** Climb pace as a fraction of the walk speed (WorldSettings). */
+  stepUpSpeedFactor: number;
+  /** Broadcast-velocity multiplier while climbing (WorldSettings). */
+  climbAnimFactor: number;
 }
 
 export class BotCharacterMovement implements CharacterMovement {
@@ -87,7 +92,10 @@ export class BotCharacterMovement implements CharacterMovement {
     const moveDZ = normalDir ? normalDir.z * speed * dtSec : 0;
 
     // 3. Step physics (gravity integrated inside BotPhysicsWorld.step).
-    const stepResult = this.physics.step({ x: moveDX, z: moveDZ, dtSec });
+    const stepResult = this.physics.step(
+      { x: moveDX, z: moveDZ, dtSec },
+      this.tunables.stepUpSpeedFactor,
+    );
 
     // 4. Authoritative vertical velocity from the physics world (replaces
     //    the corrected.y / dtSec approximation that BotDriver used to use).
@@ -97,18 +105,27 @@ export class BotCharacterMovement implements CharacterMovement {
     const currentPos = this.physics.translation();
     const hasFloorUnderneath = this.physics.probeFloor(currentPos, FLOOR_PROBE_RANGE);
 
-    // 6. Determine if horizontal movement actually happened.
+    // 6. Determine if horizontal movement actually happened. A climb
+    //    always moves, even once the mode's intent has gone null.
     const minProgress = 1 - this.tunables.movementBlockThreshold;
-    const moved = normalDir !== null && stepResult.progress >= minProgress;
+    const moved =
+      stepResult.climbing || (normalDir !== null && stepResult.progress >= minProgress);
 
-    // 7. Derive animation state: verb if moved, otherwise idle.
-    const animState: 'idle' | 'walk' | 'run' =
-      moved ? (verb === 'idle' ? 'idle' : verb) : 'idle';
+    // 7. Derive animation state: climbing always walks; otherwise verb if moved, else idle.
+    const animState: 'idle' | 'walk' | 'run' = stepResult.climbing
+      ? 'walk'
+      : moved ? (verb === 'idle' ? 'idle' : verb) : 'idle';
 
     // 8. Derive broadcastVel and broadcastYaw.
     let broadcastVel: Vec3;
     let broadcastYaw: number;
-    if (moved && normalDir !== null) {
+    if (stepResult.climbing) {
+      ({ vel: broadcastVel, yaw: broadcastYaw } = climbBroadcast(
+        stepResult.climbVel,
+        this.tunables.climbAnimFactor,
+        currentYaw,
+      ));
+    } else if (moved && normalDir !== null) {
       broadcastVel = {
         x: normalDir.x * speed * stepResult.progress,
         y: 0,

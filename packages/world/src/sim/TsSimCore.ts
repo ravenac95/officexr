@@ -17,7 +17,14 @@ import {
   shouldRespawnFalling,
   worldObjectsToColliders,
 } from '../physics/rules.ts';
-import { STEP_UP_MAX_HEIGHT, StepUpHold, hasSupport, tryStepUp, type StepUpProbe } from '../physics/step-up.ts';
+import {
+  STEP_UP_MAX_HEIGHT,
+  StepUpTraversal,
+  climbBroadcast,
+  stepTraversal,
+  tryStepUp,
+  type StepUpProbe,
+} from '../physics/step-up.ts';
 import { extrapolatePos, type Extrapolatable } from './extrapolate.ts';
 import type {
   SimBakedColliders,
@@ -51,7 +58,8 @@ export class TsSimCore implements SimCore {
   private gravityEnabled = true;
   /** m/s, negative falling; reset when grounded. */
   private verticalVel = 0;
-  private readonly stepUpHold = new StepUpHold();
+  /** Active step-up climb; while set it replaces input-driven movement, jumps, gravity and fall-respawn. */
+  private traversal: StepUpTraversal | null = null;
   /** Set by a jump and cleared once the landing ease finishes; not inferred from jumps left. */
   private airborne = false;
   /** Refilled to `maxJumps` on the ground; starts empty until the first grounded step. */
@@ -145,6 +153,16 @@ export class TsSimCore implements SimCore {
     );
   }
 
+  wallDistance(origin: Vec3, dir: Vec3, maxDistance: number): number {
+    const hit = this.world.castRay(
+      new RAPIER.Ray(origin, dir),
+      maxDistance,
+      true,
+      RAPIER.QueryFilterFlags.ONLY_FIXED | RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+    );
+    return hit ? Math.min(hit.timeOfImpact, maxDistance) : maxDistance;
+  }
+
   teleport(pos: Vec3): void {
     this.body.setNextKinematicTranslation(pos);
     this.commit();
@@ -154,7 +172,7 @@ export class TsSimCore implements SimCore {
   /** Grounded with a fresh set of jumps and no fall, carry or landing ease left. */
   private land(): void {
     this.verticalVel = 0;
-    this.stepUpHold.reset();
+    this.traversal = null;
     this.airborne = false;
     this.jumpsRemaining = this.maxJumps;
     this.airVel = { x: 0, z: 0 };
@@ -163,7 +181,6 @@ export class TsSimCore implements SimCore {
 
   setGravityEnabled(on: boolean): void {
     this.gravityEnabled = on;
-    this.stepUpHold.reset();
     if (!on) {
       // Jumps left stay: zeroing them would read as airborne every frame.
       this.verticalVel = 0;
@@ -175,7 +192,7 @@ export class TsSimCore implements SimCore {
 
   step(input: SimInput): SimStepResult {
     const { dtSec, dir, speed, settings } = input;
-    const { jumpVelocity, airControl, maxJumps, landingEaseMs, movementBlockThreshold } = settings;
+    const { jumpVelocity, airControl, maxJumps, landingEaseMs, movementBlockThreshold, stepUpSpeedFactor, climbAnimFactor } = settings;
     this.maxJumps = maxJumps;
     if (this.bodyCollider.radius() !== Math.fround(settings.charRadius)) {
       this.bodyCollider.setRadius(settings.charRadius);
@@ -183,7 +200,8 @@ export class TsSimCore implements SimCore {
     const isAirborne = this.airborne;
     const intendsMove = dir.x !== 0 || dir.z !== 0;
 
-    this.verticalVel = this.gravityEnabled && !this.stepUpHold.active ? this.verticalVel + GRAVITY * dtSec : 0;
+    let traversal = this.traversal;
+    this.verticalVel = this.gravityEnabled && !traversal ? this.verticalVel + GRAVITY * dtSec : 0;
 
     // Reads the previous step's sweep, so it runs before the jump: a
     // freshly landed step that also jumps gets its jump back.
@@ -206,9 +224,8 @@ export class TsSimCore implements SimCore {
       }
     }
 
-    if (input.jump && this.jumpsRemaining > 0 && this.gravityEnabled) {
+    if (input.jump && this.jumpsRemaining > 0 && this.gravityEnabled && !traversal) {
       this.verticalVel = jumpVelocity;
-      this.stepUpHold.reset();
       if (!this.airborne) {
         this.airVel = { x: dir.x * speed, z: dir.z * speed };
       }
@@ -223,39 +240,56 @@ export class TsSimCore implements SimCore {
     const moveX = isAirborne ? this.airVel.x * dtSec : dir.x * speed * dtSec;
     const moveZ = isAirborne ? this.airVel.z * dtSec : dir.z * speed * dtSec;
 
-    const holdSupported = !this.stepUpHold.active || hasSupport(this.stepUpProbe);
-    const corrected = this.sweep(moveX, moveZ, dtSec);
-    this.stepUpHold.update(
-      Math.hypot(corrected.x, corrected.z),
-      intendsMove ? Math.hypot(moveX, moveZ) : 0,
-      this.controller.computedGrounded(),
-      holdSupported,
-    );
+    let progress = 1;
+    let horizBlocked = false;
+    let delta: Vec3 = { x: 0, y: 0, z: 0 };
+    let bumps: SimStepResult['bumps'] = [];
+    if (!traversal) {
+      const corrected = this.sweep({ x: moveX, y: this.verticalVel * dtSec, z: moveZ });
 
-    // Lifted over a ledge rather than falling. Unlike bots, only a falling
-    // speed resets: a jump's ascent also moves up and must survive.
-    if (this.verticalVel < 0 && corrected.y >= 0) {
-      this.verticalVel = 0;
-    }
-
-    const { touching, bumps } = this.colliders.edgeTriggeredBumps(this.controller, this.bumpingPeers);
-    this.bumpingPeers = touching;
-
-    const progress = horizontalProgress(corrected, { x: moveX, z: moveZ });
-    let horizBlocked = intendsMove && progress < 1 - movementBlockThreshold;
-    let delta = corrected;
-
-    // Characters are not stairs: blocked by a peer, bump instead of climbing it.
-    if (horizBlocked && this.bumpingPeers.size === 0 && this.controller.computedGrounded() && this.verticalVel <= 0) {
-      const hop = tryStepUp(this.stepUpProbe, moveX, moveZ);
-      if (hop) {
-        delta = hop;
-        horizBlocked = false;
+      // Lifted over a ledge rather than falling. Unlike bots, only a falling
+      // speed resets: a jump's ascent also moves up and must survive.
+      if (this.verticalVel < 0 && corrected.y >= 0) {
         this.verticalVel = 0;
-        this.stepUpHold.begin();
       }
-      // The probe sweeps overwrote the controller state the next step's grounded check reads.
-      this.sweep(moveX, moveZ, dtSec);
+
+      const contacts = this.colliders.edgeTriggeredBumps(this.controller, this.bumpingPeers);
+      this.bumpingPeers = contacts.touching;
+      bumps = contacts.bumps;
+
+      progress = horizontalProgress(corrected, { x: moveX, z: moveZ });
+      horizBlocked = intendsMove && progress < 1 - movementBlockThreshold;
+      delta = corrected;
+
+      // Characters are not stairs: blocked by a peer, bump instead of climbing it.
+      // Not while airborne: during the landing ease the move is the decaying
+      // air velocity, which would set a near-zero climb pace.
+      if (
+        horizBlocked &&
+        this.bumpingPeers.size === 0 &&
+        !isAirborne &&
+        this.controller.computedGrounded() &&
+        this.verticalVel <= 0
+      ) {
+        const path = tryStepUp(this.stepUpProbe, moveX, moveZ);
+        // The probe sweeps overwrote the controller state the next step's grounded check reads.
+        this.sweep({ x: moveX, y: this.verticalVel * dtSec, z: moveZ });
+        if (path) {
+          const climbSpeed = (Math.hypot(moveX, moveZ) / dtSec) * stepUpSpeedFactor;
+          traversal = this.traversal = new StepUpTraversal(path, climbSpeed);
+        }
+      }
+    }
+    // `traversal` stays set for the rest of the step a climb ends on, so
+    // that step still broadcasts as climbing.
+    if (traversal) {
+      const climbed = stepTraversal(traversal, dtSec, (d) => this.sweep(d));
+      delta = climbed.delta;
+      horizBlocked = false;
+      this.verticalVel = 0;
+      if (climbed.ended) {
+        this.traversal = null;
+      }
     }
 
     const t = this.body.translation();
@@ -274,8 +308,9 @@ export class TsSimCore implements SimCore {
       ) !== null;
     // The spawn floor gives baked maps, whose floors aren't instances, a finite backstop.
     const respawnAt =
-      shouldRespawnFalling(this.verticalVel, hasFloorUnderneath) ||
-      newPos.y < respawnThreshold(this.worldObjects, input.spawnPoints)
+      !traversal &&
+      (shouldRespawnFalling(this.verticalVel, hasFloorUnderneath) ||
+        newPos.y < respawnThreshold(this.worldObjects, input.spawnPoints))
         ? pickRespawnPosition(input.spawnPoints)
         : null;
     if (respawnAt) {
@@ -286,15 +321,18 @@ export class TsSimCore implements SimCore {
     this.body.setNextKinematicTranslation(newPos);
     this.commit();
 
-    const walking = intendsMove && !horizBlocked;
+    const climb = traversal ? climbBroadcast(traversal.velocity, climbAnimFactor, input.yaw) : null;
+    const walking = (intendsMove && !horizBlocked) || climb !== null;
     return {
       newPos,
       broadcastVel: isAirborne
         ? { x: this.airVel.x, y: 0, z: this.airVel.z }
-        : walking
-          ? { x: dir.x * speed * progress, y: 0, z: dir.z * speed * progress }
-          : { x: 0, y: 0, z: 0 },
-      broadcastYaw: input.yaw,
+        : climb
+          ? climb.vel
+          : walking
+            ? { x: dir.x * speed * progress, y: 0, z: dir.z * speed * progress }
+            : { x: 0, y: 0, z: 0 },
+      broadcastYaw: climb ? climb.yaw : input.yaw,
       moved: isAirborne || walking,
       animState: walking ? (input.running ? 'run' : 'walk') : 'idle',
       velY: this.verticalVel,
@@ -306,12 +344,12 @@ export class TsSimCore implements SimCore {
     };
   }
 
-  private sweep(moveX: number, moveZ: number, dtSec: number): Vec3 {
+  private sweep(desired: Vec3): Vec3 {
     // EXCLUDE_SENSORS: the query pipeline would otherwise treat the
     // invisible proximity rings as solid.
     this.controller.computeColliderMovement(
       this.bodyCollider,
-      { x: moveX, y: this.verticalVel * dtSec, z: moveZ },
+      desired,
       RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
     );
     const c = this.controller.computedMovement();

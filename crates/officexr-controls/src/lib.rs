@@ -118,6 +118,8 @@ pub struct Controls {
     /// Bevy joystick overwrites it each frame unless `joystick` is [`JoystickKind::Dom`].
     pub stick: Vec2,
     pub joystick: JoystickKind,
+    /// On, a finger dragging on the view no longer turns it.
+    pub look_locked: bool,
     follow: Option<Vec3>,
     look: Look,
     rig: Rig,
@@ -139,6 +141,7 @@ impl Default for Controls {
             focus: None,
             stick: Vec2::ZERO,
             joystick: JoystickKind::default(),
+            look_locked: false,
             follow: None,
             look: Look::default(),
             rig: Rig::default(),
@@ -296,6 +299,7 @@ impl Plugin for ControlsPlugin {
             .init_resource::<ShortcutKeys>()
             .init_resource::<WindowInputs>()
             .init_resource::<TouchState>()
+            .init_resource::<Turns>()
             .add_message::<PointerLockLost>()
             .add_message::<ViewPointerInput>()
             .configure_sets(Update, ControlsSystems.before(SceneSystems))
@@ -304,7 +308,7 @@ impl Plugin for ControlsPlugin {
                 Update,
                 (
                     track_shortcuts,
-                    pointer_lock,
+                    desktop_turn,
                     gather_mouse,
                     read_touches,
                     steer,
@@ -398,19 +402,48 @@ impl MovementKeys<'_> {
     }
 }
 
-/// Locks the pointer to a window on a click there while a view on it wants
-/// mouse-look, and frees it on Esc, a lost lock, or once none does.
-// Each parameter is one input to the lock decision; bundling them would only rename them.
+/// CSS px a left drag travels before it turns the view; `desktopLook.ts`'s
+/// `LOOK_DRAG_THRESHOLD_PX`, which tells a click from a drag on the page side.
+pub const LOOK_DRAG_THRESHOLD_PX: f32 = 4.0;
+
+/// One window's mouse-look: the right button held, or a left drag past
+/// [`LOOK_DRAG_THRESHOLD_PX`], turns the view until every button lets go.
+#[derive(Default)]
+struct Turn {
+    held: Vec<MouseButton>,
+    /// CSS px the mouse moved since the first button went down.
+    travel: Vec2,
+    turning: bool,
+}
+
+/// Each window's turn, while a view on it wants mouse-look.
+#[derive(Resource, Default)]
+struct Turns(HashMap<Entity, Turn>);
+
+impl Turns {
+    fn turning(&self, window: Entity) -> bool {
+        self.0.get(&window).is_some_and(|t| t.turning)
+    }
+}
+
+/// Turns the view while the right button is held or the left one drags, on a
+/// window a yaw-pitch view wants mouse-look on; the cursor is free otherwise.
+/// The pointer is locked only while turning, and Esc or a lost lock frees it
+/// without ending the turn, which then reads the unlocked motion.
+// Each parameter is one input to the turn; bundling them would only rename them.
 #[allow(clippy::too_many_arguments)]
-fn pointer_lock(
+fn desktop_turn(
     hub: Res<ControlsHub>,
     claimed: Res<PointerClaimed>,
+    mut turns: ResMut<Turns>,
     mut lost: MessageReader<PointerLockLost>,
     mut presses: MessageReader<MouseButtonInput>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    motion: Res<AccumulatedMouseMotion>,
     keys: Res<ButtonInput<KeyCode>>,
     views: Query<&View>,
     primary: Option<Single<Entity, With<PrimaryWindow>>>,
-    mut cursors: Query<(Entity, &mut CursorOptions)>,
+    mut windows: Query<(Entity, &Window, &mut CursorOptions)>,
 ) {
     let primary = primary.map(|p| *p);
     let hub = hub.lock();
@@ -422,20 +455,51 @@ fn pointer_lock(
         })
         .filter_map(|v| window_of(v, primary))
         .collect();
-    let clicked: Vec<Entity> = presses
-        .read()
-        .filter(|p| p.button == MouseButton::Left && p.state == ButtonState::Pressed)
-        .map(|p| p.window)
+    turns.0.retain(|window, _| wants_look.contains(window));
+    let was_turning: HashSet<Entity> = turns
+        .0
+        .iter()
+        .filter_map(|(window, t)| t.turning.then_some(*window))
         .collect();
+    for press in presses.read() {
+        let button = press.button;
+        if !matches!(button, MouseButton::Left | MouseButton::Right)
+            || !wants_look.contains(&press.window)
+        {
+            continue;
+        }
+        let turn = turns.0.entry(press.window).or_default();
+        if press.state == ButtonState::Released {
+            turn.held.retain(|b| *b != button);
+        } else if !(claimed.0 && button == MouseButton::Left) {
+            if turn.held.is_empty() {
+                turn.travel = Vec2::ZERO;
+            }
+            if !turn.held.contains(&button) {
+                turn.held.push(button);
+            }
+            turn.turning |= button == MouseButton::Right;
+        }
+    }
     let lost = lost.read().count() > 0;
-    for (window, mut cursor) in &mut cursors {
-        let wanted = wants_look.contains(&window);
-        if wanted && !claimed.0 && clicked.contains(&window) {
-            // Set even when already locked: the browser frees the lock on its
-            // own, and only a changed `CursorOptions` asks for it again.
+    let freed = lost || keys.just_pressed(KeyCode::Escape);
+    for (entity, window, mut cursor) in &mut windows {
+        if let Some(turn) = turns.0.get_mut(&entity) {
+            // A release outside the window may never arrive.
+            turn.held.retain(|b| buttons.pressed(*b));
+            if !turn.held.is_empty() {
+                turn.travel += motion.delta / window.scale_factor();
+            }
+            turn.turning = !turn.held.is_empty()
+                && (turn.turning
+                    || (turn.held.contains(&MouseButton::Left)
+                        && turn.travel.length() >= LOOK_DRAG_THRESHOLD_PX));
+        }
+        let turning = turns.turning(entity);
+        if turning && !was_turning.contains(&entity) {
             cursor.grab_mode = CursorGrabMode::Locked;
             cursor.visible = false;
-        } else if is_locked(&cursor) && (lost || !wanted || keys.just_pressed(KeyCode::Escape)) {
+        } else if is_locked(&cursor) && (freed || !turning) {
             cursor.grab_mode = CursorGrabMode::None;
             cursor.visible = true;
         }
@@ -445,7 +509,8 @@ fn pointer_lock(
 /// Mouse input for one window this frame, in CSS px.
 #[derive(Default)]
 struct WindowInput {
-    locked: bool,
+    /// Mouse-look is turning the view on this window.
+    turning: bool,
     scale_factor: f32,
     motion: Vec2,
     /// Buttons that went down here, on nothing a picker claimed.
@@ -478,12 +543,13 @@ impl WindowInputs {
 fn gather_mouse(
     mut inputs: ResMut<WindowInputs>,
     mut claimed: ResMut<PointerClaimed>,
+    turns: Res<Turns>,
     buttons: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
     mut presses: MessageReader<MouseButtonInput>,
     mut wheels: MessageReader<MouseWheel>,
     mut fed: MessageReader<ViewPointerInput>,
-    windows: Query<(Entity, &Window, &CursorOptions)>,
+    windows: Query<(Entity, &Window)>,
     views: Query<&View>,
 ) {
     let claimed = std::mem::take(&mut claimed.0);
@@ -496,9 +562,9 @@ fn gather_mouse(
     let held: Vec<MouseButton> = buttons.get_pressed().copied().collect();
     inputs.windows = windows
         .iter()
-        .map(|(entity, window, cursor)| {
+        .map(|(entity, window)| {
             let input = WindowInput {
-                locked: is_locked(cursor),
+                turning: turns.turning(entity),
                 scale_factor: window.scale_factor(),
                 motion: motion.delta / window.scale_factor(),
                 held: held.clone(),
@@ -659,7 +725,7 @@ fn steer(
 /// Applies a window's mouse input to a view on it.
 fn mouse(controls: &mut Controls, input: &WindowInput, held: Modifiers) {
     let mode = controls.mode;
-    if input.locked && is_yaw_pitch_mode(mode) {
+    if input.turning && is_yaw_pitch_mode(mode) {
         controls.look_by(input.motion, MOUSE_SENSITIVITY);
     }
     let orbit = &controls.config.orbit;
@@ -848,14 +914,18 @@ mod tests {
         changes.0 += u32::try_from(changed.iter().count()).unwrap();
     }
 
+    fn motion(app: &mut App, delta: Vec2) {
+        app.world_mut().write_message(MouseMotion { delta });
+    }
+
     #[test]
-    fn a_click_locks_the_pointer_and_a_lost_lock_shows_the_cursor_again() {
+    fn a_right_press_locks_the_pointer_until_released_and_a_lost_lock_shows_the_cursor_again() {
         let (mut app, id) = app();
         app.init_resource::<CursorChanges>()
             .add_systems(Last, count_cursor_changes);
         controls(&app, id, |c| c.mode = CameraMode::FirstPerson);
 
-        click(&mut app);
+        press(&mut app, MouseButton::Right, ButtonState::Pressed);
         app.update();
         let locked = cursor(&mut app);
         assert_eq!(locked.grab_mode, CursorGrabMode::Locked);
@@ -868,22 +938,70 @@ mod tests {
         assert_eq!(freed.grab_mode, CursorGrabMode::None);
         assert!(freed.visible);
         assert!(app.world().resource::<CursorChanges>().0 > before);
+
+        // The turn outlives the lost lock, on the unlocked motion.
+        let yaw = controls(&app, id, |c| c.look.yaw);
+        motion(&mut app, Vec2::new(40.0, 0.0));
+        app.update();
+        assert_ne!(controls(&app, id, |c| c.look.yaw), yaw);
+
+        press(&mut app, MouseButton::Right, ButtonState::Released);
+        app.update();
+        let yaw = controls(&app, id, |c| c.look.yaw);
+        motion(&mut app, Vec2::new(40.0, 0.0));
+        app.update();
+        assert_eq!(controls(&app, id, |c| c.look.yaw), yaw);
     }
 
     #[test]
-    fn esc_frees_the_pointer_and_a_claimed_click_doesnt_lock_it() {
+    fn a_left_click_leaves_the_cursor_free_and_a_left_drag_turns_until_released() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| {
+            c.mode = CameraMode::FirstPerson;
+            c.set_follow(Vec3::ZERO, 0.0);
+        });
+        click(&mut app);
+        app.update();
+        assert_eq!(cursor(&mut app).grab_mode, CursorGrabMode::None);
+
+        // Under the threshold in CSS px: still a click.
+        motion(
+            &mut app,
+            Vec2::new(LOOK_DRAG_THRESHOLD_PX * SCALE * 0.5, 0.0),
+        );
+        app.update();
+        assert_eq!(controls(&app, id, |c| c.look.yaw), 0.0);
+        assert_eq!(cursor(&mut app).grab_mode, CursorGrabMode::None);
+
+        motion(&mut app, Vec2::new(LOOK_DRAG_THRESHOLD_PX * SCALE, 0.0));
+        app.update();
+        assert_eq!(cursor(&mut app).grab_mode, CursorGrabMode::Locked);
+        assert_ne!(controls(&app, id, |c| c.look.yaw), 0.0);
+
+        press(&mut app, MouseButton::Left, ButtonState::Released);
+        app.update();
+        assert_eq!(cursor(&mut app).grab_mode, CursorGrabMode::None);
+    }
+
+    #[test]
+    fn esc_frees_the_pointer_and_a_claimed_click_doesnt_turn() {
         let (mut app, id) = app();
         controls(&app, id, |c| c.mode = CameraMode::FirstPerson);
-        click(&mut app);
+        press(&mut app, MouseButton::Right, ButtonState::Pressed);
         app.update();
         key(&mut app, KeyCode::Escape, ButtonState::Pressed);
         app.update();
         assert_eq!(cursor(&mut app).grab_mode, CursorGrabMode::None);
+        press(&mut app, MouseButton::Right, ButtonState::Released);
+        app.update();
 
         app.world_mut().resource_mut::<PointerClaimed>().0 = true;
         click(&mut app);
         app.update();
+        motion(&mut app, Vec2::new(100.0, 0.0));
+        app.update();
         assert_eq!(cursor(&mut app).grab_mode, CursorGrabMode::None);
+        assert_eq!(controls(&app, id, |c| c.look.yaw), 0.0);
         assert!(!app.world().resource::<PointerClaimed>().0);
     }
 
@@ -894,12 +1012,10 @@ mod tests {
             c.mode = CameraMode::FirstPerson;
             c.set_follow(Vec3::ZERO, 0.0);
         });
-        click(&mut app);
+        press(&mut app, MouseButton::Right, ButtonState::Pressed);
         app.update();
         let mut expected = controls(&app, id, |c| c.look);
-        app.world_mut().write_message(MouseMotion {
-            delta: Vec2::new(40.0, 20.0),
-        });
+        motion(&mut app, Vec2::new(40.0, 20.0));
         app.update();
         let d = Vec2::new(40.0, 20.0) / SCALE * -MOUSE_SENSITIVITY;
         apply_look_delta(CameraMode::FirstPerson, d.x, d.y, &mut expected);
@@ -1437,6 +1553,77 @@ mod tests {
         let (zoom, after) = controls(&app, id, |c| (c.look.offsets.zoom, c.look.yaw));
         assert!((zoom - 2.0).abs() < 1e-5);
         assert_eq!(after, yaw);
+    }
+
+    #[test]
+    fn a_locked_look_ignores_a_dragging_finger() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| {
+            c.mode = CameraMode::FirstPerson;
+            c.look_locked = true;
+        });
+        let window = window(&mut app);
+        let at = Vec2::new(400.0, 200.0);
+        touch(&mut app, window, 1, TouchPhase::Started, at);
+        app.update();
+        touch(
+            &mut app,
+            window,
+            1,
+            TouchPhase::Moved,
+            at + Vec2::new(10.0, 0.0),
+        );
+        app.update();
+        assert_eq!(controls(&app, id, |c| c.look.yaw), 0.0);
+    }
+
+    #[test]
+    fn with_look_locked_a_finger_anywhere_floats_the_stick_and_never_looks() {
+        let (mut app, id) = app();
+        controls(&app, id, |c| {
+            c.mode = CameraMode::Fixed;
+            c.look_locked = true;
+        });
+        let window = window(&mut app);
+        let at = Vec2::new(400.0, 200.0);
+        touch(&mut app, window, 0, TouchPhase::Started, at);
+        app.update();
+        touch(
+            &mut app,
+            window,
+            0,
+            TouchPhase::Moved,
+            at + Vec2::new(0.0, -32.0),
+        );
+        app.update();
+        let (offsets, stick) = controls(&app, id, |c| (c.look.offsets, c.stick));
+        assert_eq!(offsets.fixed_azimuth_offset_rad, 0.0);
+        assert_eq!(
+            stick,
+            Vec2::new(0.0, 1.0),
+            "full forward from where the finger landed"
+        );
+
+        // A second finger turns the pair into a pinch.
+        touch(
+            &mut app,
+            window,
+            1,
+            TouchPhase::Started,
+            at + Vec2::new(100.0, -32.0),
+        );
+        app.update();
+        touch(
+            &mut app,
+            window,
+            1,
+            TouchPhase::Moved,
+            at + Vec2::new(200.0, -32.0),
+        );
+        app.update();
+        let (zoom, stick) = controls(&app, id, |c| (c.look.offsets.zoom, c.stick));
+        assert!((zoom - 2.0).abs() < 1e-5);
+        assert_eq!(stick, Vec2::ZERO);
     }
 
     #[test]

@@ -167,7 +167,57 @@ export type Overlay = { tag: string; pickable?: boolean } & (
   | { kind: 'zone'; shape: ZoneShape; y: number; color: HexColor }
   /** White text centred on `at`. */
   | { kind: 'label'; at: Vec3; text: string }
+  /**
+   * A translucent column rising `height` (default 6 m) from the floor point `at`, a ring at its
+   * foot and, unless empty, `label` on a `color` pill over its top. Moving it or changing the
+   * label's text updates it in place.
+   */
+  | { kind: 'beacon'; at: Vec3; color: HexColor; label?: string; height?: number }
 );
+
+/** What the play camera must keep in sight this frame (`setOcclusion`). */
+export interface OcclusionInput {
+  /** World points the camera must see, e.g. the local player's head and chest. */
+  targets: Vec3[];
+  /** Object ids that never occlude: the seat, ridden rack or pool the player is in. */
+  ignore?: string[];
+  /** A point the player occupies (seat, ride, pool): an object holding it never occludes. */
+  anchor?: Vec3 | null;
+  /** The local player's feet: set, the cover overhead is cut away around them (roof cutaway). */
+  cutaway?: Vec3 | null;
+  /** Other players in a seat, ride or pool: `occlusionStats` names those only that hides. */
+  occupants?: { id: string; targets: Vec3[]; ignore?: string[]; anchor?: Vec3 | null }[];
+}
+
+export interface OcclusionStats {
+  /** Objects and layout meshes drawn faded or cut away. */
+  fading: number;
+  /** Those cut away over the player. */
+  cutaway: number;
+  /** The `occupants` nothing but their own seat, ride or pool hides: their silhouette shouldn't show. */
+  silhouetteSuppressed: string[];
+}
+
+/** A pool's water, as `motion/water.ts`'s `WaterVolume`. */
+export interface WaterVolumeInput {
+  id: string;
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  baseY?: number;
+  surfaceY: number;
+}
+
+/** A desk screen to light (`setScreens`). */
+export interface ScreenInput {
+  /** The object instance that is the screen. */
+  id: string;
+  /** 0 off to 1 fully on. */
+  glow: number;
+  /** World XZ from the screen toward its chair: the model's broad face pointing this way lights. */
+  toward: [number, number];
+}
 
 /** The plane `normal · p + constant = 0`. */
 export interface Plane {
@@ -192,6 +242,8 @@ export interface CameraConfig {
     distanceM?: number | null;
     /** A world point to orbit and look at instead of the followed player. */
     lookAt?: [number, number, number] | null;
+    /** Keeps the followed player's chest at the screen centre, ignoring the conversation. Ignored with `lookAt`. */
+    centred?: boolean;
   };
   /** The orbit mode. The defaults are the scene editor's. */
   orbit?: {
@@ -231,6 +283,28 @@ export interface MoveIntent {
   deflection: number;
 }
 
+/**
+ * A one-off effect in `setPlayers`' `effects`, keyed by `id` across frames and drawn as a function
+ * of its `age` (seconds); leave it out once done (a spark at 0.65 s, a bolt 0.9 s after it lands).
+ */
+export type Effect =
+  /** A poke's burst at `at`, facing the camera. */
+  | { kind: 'pokeSpark'; id: number; at: Vec3; age: number }
+  /** A spell bolt from `origin` along the unit `dir`, landing `distance` metres on at `speed` m/s, then bursting. */
+  | { kind: 'bolt'; id: number; origin: Vec3; dir: Vec3; distance: number; speed: number; color: HexColor; fire: boolean; age: number };
+
+/** Where a player's overhead stack stands, as `playerAnchors` reports it. */
+export interface PlayerAnchor {
+  id: string;
+  /** CSS pixels from the canvas's top left of the point just over the head; `null` behind the camera. */
+  x: number | null;
+  y: number | null;
+  /** The character model's measured height (metres); 2.3 until it has loaded. */
+  height: number;
+  /** The ping bell shows just over the head, so a stack drawn there should sit above it. */
+  bell: boolean;
+}
+
 /** The wasm-bindgen module of one backend, already instantiated by `loadRenderer`. */
 export interface RendererModule {
   /**
@@ -256,8 +330,20 @@ export interface RendererModule {
    * omitted) multiplies its clip rate: a walk or run plays at its ground speed over the clip's authored ground
    * speed, so at 1 the planted foot doesn't slide. `paused` draws every player in its bind pose without name tags,
    * as a `setWorld` mugshot does.
+   *
+   * Optional per player, each off when omitted: `clip` (`{ name, speed }`, a rig clip looped over the motion's, as a
+   * swim stroke or a ride's), `body` (`{ lift, forward, pitch, roll, scale }`, the body's offset from its feet in the
+   * avatar's frame), `vehicle` (a model path drawn under the rider), `wand` (held in the right hand), `pokes` and
+   * `casts` (each increase points or waves the wand once), `tint` (`{ color: HexColor, strength, glow }`, a spell's
+   * colour), `aura` (`'smoke' | 'sparkles'`), `frozen` (grey, translucent, rimmed, no tag, bell or reactions: an away
+   * claimant at their desk) and `silhouette` (a `HexColor` the avatar shows through whatever hides it in).
+   * Optional on the whole: `turnSpeed` (rad/s an avatar turns toward its yaw; omitted snaps), `hostTags` (the page
+   * draws name tags from `playerAnchors`, so Bevy draws none and hangs the ping bell just over the head) and
+   * `effects` (`Effect[]`).
    */
   setPlayers(id: ViewId, players: unknown): void;
+  /** Each drawn player's overhead anchor as of the view's last frame. Throws for a destroyed view. */
+  playerAnchors(id: ViewId): PlayerAnchor[];
   setCamera(id: ViewId, pose: CameraPose): void;
   /** `ready` once every model has loaded and settled; `pending` counts the models still loading. */
   isReady(id: ViewId): { ready: boolean; pending: number };
@@ -268,7 +354,7 @@ export interface RendererModule {
    * Sends `callback` the view's pick events, from pointer events on its canvas, replacing any callback
    * it had; `null` stops them. A view without a callback does no picking. A throwing callback is logged
    * with `console.error` and the frame's other events are still delivered. Throws for a destroyed view.
-   * A left press on any target but the ground doesn't take the controls' pointer lock,
+   * A left press on any target but the ground doesn't start the controls' mouse-look drag,
    * unless `bellClaimsOnly`: then only a press on a ping bell doesn't.
    */
   onPick(id: ViewId, callback: ((event: PickEvent) => void) | null, options?: { bellClaimsOnly?: boolean }): void;
@@ -285,6 +371,22 @@ export interface RendererModule {
    */
   setOverlays(id: ViewId, overlays: Overlay[]): void;
   /**
+   * Where the view's camera sees `point`, in CSS pixels from its canvas's top left, from the pose last
+   * drawn (as `rayAtScreen`); `null` when it is behind the camera.
+   */
+  projectToScreen(id: ViewId, point: Vec3): [number, number] | null;
+  /**
+   * Objects and baked-layout meshes crossing the camera's line of sight to `targets` fade, and with
+   * `cutaway` the roof over the player is cut away; send it every frame. `null` restores them all.
+   */
+  setOcclusion(id: ViewId, input: OcclusionInput | null): void;
+  /** What occlusion did on the view's last frame. */
+  occlusionStats(id: ViewId): OcclusionStats;
+  /** Replaces the view's pools' water surfaces. */
+  setWater(id: ViewId, volumes: WaterVolumeInput[]): void;
+  /** Replaces the view's lit desk screens; a screen left out is off. Send it as their glow changes. */
+  setScreens(id: ViewId, screens: ScreenInput[]): void;
+  /**
    * Replaces the view's proximity output, drawn as ground discs under the view's
    * players and its meeting-area glow. The glow eases toward it, so send it every frame.
    */
@@ -294,8 +396,10 @@ export interface RendererModule {
   // `setCamera`, in every frame its mode has something to frame. Top-down, free-fly and orbit always do;
   // first-person, third-person and fixed need a follow target (fixed, or its `lookAt`), and until
   // then `setCamera` still applies. Keys are heard page-wide and reach every view with input
-  // enabled; pointer lock and mouse-look reach only a view drawing into a Bevy window (with WebGL2,
-  // the primary canvas's). Drags and the wheel reach every view from its own canvas.
+  // enabled; mouse-look reaches only a view drawing into a Bevy window (with WebGL2, the primary
+  // canvas's): in first- and third-person the right button held, or a left drag past 4 CSS px, turns
+  // the view, with the pointer locked only while turning. Drags and the wheel reach every view from
+  // its own canvas.
   /** The movement since the last call, to step the sim with. */
   takeIntent(id: ViewId): MoveIntent;
   /** The local player's body root and yaw, after stepping the sim. */
@@ -330,6 +434,8 @@ export interface RendererModule {
    * Returns whether the view can show the Bevy stick: only the primary canvas's view can.
    */
   setJoystickKind(id: ViewId, kind: JoystickKind): boolean;
+  /** On, a finger dragging on the view no longer turns it; the mouse still does. */
+  setLookLocked(id: ViewId, locked: boolean): void;
 }
 
 export type JoystickKind = 'bevy' | 'dom';

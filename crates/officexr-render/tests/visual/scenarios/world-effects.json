@@ -1,0 +1,561 @@
+{
+  "size": [
+    800,
+    480
+  ],
+  "instances": [
+    {
+      "kindId": "stone",
+      "position": [
+        -12,
+        -4,
+        -12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        -12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        -12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        -12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        -12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        8,
+        -4,
+        -12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        12,
+        -4,
+        -12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -12,
+        -4,
+        -8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        -8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        -8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        -8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        -8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        8,
+        -4,
+        -8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        12,
+        -4,
+        -8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -12,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        8,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        12,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -12,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        8,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        12,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -12,
+        -4,
+        4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        8,
+        -4,
+        4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        12,
+        -4,
+        4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -12,
+        -4,
+        8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        8,
+        -4,
+        8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        12,
+        -4,
+        8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -12,
+        -4,
+        12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        8,
+        -4,
+        12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        12,
+        -4,
+        12
+      ]
+    },
+    {
+      "kindId": "prop_pool",
+      "position": [
+        2,
+        0,
+        -2
+      ]
+    },
+    {
+      "kindId": "colored_block_blue",
+      "position": [
+        -10,
+        0,
+        -2
+      ]
+    },
+    {
+      "kindId": "colored_block_blue",
+      "position": [
+        -10,
+        0,
+        4
+      ]
+    }
+  ],
+  "characters": [
+    {
+      "character": "Knight",
+      "name": "",
+      "spawn": [
+        -1,
+        2,
+        -4
+      ],
+      "moves": [
+        {
+          "frames": 30
+        }
+      ]
+    }
+  ],
+  "water": [
+    {
+      "id": "i49",
+      "minX": 1.4,
+      "maxX": 5.1,
+      "minZ": -0.6,
+      "maxZ": 3.1,
+      "baseY": 0,
+      "surfaceY": 0.38
+    }
+  ],
+  "screens": [
+    {
+      "id": "i50",
+      "glow": 1,
+      "toward": [
+        0,
+        -1
+      ]
+    },
+    {
+      "id": "i51",
+      "glow": 0.4,
+      "toward": [
+        1,
+        0
+      ]
+    }
+  ],
+  "overlays": [
+    {
+      "tag": "mission-marker",
+      "kind": "beacon",
+      "at": [
+        -1,
+        0,
+        2
+      ],
+      "color": "#0a84ff",
+      "label": "Mission: Stand-up - 6 m",
+      "pickable": false
+    },
+    {
+      "tag": "placement-ghost",
+      "kind": "ghost",
+      "objects": [
+        {
+          "id": "__ghost__",
+          "kindId": "prop_scooter_rack",
+          "position": [
+            12,
+            0,
+            8
+          ],
+          "yawDeg": 90
+        }
+      ],
+      "opacity": 0.55,
+      "tint": "#2ee59d",
+      "pickable": false
+    },
+    {
+      "tag": "placement-target",
+      "kind": "outline",
+      "boxes": [
+        {
+          "min": [
+            1,
+            0,
+            -1
+          ],
+          "max": [
+            5.5,
+            0.45,
+            3.5
+          ]
+        }
+      ],
+      "color": "#ffd23fe6"
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "position": [
+        0,
+        7,
+        -11
+      ],
+      "lookAt": [
+        0,
+        0.5,
+        1
+      ],
+      "fov": 50
+    },
+    {
+      "name": "top",
+      "position": [
+        0,
+        16,
+        -0.01
+      ],
+      "lookAt": [
+        0,
+        0,
+        0
+      ],
+      "fov": 50
+    }
+  ],
+  "captures": [
+    29
+  ],
+  "assert": [
+    {
+      "type": "feetOn",
+      "frame": 29,
+      "surfaceY": 0
+    }
+  ]
+}

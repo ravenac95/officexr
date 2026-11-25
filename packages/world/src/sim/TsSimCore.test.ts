@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import type { ObjectInstance, Vec3 } from '@officexr/sdk';
+import { STEP_UP_SPEED_FACTOR_DEFAULT, type ObjectInstance, type Vec3 } from '@officexr/sdk';
 import { TsSimCore } from './TsSimCore.ts';
 import { recordTrace, type SimMap, type SimTrace, type SimTraceFrame } from './trace.ts';
 import type { SimInput, SimKinds, SimStepResult } from './SimCore.ts';
@@ -67,6 +67,8 @@ const BASE: SimInput = {
     airControl: 0.2,
     maxJumps: 2,
     landingEaseMs: 120,
+    stepUpSpeedFactor: STEP_UP_SPEED_FACTOR_DEFAULT,
+    climbAnimFactor: 1,
   },
   spawnPoints: [SPAWN],
 };
@@ -112,7 +114,7 @@ const SCENARIOS: Record<string, Scenario> = {
   },
   'step-up-ledge': {
     map: mapOf(FLOOR, place('ledge', { x: 3, y: 0, z: -20 })),
-    inputs: scenario(ON_FLOOR, (s) => frames(s, 90, EAST)),
+    inputs: scenario(ON_FLOOR, (s) => frames(s, 120, EAST)),
     check(outputs) {
       const end = last(outputs);
       expect(end.newPos.x).toBeGreaterThan(4);
@@ -284,74 +286,71 @@ describe('TsSimCore stair climb', () => {
   const walk = (sim: TsSimCore, speed: number, dir: { x: number; z: number }, jump = false) =>
     sim.step({ ...BASE, dir, speed, jump }).newPos;
 
-  /** Walks -X until the first hop, then `extra` more frames; returns the hop frame's pose. */
-  function walkToFirstHop(sim: TsSimCore, speed: number) {
+  /** Walks -X until a step starts rising; returns that step's result. */
+  function walkToClimb(sim: TsSimCore, speed: number) {
     let prev = sim.position();
     for (let i = 0; i < 4000; i++) {
-      const pos = walk(sim, speed, { x: -1, z: 0 });
-      if (pos.y - prev.y > 0.3) {
-        return pos;
+      const result = sim.step({ ...BASE, dir: { x: -1, z: 0 }, speed });
+      if (result.newPos.y - prev.y > 0.001) {
+        return result;
       }
-      prev = pos;
+      prev = result.newPos;
     }
-    throw new Error('never hopped');
+    throw new Error('never climbed');
   }
 
   for (const speed of [0.5, 1, 3]) {
-    it(`climbs 8 risers in 8 hops without sagging back at ${speed} m/s`, () => {
+    it(`climbs all 8 risers over several frames each, never dipping, at ${speed} m/s`, () => {
       const sim = stairs();
       let prev = sim.position();
-      let maxY = prev.y;
-      let hops = 0;
-      let maxStepX = 0;
+      let maxRisePerFrame = 0;
       for (let i = 0; i < 4000 && prev.x > 1; i++) {
         const pos = walk(sim, speed, { x: -1, z: 0 });
-        if (pos.y - prev.y > 0.3) {
-          hops++;
-          maxStepX = Math.max(maxStepX, Math.abs(pos.x - prev.x));
-        }
-        expect(pos.y).toBeGreaterThan(maxY - 0.02);
-        maxY = Math.max(maxY, pos.y);
+        expect(pos.y).toBeGreaterThanOrEqual(prev.y - 1e-6);
+        maxRisePerFrame = Math.max(maxRisePerFrame, pos.y - prev.y);
         prev = pos;
       }
       sim.dispose();
-      expect(hops).toBe(8);
-      expect(maxStepX).toBeLessThanOrEqual(speed / 60 + 0.01);
       expect(prev.y).toBeCloseTo(3.5, 1);
+      // Paced at speed × stepUpSpeedFactor along the path, never a one-frame hop.
+      expect(maxRisePerFrame).toBeLessThanOrEqual(speed * BASE.settings.stepUpSpeedFactor * BASE.dtSec + 1e-6);
     });
   }
 
-  it('lets a jump during the hold clear more than 0.5 m', () => {
+  it('broadcasts the climb: walking, scaled velocity and a yaw along it', () => {
     const sim = stairs();
-    const hop = walkToFirstHop(sim, 1);
-    let maxY = hop.y;
-    maxY = Math.max(maxY, walk(sim, 1, { x: -1, z: 0 }, true).y);
-    for (let i = 0; i < 20; i++) {
-      maxY = Math.max(maxY, walk(sim, 1, { x: -1, z: 0 }).y);
-    }
+    const climb = walkToClimb(sim, 1);
     sim.dispose();
-    expect(maxY - hop.y).toBeGreaterThan(0.5);
+    expect(climb.moved).toBe(true);
+    expect(climb.animState).toBe('walk');
+    expect(climb.broadcastYaw).toBeCloseTo(Math.PI / 2, 6);
+    expect(Math.hypot(climb.broadcastVel.x, climb.broadcastVel.z)).toBeCloseTo(
+      BASE.settings.stepUpSpeedFactor * BASE.settings.climbAnimFactor,
+      6,
+    );
   });
 
-  it('drops the ball soon after reversing off the tread mid-hold', () => {
+  it('ignores a jump pressed mid-climb and still finishes the riser', () => {
     const sim = stairs();
-    const hop = walkToFirstHop(sim, 1);
-    let y = hop.y;
-    for (let i = 0; i < 15; i++) {
-      y = walk(sim, 1, { x: 1, z: 0 }).y;
+    const start = walkToClimb(sim, 1).newPos;
+    let maxY = start.y;
+    for (let i = 0; i < 120; i++) {
+      maxY = Math.max(maxY, walk(sim, 1, { x: -1, z: 0 }, i === 0).y);
     }
     sim.dispose();
-    expect(y).toBeLessThan(hop.y - 0.3);
+    // A jump would add well over a riser on top of the climb.
+    expect(maxY).toBeLessThan(start.y + 2 * 0.5);
+    expect(maxY).toBeGreaterThan(start.y + 0.45);
   });
 
-  it('ends the hold when blocked sideways mid-hold', () => {
+  it('finishes a started riser after the input is released', () => {
     const sim = stairs();
-    const hop = walkToFirstHop(sim, 1);
-    let y = hop.y;
-    for (let i = 0; i < 30; i++) {
-      y = walk(sim, 1, { x: 0, z: 1 }).y;
+    const start = walkToClimb(sim, 1).newPos;
+    let y = start.y;
+    for (let i = 0; i < 120; i++) {
+      y = walk(sim, 1, { x: 0, z: 0 }).y;
     }
     sim.dispose();
-    expect(y).toBeLessThan(hop.y - 0.1);
+    expect(y).toBeGreaterThan(start.y + 0.45);
   });
 });

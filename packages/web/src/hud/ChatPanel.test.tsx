@@ -5,15 +5,29 @@ import { createMultiClientHarness } from '@officexr/sdk/test-harness';
 import { useWorldFocus } from '@officexr/world/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatPanel } from './ChatPanel';
+import { useRefocusOnMovementKey } from '../room/useRefocusOnMovementKey';
+import { escapeStack } from './escapeStack';
+import { useHotkey } from './useHotkey';
 import { AUTO_HIDE_MS } from './useChatVisibility';
+
+function RefocusProbe() {
+  useRefocusOnMovementKey();
+  return <aside data-studio-panel="true">chat title</aside>;
+}
 
 const PLACEHOLDER = 'Press Enter to chat';
 const input = () => screen.queryByPlaceholderText(PLACEHOLDER) as HTMLInputElement | null;
 const pressEnter = () => act(() => void fireEvent.keyDown(window, { key: 'Enter' }));
 
+beforeEach(() => {
+  vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }));
+});
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
+  localStorage.clear();
 });
 
 describe('chat between clients', () => {
@@ -76,15 +90,171 @@ describe('ChatPanel', () => {
     expect(store.getState().chat.map((m) => m.text)).toEqual(['hi']);
   });
 
-  it('Escape and Enter on an empty draft close the panel and return the keyboard', () => {
+  describe('/mission', () => {
+    const run = async (onMissionCommand: (title: string) => Promise<boolean>, text: string) => {
+      const store = createStore({ selfId: 'me', officeId: 'o' });
+      const actions = createActions(store, createBus());
+      render(<ChatPanel store={store} actions={actions} selfId="me" onMissionCommand={onMissionCommand} />);
+      pressEnter();
+      fireEvent.change(input()!, { target: { value: text } });
+      await act(async () => void fireEvent.keyDown(input()!, { key: 'Enter' }));
+      return store;
+    };
+
+    it('creates a mission instead of sending the text, and shows a system line', async () => {
+      const create = vi.fn(async () => true);
+      const store = await run(create, '/mission Prepare the demo');
+      expect(create).toHaveBeenCalledWith('Prepare the demo');
+      expect(store.getState().chat.map((m) => [m.authorId, m.text])).toEqual([['Missions', 'Added mission "Prepare the demo"']]);
+    });
+
+    it('says so when the mission could not be added', async () => {
+      const store = await run(async () => false, '/mission Prepare the demo');
+      expect(store.getState().chat.map((m) => m.text)).toEqual(['Could not add the mission']);
+    });
+
+    it('keeps the draft when the mission could not be added, and clears it when it was', async () => {
+      await run(async () => false, '/mission Prepare the demo');
+      expect(input()!.value).toBe('/mission Prepare the demo');
+      cleanup();
+      await run(async () => true, '/mission Prepare the demo');
+      expect(input()?.value ?? '').toBe('');
+    });
+
+    it('cuts the title at 140 code points without splitting a surrogate pair', async () => {
+      const create = vi.fn(async () => true);
+      await run(create, `/mission ${'a'.repeat(139)}😀😀`);
+      const title = (create.mock.calls[0] as unknown as [string])[0];
+      expect(Array.from(title)).toHaveLength(140);
+      expect(title.endsWith('😀')).toBe(true);
+      expect(title).not.toMatch(/[\ud800-\udbff]$/);
+    });
+
+    it('sends other text, and a bare /mission, as a normal message', async () => {
+      const create = vi.fn(async () => true);
+      const store = await run(create, '/mission');
+      expect(create).not.toHaveBeenCalled();
+      expect(store.getState().chat.map((m) => m.text)).toEqual(['/mission']);
+    });
+  });
+
+  it('Enter on an empty draft closes the panel and returns the keyboard', () => {
     const { focus } = setup();
-    pressEnter();
-    fireEvent.keyDown(input()!, { key: 'Escape' });
-    expect(input()).toBeNull();
-    expect(focus.result.current).toBe(true);
     pressEnter();
     fireEvent.keyDown(input()!, { key: 'Enter' });
     expect(input()).toBeNull();
+    expect(focus.result.current).toBe(true);
+  });
+
+  it('Escape returns the keyboard to the world and keeps the draft', () => {
+    const { focus, store } = setup();
+    pressEnter();
+    fireEvent.change(input()!, { target: { value: 'not yet' } });
+    fireEvent.keyDown(input()!, { key: 'Escape' });
+    expect(document.activeElement).not.toBe(input());
+    expect(focus.result.current).toBe(true);
+    expect(input()!.value).toBe('not yet');
+    expect(store.getState().chat).toEqual([]);
+  });
+
+  it('a second Escape, with the world focused, is left to the Esc stack', () => {
+    const fallback = vi.fn();
+    const off = escapeStack.setFallback(fallback);
+    setup();
+    pressEnter();
+    fireEvent.keyDown(input()!, { key: 'Escape' });
+    expect(fallback).not.toHaveBeenCalled();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(fallback).toHaveBeenCalledTimes(1);
+    off();
+  });
+
+  it('/ opens the input with a slash typed, and keeps an earlier draft in front of it', () => {
+    setup();
+    act(() => void fireEvent.keyDown(window, { key: '/' }));
+    expect(document.activeElement).toBe(input());
+    expect(input()!.value).toBe('/');
+  });
+
+  it('/ typed inside the input is plain text, and Enter or / do nothing while a dialog is open', () => {
+    setup();
+    pressEnter();
+    const e = new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true });
+    input()!.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(false);
+    expect(input()!.value).toBe('');
+    fireEvent.keyDown(input()!, { key: 'Escape' });
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    document.body.append(dialog);
+    act(() => void fireEvent.keyDown(window, { key: '/' }));
+    expect(document.activeElement).not.toBe(input());
+    dialog.remove();
+  });
+
+  it('keys typed in the input reach the text: movement keys and hotkeys stand down', () => {
+    const fired = vi.fn();
+    function Probe() {
+      useHotkey('m', fired);
+      useHotkey('t', fired);
+      useRefocusOnMovementKey();
+      return null;
+    }
+    setup();
+    render(<Probe />);
+    pressEnter();
+    for (const key of ['m', 't', 'w', 'a', 's', 'd', ' ', 'ArrowLeft']) {
+      const e = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      input()!.dispatchEvent(e);
+      expect(e.defaultPrevented, key).toBe(false);
+    }
+    expect(fired).not.toHaveBeenCalled();
+  });
+
+  it('leaves the held movement keys released while the input has focus', () => {
+    const { focus } = setup();
+    expect(focus.result.current).toBe(true);
+    pressEnter();
+    expect(focus.result.current).toBe(false);
+  });
+
+  it('Up and Down recall sent messages from an empty input, and are plain keys otherwise', () => {
+    setup();
+    pressEnter();
+    for (const text of ['first', 'second']) {
+      fireEvent.change(input()!, { target: { value: text } });
+      fireEvent.keyDown(input()!, { key: 'Enter' });
+      pressEnter();
+    }
+    fireEvent.keyDown(input()!, { key: 'ArrowUp' });
+    expect(input()!.value).toBe('second');
+    fireEvent.keyDown(input()!, { key: 'ArrowUp' });
+    expect(input()!.value).toBe('first');
+    fireEvent.keyDown(input()!, { key: 'ArrowDown' });
+    expect(input()!.value).toBe('second');
+    fireEvent.keyDown(input()!, { key: 'ArrowDown' });
+    expect(input()!.value).toBe('');
+    fireEvent.change(input()!, { target: { value: 'typing' } });
+    const e = new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true });
+    input()!.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(false);
+    expect(input()!.value).toBe('typing');
+  });
+
+  it('clicking the world leaves the input, keeps the draft, and the next movement key refocuses the world', () => {
+    const { focus } = setup();
+    render(<RefocusProbe />);
+    pressEnter();
+    fireEvent.change(input()!, { target: { value: 'draft' } });
+    input()!.focus();
+    act(() => void document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 })));
+    expect(document.activeElement).not.toBe(input());
+    expect(input()!.value).toBe('draft');
+    expect(focus.result.current).toBe(true);
+    act(() => void screen.getByText('chat title').dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 })));
+    expect(focus.result.current).toBe(false);
+    fireEvent.keyDown(document.body, { key: 'w' });
+    expect(focus.result.current).toBe(true);
   });
 
   it('ignores Enter while an IME composition is in progress', () => {
@@ -150,5 +320,130 @@ describe('ChatPanel', () => {
     expect(screen.queryByText(/msg-9$/)).toBeNull();
     expect(screen.getByText(/msg-10$/)).toBeTruthy();
     expect(screen.getByText(/msg-59$/)).toBeTruthy();
+  });
+
+  describe('fold', () => {
+    it('Collapse chat folds it to the chip, and a later message no longer peeks', () => {
+      const { remote } = setup();
+      remote('a');
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse chat' }));
+      expect(input()).toBeNull();
+      remote('b');
+      expect(input()).toBeNull();
+      expect(localStorage.getItem('officexr:fold:chat')).toBe('folded');
+    });
+
+    it('the chip opens the chat again, which unfolds it for the next message', () => {
+      const { remote } = setup();
+      pressEnter();
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse chat' }));
+      fireEvent.click(screen.getByRole('button', { name: /chat/i }));
+      expect(localStorage.getItem('officexr:fold:chat')).toBe('open');
+      fireEvent.keyDown(input()!, { key: 'Escape' });
+      remote('later');
+      expect(input()).not.toBeNull();
+    });
+
+    it('never shows an empty log: with no messages it says so in one line', () => {
+      setup();
+      pressEnter();
+      expect(screen.getByText('No messages yet.')).toBeTruthy();
+      expect(document.querySelector('.overflow-y-auto')).toBeNull();
+    });
+
+    it('the chip shows the newest message only while something is unread', () => {
+      const store = createStore({ selfId: 'me', officeId: 'o' });
+      const actions = createActions(store, createBus());
+      act(() => actions.applyRemoteChat({ id: '1', authorId: 'peer', text: 'hello there', t: 1 }));
+      localStorage.setItem('officexr:fold:chat', 'folded');
+      const view = render(<ChatPanel store={store} actions={actions} selfId="me" unread={0} />);
+      expect(view.getByRole('button', { name: 'Chat' }).textContent).not.toContain('hello there');
+      view.rerender(<ChatPanel store={store} actions={actions} selfId="me" unread={2} />);
+      const chip = view.getByRole('button', { name: 'Chat, 2 new' });
+      expect(chip.textContent).toContain('hello there');
+      expect(chip.textContent).toContain('2');
+    });
+  });
+
+  describe('portrait', () => {
+    const setupPortrait = () => {
+      const store = createStore({ selfId: 'me', officeId: 'o' });
+      const actions = createActions(store, createBus());
+      render(<ChatPanel store={store} actions={actions} selfId="me" portrait />);
+      return { store, actions };
+    };
+
+    it('shows nothing for a peek or while hidden: the preview is the ticker, outside this panel', () => {
+      const { actions } = setupPortrait();
+      expect(screen.queryByRole('dialog')).toBeNull();
+      act(() => actions.applyRemoteChat({ id: '1', authorId: 'peer', text: 'hi', t: 1 }));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(input()).toBeNull();
+    });
+
+    it('opens as a sheet on Enter, with the input focused', () => {
+      setupPortrait();
+      pressEnter();
+      expect(screen.getByRole('dialog', { name: 'Chat' })).toBeTruthy();
+      expect(document.activeElement).toBe(input());
+    });
+
+    it('keeps the keyboard open after sending, and on an empty Enter', () => {
+      const { store } = setupPortrait();
+      pressEnter();
+      fireEvent.change(input()!, { target: { value: 'one' } });
+      fireEvent.keyDown(input()!, { key: 'Enter' });
+      expect(store.getState().chat.map((m) => m.text)).toEqual(['one']);
+      expect(input()!.value).toBe('');
+      expect(screen.getByRole('dialog', { name: 'Chat' })).toBeTruthy();
+      fireEvent.keyDown(input()!, { key: 'Enter' });
+      expect(screen.getByRole('dialog', { name: 'Chat' })).toBeTruthy();
+    });
+
+    it('closes with Collapse chat and Escape', () => {
+      setupPortrait();
+      pressEnter();
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse chat' }));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      pressEnter();
+      fireEvent.keyDown(input()!, { key: 'Escape' });
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    it('sizes the sheet to the visible viewport so the keyboard cannot cover the input', () => {
+      vi.stubGlobal('visualViewport', Object.assign(new EventTarget(), { height: 320, offsetTop: 0 }));
+      Object.defineProperty(window, 'innerHeight', { value: 640, configurable: true });
+      setupPortrait();
+      pressEnter();
+      const sheet = screen.getByRole('dialog', { name: 'Chat' });
+      expect(sheet.style.bottom).toBe('320px');
+      expect(sheet.style.height).toContain('320px');
+    });
+  });
+});
+
+describe('ChatPanel muted senders', () => {
+  const setup = (hidden: string[]) => {
+    const store = createStore({ selfId: 'me', officeId: 'o' });
+    const actions = createActions(store, createBus());
+    const visibility = { mode: 'compose' as const, folded: false, compose: () => {}, peek: () => {}, hide: () => {}, collapse: () => {} };
+    render(<ChatPanel store={store} actions={actions} selfId="me" visibility={visibility} hiddenLogins={new Set(hidden)} />);
+    return actions;
+  };
+
+  it('hides messages from muted logins in every window of theirs, and shows the rest', () => {
+    const actions = setup(['ann@example.test']);
+    act(() => {
+      actions.applyRemoteChat({ id: 'm1', authorId: 'ann@example.test#a', text: 'from the muted one', t: 1 });
+      actions.applyRemoteChat({ id: 'm2', authorId: 'bob@example.test#a', text: 'from bob', t: 2 });
+    });
+    expect(screen.queryByText(/from the muted one/)).toBeNull();
+    expect(screen.getByText(/from bob/)).toBeTruthy();
+  });
+
+  it('shows everything when nobody is muted', () => {
+    const actions = setup([]);
+    act(() => actions.applyRemoteChat({ id: 'm1', authorId: 'ann@example.test#a', text: 'hi there', t: 1 }));
+    expect(screen.getByText(/hi there/)).toBeTruthy();
   });
 });

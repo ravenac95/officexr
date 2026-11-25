@@ -6,9 +6,17 @@ import bevy_pbr::render::{
 };
 import bevy_render::maths::PI;
 
+struct AvatarLook {
+    tint: vec4<f32>,
+    glow: f32,
+    desaturate: f32,
+    rim: vec4<f32>,
+}
+
 struct HemisphereIrradiance {
     sky: vec4<f32>,
     ground: vec4<f32>,
+    look: AvatarLook,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> hemisphere: HemisphereIrradiance;
@@ -21,6 +29,16 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         pbr_input.material.alpha_cutoff,
         pbr_input.material.base_color,
     );
+
+    // `Adventurer.tsx`'s spell tint: the colour factor lerped toward the tint.
+    let base = pbr_input.material.base_color.rgb * mix(vec3(1.0), hemisphere.look.tint.rgb, hemisphere.look.tint.a);
+    // `frozenLook.ts`: mostly grey.
+    let grey = dot(base, vec3(0.299, 0.587, 0.114));
+    pbr_input.material.base_color = vec4(mix(base, vec3(grey), hemisphere.look.desaturate), pbr_input.material.base_color.a);
+    let facing = saturate(dot(normalize(pbr_input.N), normalize(pbr_input.V)));
+    let rim = hemisphere.look.rim.rgb * hemisphere.look.rim.a * pow(1.0 - facing, 2.5);
+    let glow = hemisphere.look.tint.rgb * hemisphere.look.tint.a * hemisphere.look.glow;
+    pbr_input.material.emissive = vec4(pbr_input.material.emissive.rgb + rim + glow, pbr_input.material.emissive.a);
 
     var out: FragmentOutput;
     out.color = apply_pbr_lighting(pbr_input);

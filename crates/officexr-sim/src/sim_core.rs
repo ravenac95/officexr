@@ -18,7 +18,9 @@ use crate::physics::rules::{
     GRAVITY, pick_respawn_position, respawn_threshold, should_respawn_falling,
     world_objects_to_colliders,
 };
-use crate::physics::step_up::{STEP_UP_MAX_HEIGHT, StepUpHold, has_support, try_step_up};
+use crate::physics::step_up::{
+    STEP_UP_MAX_HEIGHT, StepUpTraversal, climb_broadcast, step_traversal, try_step_up,
+};
 use crate::proximity::{PairTracker, ProximityInput, TrackerOutput};
 use crate::world_objects::{Vec3, WorldObjects};
 
@@ -86,7 +88,16 @@ pub struct SimSettings {
     pub air_control: f64,
     pub max_jumps: u32,
     pub landing_ease_ms: f64,
+    /// Climb pace as a fraction of the walk speed that started it.
+    pub step_up_speed_factor: f64,
+    /// Scales the broadcast climb velocity, which drives the walk animation's rate.
+    pub climb_anim_factor: f64,
 }
+
+/// `STEP_UP_SPEED_FACTOR_DEFAULT` in the SDK's world constants.
+pub const STEP_UP_SPEED_FACTOR_DEFAULT: f64 = 0.7;
+/// `CLIMB_ANIM_FACTOR_DEFAULT` in the SDK's world constants.
+pub const CLIMB_ANIM_FACTOR_DEFAULT: f64 = 1.0;
 
 /// One frame of the local player's intent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -140,7 +151,8 @@ pub struct SimCore {
     world_objects: WorldObjects,
     gravity_enabled: bool,
     vertical_vel: f64,
-    step_up_hold: StepUpHold,
+    /// Active step-up climb; while set it replaces input-driven movement, jumps, gravity and fall-respawn.
+    traversal: Option<StepUpTraversal>,
     /// Set by a jump and cleared once the landing ease finishes; not inferred from jumps left.
     airborne: bool,
     /// Refilled to `max_jumps` on the ground; starts empty until the first grounded step.
@@ -185,7 +197,7 @@ impl SimCore {
             },
             gravity_enabled: true,
             vertical_vel: 0.0,
-            step_up_hold: StepUpHold::default(),
+            traversal: None,
             airborne: false,
             jumps_remaining: 0,
             max_jumps: 0,
@@ -285,6 +297,14 @@ impl SimCore {
             .ball_intersects(centre, char_radius, Some(self.body))
     }
 
+    /// How far a ray from `origin` along unit `dir` travels before a wall or other static
+    /// collider stops it, capped at `max_distance`. Characters don't stop it.
+    pub fn wall_distance(&self, origin: Vec3, dir: Vec3, max_distance: f64) -> f64 {
+        self.world
+            .cast_ray_toi_static(origin, dir.to_rapier(), max_distance)
+            .map_or(max_distance, |toi| toi.min(max_distance))
+    }
+
     /// Moves the player to `pos` and clears its fall and jump state.
     pub fn teleport(&mut self, pos: Vec3) {
         self.world.bodies[self.body].set_next_kinematic_translation(pos.to_rapier());
@@ -295,7 +315,7 @@ impl SimCore {
     /// Grounded with a fresh set of jumps and no fall, carry or landing ease left.
     fn land(&mut self) {
         self.vertical_vel = 0.0;
-        self.step_up_hold.reset();
+        self.traversal = None;
         self.airborne = false;
         self.jumps_remaining = self.max_jumps;
         self.air_vel = (0.0, 0.0);
@@ -305,7 +325,6 @@ impl SimCore {
     /// Off pins the player: no gravity and no jumping.
     pub fn set_gravity_enabled(&mut self, on: bool) {
         self.gravity_enabled = on;
-        self.step_up_hold.reset();
         if !on {
             // Jumps left stay: zeroing them would read as airborne every frame.
             self.vertical_vel = 0.0;
@@ -333,7 +352,9 @@ impl SimCore {
         let intends_move = dir.x != 0.0 || dir.z != 0.0;
         let intent_vel = (dir.x * speed, dir.z * speed);
 
-        self.vertical_vel = if self.gravity_enabled && !self.step_up_hold.active() {
+        // Taken for the step; put back unless the climb ends this step.
+        let mut traversal = self.traversal.take();
+        self.vertical_vel = if self.gravity_enabled && traversal.is_none() {
             self.vertical_vel + GRAVITY * dt_sec
         } else {
             0.0
@@ -360,9 +381,8 @@ impl SimCore {
             }
         }
 
-        if input.jump && self.jumps_remaining > 0 && self.gravity_enabled {
+        if input.jump && self.jumps_remaining > 0 && self.gravity_enabled && traversal.is_none() {
             self.vertical_vel = s.jump_velocity;
-            self.step_up_hold.reset();
             if !self.airborne {
                 self.air_vel = intent_vel;
             }
@@ -380,64 +400,74 @@ impl SimCore {
             (intent_vel.0 * dt_sec, intent_vel.1 * dt_sec)
         };
 
-        let hold_supported = !self.step_up_hold.active() || {
-            let mut probe = KccStepUpProbe {
-                world: &mut self.world,
-                controller: &mut self.controller,
-                body: self.body,
-                collider: self.body_collider,
-                peers: &self.colliders,
-            };
-            has_support(&mut probe)
-        };
-        let corrected = self.sweep(move_x, move_z, dt_sec);
-        self.step_up_hold.update(
-            corrected.x.hypot(corrected.z),
-            if intends_move {
-                move_x.hypot(move_z)
-            } else {
-                0.0
-            },
-            self.controller.computed_grounded(),
-            hold_supported,
-        );
+        let mut progress = 1.0;
+        let mut horiz_blocked = false;
+        let mut delta = Vec3::default();
+        let mut bumps = vec![];
+        if traversal.is_none() {
+            let corrected = self.sweep(Vec3 {
+                x: move_x,
+                y: self.vertical_vel * dt_sec,
+                z: move_z,
+            });
 
-        // Lifted over a ledge rather than falling. Only a falling speed
-        // resets: a jump's ascent also moves up and must survive.
-        if self.vertical_vel < 0.0 && corrected.y >= 0.0 {
-            self.vertical_vel = 0.0;
-        }
-
-        let (touching, bumps) = self
-            .colliders
-            .edge_triggered_bumps(&self.controller, &self.bumping_peers);
-        self.bumping_peers = touching;
-
-        let progress = horizontal_progress((corrected.x, corrected.z), (move_x, move_z));
-        let mut horiz_blocked = intends_move && progress < 1.0 - s.movement_block_threshold;
-        let mut delta = corrected;
-
-        // Characters are not stairs: blocked by a peer, bump instead of climbing it.
-        if horiz_blocked
-            && self.bumping_peers.is_empty()
-            && self.controller.computed_grounded()
-            && self.vertical_vel <= 0.0
-        {
-            let mut probe = KccStepUpProbe {
-                world: &mut self.world,
-                controller: &mut self.controller,
-                body: self.body,
-                collider: self.body_collider,
-                peers: &self.colliders,
-            };
-            if let Some(hop) = try_step_up(&mut probe, move_x, move_z) {
-                delta = hop;
-                horiz_blocked = false;
+            // Lifted over a ledge rather than falling. Only a falling speed
+            // resets: a jump's ascent also moves up and must survive.
+            if self.vertical_vel < 0.0 && corrected.y >= 0.0 {
                 self.vertical_vel = 0.0;
-                self.step_up_hold.begin();
             }
-            // The probe sweeps overwrote the controller state the next step's grounded check reads.
-            self.sweep(move_x, move_z, dt_sec);
+
+            let (touching, contacts) = self
+                .colliders
+                .edge_triggered_bumps(&self.controller, &self.bumping_peers);
+            self.bumping_peers = touching;
+            bumps = contacts;
+
+            progress = horizontal_progress((corrected.x, corrected.z), (move_x, move_z));
+            horiz_blocked = intends_move && progress < 1.0 - s.movement_block_threshold;
+            delta = corrected;
+
+            // Characters are not stairs: blocked by a peer, bump instead of climbing it.
+            // Not while airborne: during the landing ease the move is the decaying
+            // air velocity, which would set a near-zero climb pace.
+            if horiz_blocked
+                && self.bumping_peers.is_empty()
+                && !is_airborne
+                && self.controller.computed_grounded()
+                && self.vertical_vel <= 0.0
+            {
+                let mut probe = KccStepUpProbe {
+                    world: &mut self.world,
+                    controller: &mut self.controller,
+                    body: self.body,
+                    collider: self.body_collider,
+                    peers: &self.colliders,
+                };
+                let path = try_step_up(&mut probe, move_x, move_z);
+                // The probe sweeps overwrote the controller state the next step's grounded check reads.
+                self.sweep(Vec3 {
+                    x: move_x,
+                    y: self.vertical_vel * dt_sec,
+                    z: move_z,
+                });
+                if let Some(path) = path {
+                    let climb_speed = move_x.hypot(move_z) / dt_sec * s.step_up_speed_factor;
+                    traversal = Some(StepUpTraversal::new(path, climb_speed));
+                }
+            }
+        }
+        // `traversal` stays set for the rest of the step a climb ends on, so
+        // that step still broadcasts as climbing.
+        if let Some(t) = traversal.as_mut() {
+            let (climbed, ended) = step_traversal(t, dt_sec, |d| {
+                Self::sweep_with(&mut self.controller, &self.world, self.body_collider, d)
+            });
+            delta = climbed;
+            horiz_blocked = false;
+            self.vertical_vel = 0.0;
+            if !ended {
+                self.traversal = Some(t.clone());
+            }
         }
 
         let t = self.position();
@@ -451,8 +481,9 @@ impl SimCore {
             self.world
                 .cast_ray_hits(new_pos, -Vector::y(), FLOOR_PROBE_RANGE);
         // The spawn floor gives baked maps, whose floors aren't instances, a finite backstop.
-        let respawn_at = if should_respawn_falling(self.vertical_vel, has_floor_underneath)
-            || new_pos.y < respawn_threshold(&self.world_objects, &input.spawn_points)
+        let respawn_at = if traversal.is_none()
+            && (should_respawn_falling(self.vertical_vel, has_floor_underneath)
+                || new_pos.y < respawn_threshold(&self.world_objects, &input.spawn_points))
         {
             pick_respawn_position(&input.spawn_points)
         } else {
@@ -466,13 +497,18 @@ impl SimCore {
         self.world.bodies[self.body].set_next_kinematic_translation(new_pos.to_rapier());
         self.world.step();
 
-        let walking = intends_move && !horiz_blocked;
+        let climb = traversal
+            .as_ref()
+            .map(|t| climb_broadcast(t.velocity(), s.climb_anim_factor, input.yaw));
+        let walking = (intends_move && !horiz_blocked) || climb.is_some();
         let broadcast_vel = if is_airborne {
             Vec3 {
                 x: self.air_vel.0,
                 y: 0.0,
                 z: self.air_vel.1,
             }
+        } else if let Some(c) = climb {
+            c.vel
         } else if walking {
             Vec3 {
                 x: dir.x * speed * progress,
@@ -485,7 +521,7 @@ impl SimCore {
         SimStepResult {
             new_pos,
             broadcast_vel,
-            broadcast_yaw: input.yaw,
+            broadcast_yaw: climb.map_or(input.yaw, |c| c.yaw),
             moved: is_airborne || walking,
             anim_state: match (walking, input.running) {
                 (false, _) => AnimState::Idle,
@@ -501,19 +537,26 @@ impl SimCore {
         }
     }
 
-    fn sweep(&mut self, move_x: f64, move_z: f64, dt_sec: f64) -> Vec3 {
-        // Sensors excluded: the query pipeline would otherwise treat the
-        // invisible proximity rings as solid.
-        self.controller.compute_collider_movement(
+    fn sweep(&mut self, desired: Vec3) -> Vec3 {
+        Self::sweep_with(
+            &mut self.controller,
             &self.world,
             self.body_collider,
-            Vec3 {
-                x: move_x,
-                y: self.vertical_vel * dt_sec,
-                z: move_z,
-            },
-        );
-        self.controller.computed_movement()
+            desired,
+        )
+    }
+
+    /// `sweep` over borrowed fields, for callers already holding another part of `self`.
+    fn sweep_with(
+        controller: &mut CharacterController,
+        world: &PhysicsWorld,
+        collider: ColliderHandle,
+        desired: Vec3,
+    ) -> Vec3 {
+        // Sensors excluded: the query pipeline would otherwise treat the
+        // invisible proximity rings as solid.
+        controller.compute_collider_movement(world, collider, desired);
+        controller.computed_movement()
     }
 }
 
@@ -538,6 +581,8 @@ mod tests {
                 air_control: 0.2,
                 max_jumps: 2,
                 landing_ease_ms: 120.0,
+                step_up_speed_factor: STEP_UP_SPEED_FACTOR_DEFAULT,
+                climb_anim_factor: CLIMB_ANIM_FACTOR_DEFAULT,
             },
             spawn_points: vec![],
         }
@@ -618,52 +663,76 @@ mod tests {
         sim
     }
 
-    fn walk(sim: &mut SimCore, speed: f64, dir: (f64, f64), jump: bool) -> Vec3 {
+    fn walk(sim: &mut SimCore, speed: f64, dir: (f64, f64), jump: bool) -> SimStepResult {
         let mut i = input(0.4);
         i.dir = XZ { x: dir.0, z: dir.1 };
         i.speed = speed;
         i.jump = jump;
-        sim.step(&i).new_pos
+        i.yaw = 0.3;
+        sim.step(&i)
     }
 
-    /// Walks -X until the first hop; returns the hop frame's pose.
-    fn walk_to_first_hop(sim: &mut SimCore, speed: f64) -> Vec3 {
-        let mut prev = sim.position();
+    /// Walks -X until a climb starts; returns that frame's result.
+    fn walk_to_first_climb(sim: &mut SimCore, speed: f64) -> SimStepResult {
         for _ in 0..4000 {
-            let pos = walk(sim, speed, (-1.0, 0.0), false);
-            if pos.y - prev.y > 0.3 {
-                return pos;
+            let r = walk(sim, speed, (-1.0, 0.0), false);
+            if sim.traversal.is_some() {
+                return r;
             }
-            prev = pos;
         }
-        panic!("never hopped");
+        panic!("never climbed");
     }
 
     #[test]
-    fn climbs_eight_risers_in_eight_hops_at_any_walking_speed() {
+    fn a_wall_stops_the_wall_ray_but_the_player_and_open_space_dont() {
+        let sim = stairs();
+        // Past the stairs toward +Z: the wall's face at z = 2.5 is 0.5 m ahead.
+        let origin = Vec3 {
+            x: 10.0,
+            y: 1.0,
+            z: 2.0,
+        };
+        let toward_wall = Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        };
+        assert!((sim.wall_distance(origin, toward_wall, 10.0) - 0.5).abs() < 1e-4);
+        let away = Vec3 {
+            x: 0.0,
+            y: 0.0,
+            z: -1.0,
+        };
+        // From inside the player's own ball.
+        let from_player = Vec3 {
+            x: 10.0,
+            y: -0.5 + BODY_Y,
+            z: 2.0,
+        };
+        assert_eq!(sim.wall_distance(from_player, away, 3.0), 3.0);
+    }
+
+    #[test]
+    fn climbs_eight_risers_at_a_paced_rate_at_any_walking_speed() {
         for speed in [0.5, 1.0, 3.0] {
             let mut sim = stairs();
             let mut prev = sim.position();
             let mut max_y = prev.y;
-            let (mut hops, mut max_step_x) = (0, 0.0_f64);
+            let max_slice = speed / 60.0 * STEP_UP_SPEED_FACTOR_DEFAULT + 1e-6;
             for _ in 0..4000 {
                 if prev.x <= 1.0 {
                     break;
                 }
-                let pos = walk(&mut sim, speed, (-1.0, 0.0), false);
-                if pos.y - prev.y > 0.3 {
-                    hops += 1;
-                    max_step_x = max_step_x.max((pos.x - prev.x).abs());
+                let pos = walk(&mut sim, speed, (-1.0, 0.0), false).new_pos;
+                if sim.traversal.is_some() {
+                    let step = (pos.x - prev.x).hypot(pos.y - prev.y).hypot(pos.z - prev.z);
+                    assert!(step <= max_slice, "climb slice {step} at {speed} m/s");
                 }
                 assert!(pos.y > max_y - 0.02, "sag at {speed} m/s: {pos:?}");
                 max_y = max_y.max(pos.y);
                 prev = pos;
             }
-            assert_eq!(hops, 8, "hops at {speed} m/s");
-            assert!(
-                max_step_x <= speed / 60.0 + 0.01,
-                "hop advance at {speed} m/s"
-            );
+            assert!(prev.x <= 1.0, "stuck at {prev:?} at {speed} m/s");
             assert!(
                 (prev.y - 3.5).abs() < 0.1,
                 "end y {} at {speed} m/s",
@@ -673,35 +742,34 @@ mod tests {
     }
 
     #[test]
-    fn a_jump_during_the_hold_clears_half_a_metre() {
+    fn a_climb_broadcasts_walking_along_the_climb() {
         let mut sim = stairs();
-        let hop = walk_to_first_hop(&mut sim, 1.0);
-        let mut max_y = walk(&mut sim, 1.0, (-1.0, 0.0), true).y;
-        for _ in 0..20 {
-            max_y = max_y.max(walk(&mut sim, 1.0, (-1.0, 0.0), false).y);
-        }
-        assert!(max_y - hop.y > 0.5);
+        let r = walk_to_first_climb(&mut sim, 1.0);
+        assert!(r.moved);
+        assert_eq!(r.anim_state, AnimState::Walk);
+        assert_eq!(r.vel_y, 0.0);
+        assert!(r.broadcast_vel.x < 0.0);
+        assert!((r.broadcast_yaw - std::f64::consts::FRAC_PI_2).abs() < 1e-6);
     }
 
     #[test]
-    fn reversing_off_the_tread_mid_hold_drops_the_ball() {
+    fn jumps_are_ignored_while_climbing() {
         let mut sim = stairs();
-        let hop = walk_to_first_hop(&mut sim, 1.0);
-        let mut y = hop.y;
-        for _ in 0..15 {
-            y = walk(&mut sim, 1.0, (1.0, 0.0), false).y;
-        }
-        assert!(y < hop.y - 0.3);
+        let start = walk_to_first_climb(&mut sim, 1.0).new_pos;
+        let r = walk(&mut sim, 1.0, (-1.0, 0.0), true);
+        assert!(!r.is_airborne);
+        assert!(r.new_pos.y - start.y <= 1.0 / 60.0 * STEP_UP_SPEED_FACTOR_DEFAULT + 1e-6);
     }
 
     #[test]
-    fn being_blocked_mid_hold_ends_it() {
+    fn a_teleport_cancels_the_climb() {
         let mut sim = stairs();
-        let hop = walk_to_first_hop(&mut sim, 1.0);
-        let mut y = hop.y;
-        for _ in 0..30 {
-            y = walk(&mut sim, 1.0, (0.0, 1.0), false).y;
-        }
-        assert!(y < hop.y - 0.1);
+        walk_to_first_climb(&mut sim, 1.0);
+        sim.teleport(Vec3 {
+            x: 10.0,
+            y: -0.5,
+            z: 2.0,
+        });
+        assert!(sim.traversal.is_none());
     }
 }

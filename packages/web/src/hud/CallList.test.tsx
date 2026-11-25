@@ -5,7 +5,8 @@ import { createViewYaw, PlayControlsProvider, ViewYawProvider } from '@officexr/
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CallList, callRows } from './CallList';
 import { fakePlayControls } from './fakePlayControls';
-import { PresenceList } from './PresenceList';
+import { createLocalMutes } from './localMutes';
+import { PeopleSheet } from './PeopleSheet';
 
 beforeEach(() => {
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }));
@@ -94,6 +95,7 @@ describe('callRows', () => {
 
 describe('CallList', () => {
   function setup() {
+    const clock = () => 0;
     const store = createStore({ selfId: 'me', officeId: 'o' });
     const actions = createActions(store, createBus());
     actions.upsertPlayer({ id: 'me', name: 'Me', pos: { x: 0, y: 0, z: 0 } });
@@ -101,8 +103,8 @@ describe('CallList', () => {
     render(
       <PlayControlsProvider controls={fakePlayControls().controls}>
         <ViewYawProvider viewYaw={createViewYaw()}>
-          <PresenceList store={store} selfId="me" officeName="HQ" />
-          <CallList store={store} selfId="me" />
+          <PeopleSheet store={store} selfId="me" officeName="HQ" mutes={createLocalMutes(null)} portrait={false} onWave={() => {}} onInvite={() => {}} onClose={() => {}} clock={clock} />
+          <CallList store={store} selfId="me" clock={clock} />
         </ViewYawProvider>
       </PlayControlsProvider>,
     );
@@ -137,5 +139,20 @@ describe('CallList', () => {
     expect(call.getByRole('button', { name: 'Go to Ann' })).toBeTruthy();
     expect(presence.getByText('Ann')).toBeTruthy();
     expect(presence.queryByRole('img', { name: 'Speaking' })).toBeNull();
+  });
+
+  it('shows how long ago a peer was last active, and nothing on a guest row', () => {
+    const actions = setup();
+    act(() => {
+      actions.setMyJitsiRoom('room');
+      actions.setMyJitsiParticipantId('j-me');
+      actions.applyRemotePresence('ann', 'available', 'none', 0, { room: 'room', participantId: 'j-ann' }, 5 * 60_000);
+      actions.callParticipantJoined('j-ann', 'Ann J');
+      actions.callParticipantJoined('j-x', 'Visitor');
+    });
+    const call = within(screen.getByRole('list', { name: 'People in your call' }));
+    expect(call.getAllByText(/Active 5m ago/)).toHaveLength(1);
+    const guest = call.getAllByRole('listitem').find((li) => li.textContent?.includes('Visitor'));
+    expect(guest?.textContent).not.toContain('Active');
   });
 });

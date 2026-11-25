@@ -1,7 +1,8 @@
 //! `officexr-render` in the browser, one view per canvas, fed from JS:
 //! `init` once, then `createView` per canvas and `setWorld`, `setCamera`,
 //! `setPlayers` and the editors' [`overlays`] on each; a world view's camera
-//! can instead follow the local player through the [`controls`] API.
+//! can instead follow the local player through the [`controls`] API, and the
+//! play view adds its world [`effects`].
 //!
 //! A view on the canvas given to `init` draws straight into Bevy's primary
 //! window. With WebGPU every other view is a Bevy window on its own canvas.
@@ -24,10 +25,11 @@ use bevy::asset::AssetMetaCheck;
 use bevy::picking::input::PointerInputPlugin;
 use bevy::prelude::*;
 use bevy::window::ExitCondition;
+use officexr_render::effects::{Aura, Effect};
 use officexr_render::views::{ViewHub, ViewId, ViewKind, ViewMsg, ViewStatus, ViewTarget};
 use officexr_render::{
-    AnimSpeeds, AssetBase, Bump, OfficeXrRenderPlugin, PlayerAnimation, PlayerRender, Players,
-    SceneCamera, Seat, WorldDiff, mugshot_player,
+    AnimSpeeds, AssetBase, BodyOffset, Bump, NamedClip, OfficeXrRenderPlugin, PlayerAnimation,
+    PlayerRender, Players, SceneCamera, Seat, Tint, WorldDiff, mugshot_player,
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -35,6 +37,7 @@ use wasm_bindgen::prelude::*;
 mod blob_assets;
 mod capture;
 mod controls;
+mod effects;
 mod overlays;
 mod picking;
 mod proximity;
@@ -87,6 +90,29 @@ struct PlayersInput {
     /// Draws the players in their bind pose, as a `setWorld` mugshot does.
     #[serde(default)]
     paused: bool,
+    /// Radians a second an avatar turns toward its yaw; absent snaps.
+    #[serde(default)]
+    turn_speed: Option<f32>,
+    /// The page draws the name tags from `playerAnchors`.
+    #[serde(default)]
+    host_tags: bool,
+    #[serde(default)]
+    effects: Vec<Effect>,
+}
+
+#[derive(Deserialize)]
+struct TintInput {
+    /// `#rrggbb`.
+    color: String,
+    strength: f32,
+    #[serde(default)]
+    glow: bool,
+}
+
+fn hex_color(hex: &str) -> Result<Color, JsError> {
+    Srgba::hex(hex)
+        .map(Color::from)
+        .map_err(|e| js_err(format!("{hex}: {e}")))
 }
 
 #[derive(Deserialize)]
@@ -119,6 +145,36 @@ struct PlayerInput {
     /// `{ idle, walk, run }`: the character's clip-speed tunables, all 1 when omitted.
     #[serde(default, rename = "animSpeeds")]
     anim_speeds: AnimSpeeds,
+    #[serde(default)]
+    clip: Option<NamedClip>,
+    #[serde(default)]
+    body: BodyOffset,
+    #[serde(default)]
+    vehicle: Option<String>,
+    #[serde(default)]
+    wand: bool,
+    #[serde(default)]
+    pokes: u32,
+    #[serde(default)]
+    casts: u32,
+    #[serde(default)]
+    tint: Option<TintInput>,
+    #[serde(default)]
+    frozen: bool,
+    /// `#rrggbb`.
+    #[serde(default)]
+    silhouette: Option<String>,
+    #[serde(default)]
+    aura: Option<Aura>,
+}
+
+#[derive(Serialize)]
+struct AnchorOutput {
+    id: String,
+    x: Option<f32>,
+    y: Option<f32>,
+    height: f32,
+    bell: bool,
 }
 
 #[derive(Serialize)]
@@ -214,6 +270,7 @@ pub fn init(origin: String, primary_canvas: JsValue) -> Result<(), JsError> {
     ));
     picking::add(&mut app);
     capture::add(&mut app);
+    effects::add(&mut app);
     #[cfg(feature = "webgl2")]
     image_views::add(&mut app);
     controls::add(&mut app);
@@ -287,6 +344,7 @@ pub fn destroy_view(id: ViewId) -> Result<(), JsError> {
     }
     picking::forget(id);
     capture::forget(id);
+    effects::forget(id);
     // So the id finds no canvas: `onPick` and the ray queries on it then fail.
     if let Ok(canvas) =
         query_selector(&format!("canvas[data-officexr-view=\"{id}\"]")).dyn_into::<Canvas>()
@@ -338,34 +396,78 @@ pub fn set_players(id: ViewId, players: JsValue) -> Result<(), JsError> {
         players: input
             .players
             .into_iter()
-            .map(|p| PlayerRender {
-                id: p.id,
-                character: p.character,
-                pos: p.pos.into(),
-                yaw: p.yaw,
-                vel: p.vel.into(),
-                name: p.name,
-                airborne: p.airborne,
-                seat: p.seat.map(|s| Seat {
-                    pos: s.pos.into(),
-                    yaw: s.yaw,
-                }),
-                bump: Bump {
-                    count: p.bump.count,
-                    normal: p.bump.normal.into(),
-                },
-                animation: p.animation,
-                anim_speeds: p.anim_speeds,
+            .map(|p| {
+                Ok(PlayerRender {
+                    id: p.id,
+                    character: p.character,
+                    pos: p.pos.into(),
+                    yaw: p.yaw,
+                    vel: p.vel.into(),
+                    name: p.name,
+                    airborne: p.airborne,
+                    seat: p.seat.map(|s| Seat {
+                        pos: s.pos.into(),
+                        yaw: s.yaw,
+                    }),
+                    bump: Bump {
+                        count: p.bump.count,
+                        normal: p.bump.normal.into(),
+                    },
+                    animation: p.animation,
+                    anim_speeds: p.anim_speeds,
+                    clip: p.clip,
+                    body: p.body,
+                    vehicle: p.vehicle,
+                    wand: p.wand,
+                    pokes: p.pokes,
+                    casts: p.casts,
+                    tint: p
+                        .tint
+                        .map(|t| {
+                            Ok::<_, JsError>(Tint {
+                                color: hex_color(&t.color)?,
+                                strength: t.strength,
+                                glow: t.glow,
+                            })
+                        })
+                        .transpose()?,
+                    frozen: p.frozen,
+                    silhouette: p.silhouette.as_deref().map(hex_color).transpose()?,
+                    aura: p.aura,
+                })
             })
-            .collect(),
+            .collect::<Result<_, JsError>>()?,
         char_radius: input.char_radius,
         player_speed: input.player_speed,
         run_speed: input.run_speed,
         bump_easing_ms: input.bump_easing_ms,
         paused: input.paused,
+        turn_speed: input.turn_speed,
+        host_tags: input.host_tags,
+        effects: input.effects,
         ..default()
     };
     send(id, ViewMsg::Players(players))
+}
+
+/// Where each player's overhead stack stands on the view's canvas, as of its
+/// last frame: CSS pixels from the top left (`null` behind the camera), the
+/// model's height, and whether the ping bell shows under the stack.
+#[wasm_bindgen(js_name = playerAnchors)]
+pub fn player_anchors(id: ViewId) -> Result<JsValue, JsError> {
+    status(id)?;
+    let anchors: Vec<AnchorOutput> = hub()?
+        .anchors(id)
+        .into_iter()
+        .map(|a| AnchorOutput {
+            id: a.id,
+            x: a.screen.map(|s| s.x),
+            y: a.screen.map(|s| s.y),
+            height: a.height,
+            bell: a.bell,
+        })
+        .collect();
+    serde_wasm_bindgen::to_value(&anchors).map_err(js_err)
 }
 
 /// `ready` once every model of the view has loaded and settled; `pending`

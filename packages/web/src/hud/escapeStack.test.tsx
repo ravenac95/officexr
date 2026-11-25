@@ -1,36 +1,43 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createActions, createBus, createStore } from '@officexr/sdk';
 import { PlayControlsProvider } from '@officexr/world/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PingInbox } from '../ping/pingInbox';
-import { SettingsHarness, openSettings } from '../room/settingsHarness';
+import { SettingsHarness, openMenu, openPage } from '../room/settingsHarness';
 import { useSettings } from '../room/Settings';
 import { ChatPanel } from './ChatPanel';
 import { useEscapeFallback } from './useEscapeLayer';
 import { fakePlayControls } from './fakePlayControls';
 import { PingInboxHud } from './PingInboxHud';
 
+beforeEach(() => {
+  vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }));
+});
+
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
+  localStorage.clear();
   Object.defineProperty(document, 'pointerLockElement', { value: null, configurable: true });
 });
 
 const settingsDialog = () => screen.queryByRole('dialog');
 
 function OpenSettingsOnEsc() {
-  const { open, openPane } = useSettings();
+  const { open } = useSettings();
   useEscapeFallback(() => open());
-  return <button onClick={() => openPane('pane')}>pane</button>;
+  return null;
 }
 
 function setup(children?: React.ReactNode) {
   const store = createStore({ selfId: 'me#t0', officeId: 'o' });
   const actions = createActions(store, createBus());
   const inbox = new PingInbox();
+  inbox.add('ada#t1', 'Ada');
   render(
     <PlayControlsProvider controls={fakePlayControls().controls}>
-      <SettingsHarness panes={[{ id: 'pane', label: 'Pane', content: <p>pane body</p> }]}>
+      <SettingsHarness pages={{ help: <p>pane body</p> }}>
         <OpenSettingsOnEsc />
         <PingInboxHud inbox={inbox} store={store} />
         <ChatPanel store={store} actions={actions} selfId="me#t0" />
@@ -46,21 +53,21 @@ describe('Escape stack', () => {
   it('closes the open ping inbox without opening Settings', () => {
     setup();
     fireEvent.click(screen.getByRole('button', { name: /^Pings/ }));
-    expect(screen.getByText('No pings yet')).toBeTruthy();
+    expect(screen.getByRole('list', { name: 'Received pings' })).toBeTruthy();
     esc();
-    expect(screen.queryByText('No pings yet')).toBeNull();
+    expect(screen.queryByRole('list', { name: 'Received pings' })).toBeNull();
     expect(settingsDialog()).toBeNull();
   });
 
   it('closes Settings before the inbox beneath it', () => {
     setup();
     fireEvent.click(screen.getByRole('button', { name: /^Pings/ }));
-    openSettings();
+    openMenu();
     esc(settingsDialog()!);
     expect(settingsDialog()).toBeNull();
-    expect(screen.getByText('No pings yet')).toBeTruthy();
+    expect(screen.getByRole('list', { name: 'Received pings' })).toBeTruthy();
     esc();
-    expect(screen.queryByText('No pings yet')).toBeNull();
+    expect(screen.queryByRole('list', { name: 'Received pings' })).toBeNull();
   });
 
   it('keeps Settings closed while Esc is held', () => {
@@ -84,8 +91,8 @@ describe('Escape stack', () => {
 
   it('goes back from a Settings pane, then closes', () => {
     setup();
-    openSettings();
-    act(() => void screen.getByText('pane').click());
+    openMenu();
+    openPage('Help');
     expect(screen.getByText('pane body')).toBeTruthy();
     esc(settingsDialog()!);
     expect(screen.queryByText('pane body')).toBeNull();
@@ -99,7 +106,7 @@ describe('Escape stack', () => {
     fireEvent.keyDown(window, { key: 'Enter' });
     const input = screen.getByPlaceholderText('Press Enter to chat');
     esc(input);
-    expect(screen.queryByPlaceholderText('Press Enter to chat')).toBeNull();
+    expect(document.activeElement).not.toBe(input);
     expect(settingsDialog()).toBeNull();
   });
 });

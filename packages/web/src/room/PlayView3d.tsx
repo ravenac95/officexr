@@ -1,55 +1,95 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { PersistentLocalState } from '@officexr/core-refactor';
-import { PlayView, simFromSearch } from '@officexr/world/react';
-import type { CameraMode } from '@officexr/world/react';
-import type { TopDownPlayViewProps } from '@officexr/world/top-down';
+import { PlayView, simFromSearch, type CameraMode, type PlayViewProps } from '@officexr/world/react';
 import { Switch } from '../hud/ui/Switch';
-import { CameraModeControl } from './CameraModeControl';
-import { CharacterAction, CharacterPane } from './CharacterPane';
+import { CharacterLook } from './CharacterLook';
 import { DebugFps, type DebugFpsSample } from './DebugFps';
 import { debugFpsEnabled } from './debugFpsFlag';
 import { storedJoystickKind, storeJoystickKind } from './joystickKind';
 import { MotionLookControl } from './MotionLookControl';
-import type { SettingsAction, SettingsTab } from './Settings';
-import { SettingRow, SettingsModal } from './SettingsModal';
+import { SettingRow } from '../hud/settings/parts';
+import { PerfReadout } from '../perf/PerfReadout';
+import { publishFrameStats } from '../perf/perfStats';
+import type { FrameStatsSample } from '@officexr/world/react';
+import { useShowPerformance } from '../perf/perfSetting';
+import { angleHeld, cameraModeOf, forgetLegacyJoystickChoice, storedOpenView, viewOfCameraMode, type GameView, type OpenView } from './gameView';
+import type { SettingsAction } from './Settings';
+import { ViewPicker } from './ViewPicker';
 
-/** Everything that reaches the Bevy renderer, so `OfficeWorld` can load it only in 3D. */
+/**
+ * The 2D view: the same 3D scene through the fixed follow camera, swung due south and tilted
+ * steeply down so the office reads like a floor plan (Gather-style). A long lens from high up
+ * keeps walls from leaning. Wheel and pinch zoom.
+ */
+const OVERHEAD_CAMERA = {
+  azimuthDeg: 180,
+  pitchDeg: -65,
+  height: 60,
+  fov: 20,
+  centred: true,
+} as const;
+
+const BIRDS_EYE_CAMERA = { ...OVERHEAD_CAMERA, pitchDeg: -89.9 } as const;
+
+const ANGLED_CAMERA = { centred: true } as const;
+
+const fixedCameraOf = (view: GameView) =>
+  view === 'map' ? OVERHEAD_CAMERA : view === 'birds-eye' ? BIRDS_EYE_CAMERA : view === 'angled' ? ANGLED_CAMERA : undefined;
+
+export interface PlayViewSettings {
+  controls: ReactNode;
+  motion: ReactNode;
+  look: ReactNode;
+  actions: SettingsAction[];
+  joystickFloats: boolean;
+}
+
+/** Everything that reaches the Bevy renderer, lazily loaded by `OfficeWorld`. */
 export default function PlayView3d({
   viewProps,
+  overhead,
   local,
-  settings,
   onError,
   children,
 }: {
-  viewProps: Omit<TopDownPlayViewProps, 'children'>;
+  viewProps: Pick<
+    PlayViewProps,
+    'store' | 'actions' | 'rules' | 'bus' | 'sync' | 'handshake' | 'selfId' | 'mapName' | 'title' | 'loading' | 'renderLoadError' | 'storages' | 'onPingPlayer' | 'onPingFrozen' | 'placement' | 'missionMarker'
+  >;
+  /** The 2D view: lock the camera overhead instead of offering camera modes. */
+  overhead: boolean;
   local: PersistentLocalState;
-  /** Settings shared with the 2D view. */
-  settings: { tabs: SettingsTab[]; actions: SettingsAction[] };
   onError: (message: string | null) => void;
-  children: ReactNode;
+  children: (settings: PlayViewSettings) => ReactNode;
 }) {
-  const [cameraMode, setCameraMode] = useState<CameraMode>('fixed');
-  // ponytail: no Recenter; the Bevy view's motion look doesn't port it yet.
+  const [openView, setOpenView] = useState<OpenView>(storedOpenView);
+  const view: GameView = overhead ? 'map' : openView;
+  const cameraMode = cameraModeOf(view);
+  const setCameraMode = (mode: CameraMode) => setOpenView((current) => viewOfCameraMode(mode, current));
   const [motionLook, setMotionLook] = useState({ enabled: false, recenterKey: 0 });
   const [motionUnsupported, setMotionUnsupported] = useState(false);
   const [invertLook, setInvertLook] = useState(false);
+  useEffect(forgetLegacyJoystickChoice, []);
+  const showPerformance = useShowPerformance();
   const [joystickKind, setJoystickKind] = useState(() => storedJoystickKind());
   const [showFps] = useState(() => debugFpsEnabled(window.location.search, safeLocalStorage()));
   const [fps, setFps] = useState<DebugFpsSample | null>(null);
+  const onFrameStats =
+    showPerformance || showFps
+      ? (sample: FrameStatsSample | null) => {
+          if (showPerformance) {
+            publishFrameStats(sample);
+          }
+          if (showFps) {
+            setFps(sample);
+          }
+        }
+      : undefined;
+  const lookLocked = angleHeld(view, motionLook.enabled);
 
   const controls = (
     <>
-      <SettingRow label="Camera">
-        <CameraModeControl value={cameraMode} onChange={setCameraMode} />
-      </SettingRow>
-      <SettingRow label="Motion look">
-        <MotionLookControl
-          enabled={motionLook.enabled}
-          onEnabledChange={(enabled) => setMotionLook((m) => ({ ...m, enabled }))}
-          unsupported={motionUnsupported}
-          onUnsupported={() => setMotionUnsupported(true)}
-        />
-      </SettingRow>
+      <ViewPicker value={view} onOpenView={setOpenView} />
       <SettingRow label="Invert look">
         <Switch aria-label="Invert look" checked={invertLook} onCheckedChange={setInvertLook} />
       </SettingRow>
@@ -66,32 +106,46 @@ export default function PlayView3d({
       </SettingRow>
     </>
   );
-  const actions: SettingsAction[] = [{ id: 'character', render: () => <CharacterAction /> }];
+  const motion = (
+    <SettingRow label="Motion look">
+      <MotionLookControl
+        enabled={motionLook.enabled}
+        onEnabledChange={(enabled) => setMotionLook((m) => ({ ...m, enabled }))}
+        onRecenter={() => setMotionLook((m) => ({ ...m, recenterKey: m.recenterKey + 1 }))}
+        unsupported={motionUnsupported}
+        onUnsupported={() => setMotionUnsupported(true)}
+      />
+    </SettingRow>
+  );
+  const settings: PlayViewSettings = {
+    controls,
+    motion,
+    look: <CharacterLook local={local} onSaveResult={onError} />,
+    actions: [],
+    joystickFloats: lookLocked,
+  };
 
   return (
+    <>
     <PlayView
       {...viewProps}
       realtime="ws"
       cameraMode={cameraMode}
-      onCameraModeChange={setCameraMode}
+      onCameraModeChange={overhead ? undefined : setCameraMode}
+      fixedCamera={fixedCameraOf(view)}
       motionLook={motionLook}
       invertLook={invertLook}
+      lookLocked={lookLocked}
       joystickKind={joystickKind}
       hud="player"
       sim={simFromSearch(window.location.search)}
-      onFrameStats={showFps ? setFps : undefined}
+      onFrameStats={onFrameStats}
     >
-      <SettingsModal
-        title={viewProps.title}
-        tabs={[...settings.tabs, { id: 'controls', label: 'Controls', content: controls }]}
-        panes={[
-          { id: 'character', label: 'Character', content: <CharacterPane local={local} onSaveResult={onError} /> },
-        ]}
-        actions={[...settings.actions, ...actions]}
-      />
-      {children}
+      {children(settings)}
       {showFps && <DebugFps sample={fps} />}
     </PlayView>
+    {showPerformance && <PerfReadout mode={cameraMode} />}
+    </>
   );
 }
 

@@ -5,20 +5,32 @@ import type {
   PlayerState,
   ProximityConstants,
   Store,
+  SyncEngine,
   TrackerOutput,
   Vec3,
+  WorldObjects,
 } from '@officexr/sdk';
-import type { JoystickKind, MoveIntent, ProximityInput, WorldDiff } from '@officexr/render-wasm';
+import type { Effect, JoystickKind, MoveIntent, ProximityInput, WorldDiff } from '@officexr/render-wasm';
 import type { BotPool } from '../bot/BotPool.ts';
+import type { ActionInput } from '../input/action-input.ts';
+import type { InteractionStore } from '../input/interaction.ts';
 import { resolveCharacterTunables } from '../characters/resolve.ts';
 import { feetPosition } from '../physics/rules.ts';
 import type { CameraMode } from '../renderer/config.ts';
-import { yawFromDirection } from '../renderer/lookControls.ts';
+import { isYawPitchMode, yawFromDirection } from '../renderer/lookControls.ts';
 import type { AutoWalkSource, MoveInput } from '../renderer/moveIntent.ts';
 import type { SeatingSource } from '../renderer/seated.ts';
+import type { SelfWorld } from '../renderer/useMotionWorld.ts';
 import type { ExcludeInstance } from '../scenes/compile-map.ts';
 import { extrapolatePos } from '../sim/extrapolate.ts';
 import type { SimCore, SimPeer } from '../sim/SimCore.ts';
+import { SelfPlay } from './selfPlay.ts';
+import type { FrozenAvatar } from '../app/frozen-avatars.ts';
+import type { WaterVolume } from '../motion/water.ts';
+import { AvatarLooks, type AvatarLook } from '../renderer/avatarLooks.ts';
+import { EffectsTracker } from '../renderer/effectsTracker.ts';
+import { hexColor } from '../renderer/hexColor.ts';
+import { playerAccent } from '../renderer/occlusion/silhouetteColor.ts';
 import { isTypingTarget } from './useWorldFocus.ts';
 import { diffWorld, type BakedLayoutDiff, type SentWorld } from './worldDiff.ts';
 
@@ -40,15 +52,29 @@ export interface PlayerInput {
   bump: { count: number; normal: [number, number] };
   /** The character's clip-speed tunables; at 1 a walk or run plays at the rate that keeps its feet planted. */
   animSpeeds: { idle: number; walk: number; run: number };
+  /** An away claimant left at their desk (`frozenAvatarId`). */
+  frozen?: boolean;
+  /** `#rrggbb` the avatar shows through walls in. */
+  silhouette?: string | null;
 }
 
 export interface PlayersInput {
-  players: PlayerInput[];
+  players: (PlayerInput & Partial<AvatarLook>)[];
   charRadius: number;
   playerSpeed: number;
   runSpeed: number;
   bumpEasingMs: number;
+  turnSpeed?: number;
+  /** The page draws the overhead tags from `playerAnchors`. */
+  hostTags?: boolean;
+  effects?: Effect[];
 }
+
+/** The id an away claimant's frozen avatar is drawn and picked under. */
+export const frozenAvatarId = (login: string): string => `frozen:${login}`;
+
+/** The login of a frozen avatar's id, or `null` for a live player's. */
+export const frozenLoginOf = (id: string): string | null => (id.startsWith('frozen:') ? id.slice('frozen:'.length) : null);
 
 /** The calls one frame makes on its Bevy view. */
 export interface RoomView {
@@ -64,13 +90,22 @@ export interface RoomView {
   setProximity(proximity: ProximityInput): void;
 }
 
+/** What gameplay reads beside the view's intent: keys by `KeyboardEvent.key`, lowercased, and canvas clicks. */
+export interface PlayKeys {
+  held(): ReadonlySet<string>;
+  /** Whether the canvas was clicked since the last call. */
+  takeClick(): boolean;
+}
+
 export interface RoomFrameDeps {
   store: Store;
   actions: Actions;
   bus: Bus;
+  sync: Pick<SyncEngine, 'sendCast' | 'sendPoke'>;
   bots?: BotPool;
   selfId: string;
   view: RoomView;
+  keys: PlayKeys;
   /** Whether the page's DOM joystick walks: picked, or standing in for a view without a Bevy stick. */
   onDomJoystick?(dom: boolean): void;
   /** Receives the camera yaw each frame. */
@@ -92,18 +127,35 @@ export interface RoomFrameOptions {
   joystickKind: JoystickKind;
   autoWalk?: AutoWalkSource;
   seating?: SeatingSource;
+  /** On-screen buttons held as keys: jump, sprint, interact, poke. */
+  actionInput?: ActionInput;
+  /** Receives what is in reach to interact with. */
+  interactions?: InteractionStore;
+  /** Water, rides and wand stands around the player. */
+  motionWorld: SelfWorld;
   /** The character model `setPlayers` draws for a player: a built-in's name, or a model's path or URL. */
   characterOf(player: PlayerState): string;
   kinds: readonly unknown[];
   bakedLayouts: readonly BakedLayoutDiff[];
-  /** The instances a baked layout draws. */
+  /** The instances a baked layout draws, or that are not drawn at all (a ridden rack). */
   excludeInstance?: ExcludeInstance;
+  /** The objects as drawn, e.g. a stand whose wand is held as its empty kind; absent draws the store's. */
+  drawnObjects?(worldObjects: WorldObjects): WorldObjects;
+  /** The away claimants to leave sitting at their desks. */
+  frozenAvatars?(state: OfficeState): readonly FrozenAvatar[];
+  /** The pools a swimmer floats in. */
+  waterVolumes?: readonly WaterVolume[];
+  /** The page draws the overhead tags from `playerAnchors`. */
+  hostTags?: boolean;
 }
 
 /** The warp detector's threshold: well above a frame of gravity or walking, below any real teleport. */
 const WARP_DISTANCE_SQ = 0.5 * 0.5;
 
 const xyz = (v: Vec3): Xyz => [v.x, v.y, v.z];
+
+const NO_KEYS: ReadonlySet<string> = new Set();
+const STILL = { x: 0, z: 0 };
 
 /**
  * One frame of the 3D play view, in order: the view's movement intent, the
@@ -122,21 +174,34 @@ export class RoomFrame {
   private proximity: TrackerOutput | null = null;
   private sentWorld: SentWorld | null = null;
   private worldSources: unknown[] = [];
-  private readonly bumps = new Map<string, PlayerInput['bump']>();
+  private readonly bumps = new Map<string, PlayerInput['bump'] & { atMs: number }>();
   private readonly stopBumps: () => void;
+  private readonly play: SelfPlay;
+  private readonly looks: AvatarLooks;
+  private readonly effects: EffectsTracker;
+  private dtSec = 0;
 
   constructor(
     private readonly deps: RoomFrameDeps,
     options: RoomFrameOptions,
   ) {
     this.options = options;
+    this.play = new SelfPlay({ actions: deps.actions, sync: deps.sync, selfId: deps.selfId });
     this.stopBumps = deps.bus.on('collision:char-bump', ({ selfId, normal }) => {
-      this.bumps.set(selfId, { count: (this.bumps.get(selfId)?.count ?? 0) + 1, normal: [normal.x, normal.z] });
+      this.bumps.set(selfId, {
+        count: (this.bumps.get(selfId)?.count ?? 0) + 1,
+        normal: [normal.x, normal.z],
+        atMs: performance.now(),
+      });
     });
+    this.looks = new AvatarLooks(deps.bus, deps.selfId, deps.store);
+    this.effects = new EffectsTracker(deps.bus, deps.store);
   }
 
   dispose(): void {
     this.stopBumps();
+    this.looks.dispose();
+    this.effects.dispose();
   }
 
   step(dtSec: number, nowMs: number): void {
@@ -147,6 +212,7 @@ export class RoomFrame {
     this.deps.onViewYaw?.(intent.yaw);
     this.simulate(intent, dtSec, nowMs);
     bots?.tick(dtSec * 1000);
+    this.dtSec = dtSec;
     this.draw(nowMs);
   }
 
@@ -172,17 +238,24 @@ export class RoomFrame {
     }
   }
 
-  // SRP violation: input, proximity, warp, seating and the step share one
-  // frame's snapshot of store state, as SceneFrame's body did. Splitting
-  // them means giving each its own sim stage.
+  // SRP violation: input, proximity, warp, seating, gameplay and the step share
+  // one frame's snapshot of store state, as SceneFrame's body did. Splitting
+  // them means giving each its own sim stage. `SelfPlay` already holds the
+  // gameplay rules; this only orders them.
   private simulate(intent: MoveIntent, dtSec: number, nowMs: number) {
-    const { store, actions, bus, selfId } = this.deps;
-    const { sim, autoWalk, seating } = this.options;
-    // Free-fly flies the camera on the movement keys, and nothing walks the player.
-    const freeFly = this.options.cameraMode === 'free-fly';
+    const { store, actions, bus, selfId, keys: playKeys } = this.deps;
+    const { sim, autoWalk, seating, actionInput, cameraMode } = this.options;
+    const keys = actionInput ? actionInput.mergeInto(playKeys.held()) : playKeys.held();
+    const clicked = playKeys.takeClick() && isYawPitchMode(cameraMode);
+    // Free-fly flies the camera on the movement keys (Q and E among them), and nothing walks the player.
+    const freeFly = cameraMode === 'free-fly';
+    this.play.begin(freeFly ? NO_KEYS : keys);
+    const held = !this.options.selfReady;
+    if (!held) {
+      this.play.sit(seating, store.getState().players[selfId]?.seat != null);
+    }
     const hasMoveInput = !freeFly && (intent.dir[0] !== 0 || intent.dir[1] !== 0);
     const deflection = hasMoveInput ? intent.deflection : 0;
-    const jump = !freeFly && intent.jump;
     if (hasMoveInput) {
       autoWalk?.cancel();
     }
@@ -190,7 +263,7 @@ export class RoomFrame {
     const autoWalkDir =
       !hasMoveInput && !freeFly && selfBeforeWalk ? (autoWalk?.intent(selfBeforeWalk.pos) ?? null) : null;
 
-    // Read after auto-walk, which can seat the player, so this frame's movement doesn't overwrite the seated pose.
+    // Read after E and auto-walk, which can seat the player, so this frame's movement doesn't overwrite the seated pose.
     const state = store.getState();
     const self = state.players[selfId];
     const { worldSettings } = state;
@@ -213,12 +286,25 @@ export class RoomFrame {
       this.proximity = proximity;
     }
 
-    const held = !this.options.selfReady;
     if (held || !self) {
       return;
     }
+    const { motionWorld } = this.options;
+    const act = this.play.act({
+      state,
+      self,
+      nowMs,
+      castClicked: clicked,
+      world: motionWorld,
+      seating,
+      interactions: this.options.interactions,
+      autoWalking: autoWalkDir !== null,
+      wallDistance: (origin, dir, max) => (sim ? sim.wallDistance(origin, dir, max) : max),
+    });
+    const jumpPressed = !freeFly && (intent.jump || act.jumpPressed);
     if (self.seat != null) {
-      if (hasMoveInput || jump || autoWalkDir !== null) {
+      this.play.seat();
+      if (hasMoveInput || jumpPressed || autoWalkDir !== null) {
         seating?.stand();
       }
       sim?.teleport(store.getState().players[selfId]?.pos ?? self.pos);
@@ -248,11 +334,23 @@ export class RoomFrame {
       worldSettings,
       state.characterConfigs,
     );
-    const running = !freeFly && intent.run;
-    const speed = autoWalkDir
+    const running = !freeFly && (intent.run || keys.has('shift'));
+    const walkSpeed = autoWalkDir
       ? baseSpeed
       : (running ? baseSpeed * runSpeedMultiplier : baseSpeed) * (deflection > 0 ? deflection : 1);
-    const dir = hasMoveInput ? { x: intent.dir[0], z: intent.dir[1] } : (autoWalkDir ?? { x: 0, z: 0 });
+    const steer = hasMoveInput ? { x: intent.dir[0], z: intent.dir[1] } : autoWalkDir;
+    // Swimming and riding replace the walk's direction and speed.
+    const motion = this.play.move({
+      self,
+      feet: feetPosition(self.pos, worldSettings.charRadius),
+      dir: steer,
+      sprint: running,
+      mount: act.mount && !freeFly,
+      dtSec,
+      world: motionWorld,
+    });
+    const dir = motion.speed === null ? (steer ?? STILL) : (motion.dir ?? STILL);
+    const speed = (motion.speed ?? walkSpeed) * act.moveScale;
     const moving = dir.x !== 0 || dir.z !== 0;
 
     const result = sim.step({
@@ -262,7 +360,7 @@ export class RoomFrame {
       speed,
       running: running && !autoWalkDir,
       yaw: moving ? yawFromDirection(dir) : self.yaw,
-      jump,
+      jump: jumpPressed && motion.canJump && act.moveScale > 0,
       settings: worldSettings,
       spawnPoints: this.options.spawnPoints,
     });
@@ -312,13 +410,13 @@ export class RoomFrame {
 
   /** Sends the world when one of its sources changed since the last frame. */
   private syncWorld(state: OfficeState) {
-    const { kinds, bakedLayouts, excludeInstance } = this.options;
+    const { kinds, bakedLayouts, excludeInstance, drawnObjects } = this.options;
     const { lighting, background } = state.worldConstants;
-    const sources = [state.worldObjects, kinds, bakedLayouts, excludeInstance, lighting, background];
+    const sources = [state.worldObjects, kinds, bakedLayouts, excludeInstance, drawnObjects, lighting, background];
     if (sources.every((s, i) => s === this.worldSources[i])) {
       return;
     }
-    const { instances } = state.worldObjects;
+    const { instances } = drawnObjects ? drawnObjects(state.worldObjects) : state.worldObjects;
     const { diff, sent } = diffWorld(this.sentWorld, {
       instances: excludeInstance ? instances.filter((i) => !excludeInstance(i)) : instances,
       kinds,
@@ -343,9 +441,20 @@ export class RoomFrame {
         this.bumps.delete(id);
       }
     }
+    this.looks.prune(state.players);
+    const self = state.players[selfId];
+    // `Players.tsx`: silhouettes in the cameras that look down on the player, for the player and
+    // anyone within the outer proximity ring.
+    const silhouettes = cameraMode === 'fixed' || cameraMode === 'third-person';
+    const silhouetteOf = (p: PlayerState): string | null =>
+      silhouettes &&
+      (p.id === selfId ||
+        (self !== undefined && Math.hypot(p.pos.x - self.pos.x, p.pos.z - self.pos.z) <= ws.proximityOuterRadius))
+        ? hexColor(playerAccent(p.id))
+        : null;
     const players = Object.values(state.players)
       .filter((p) => p.id !== selfId || cameraMode !== 'first-person')
-      .map((p): PlayerInput => {
+      .map((p): PlayersInput['players'][number] => {
         const isSelf = p.id === selfId;
         const pos = isSelf ? p.pos : sim ? sim.extrapolatePeer(p, nowMs) : extrapolatePos(p, nowMs);
         const tun = resolveCharacterTunables(p.avatar.model ?? 'default', ws, state.characterConfigs);
@@ -353,22 +462,51 @@ export class RoomFrame {
           id: p.id,
           character: this.options.characterOf(p),
           pos: xyz(pos),
-          yaw: p.yaw,
+          yaw: this.looks.yawOf(p, nowMs),
           vel: xyz(p.vel),
           name: isSelf ? '' : p.name,
           airborne: isSelf ? this.airborne : p.isAirborne,
           seat: p.seat == null ? null : { pos: xyz(p.pos), yaw: p.yaw },
-          bump: this.bumps.get(p.id) ?? { count: 0, normal: [0, 0] },
+          bump: this.bumpOf(p.id),
           animSpeeds: { idle: tun.idleAnimSpeed, walk: tun.walkAnimSpeed, run: tun.runAnimSpeed },
+          silhouette: silhouetteOf(p),
+          ...this.looks.look(p, state, this.options.waterVolumes ?? [], nowMs, this.dtSec),
         };
       });
+    const frozen = (this.options.frozenAvatars?.(state) ?? []).map(
+      (f): PlayerInput => ({
+        id: frozenAvatarId(f.login),
+        character: f.model.url,
+        pos: xyz(f.pos),
+        yaw: f.yaw,
+        vel: [0, 0, 0],
+        name: '',
+        airborne: false,
+        seat: { pos: xyz(f.pos), yaw: f.yaw },
+        bump: { count: 0, normal: [0, 0] },
+        animSpeeds: { idle: 1, walk: 1, run: 1 },
+        frozen: true,
+      }),
+    );
     return {
-      players,
+      players: [...players, ...frozen],
       charRadius: ws.charRadius,
       playerSpeed: ws.playerSpeed,
       runSpeed: ws.playerSpeed * ws.runSpeedMultiplier,
       bumpEasingMs: ws.bumpEasingMs,
+      turnSpeed: ws.turnSpeed,
+      hostTags: this.options.hostTags ?? false,
+      effects: this.effects.effects(nowMs),
     };
+  }
+
+  /** A collision's or a poke's bumps, the later one's push winning. */
+  private bumpOf(id: string): PlayerInput['bump'] {
+    const collision = this.bumps.get(id);
+    const poke = this.looks.pokeBumpOf(id);
+    const count = (collision?.count ?? 0) + (poke?.count ?? 0);
+    const latest = poke && (!collision || poke.atMs > collision.atMs) ? poke : collision;
+    return { count, normal: latest?.normal ?? [0, 0] };
   }
 }
 

@@ -1,0 +1,178 @@
+{
+  "size": [
+    640,
+    360
+  ],
+  "instances": [
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        4
+      ]
+    }
+  ],
+  "characters": [
+    {
+      "character": "Knight",
+      "spawn": [
+        -0.9,
+        0,
+        0.5
+      ],
+      "yaw": 3.141593,
+      "moves": [
+        {
+          "frames": 60
+        }
+      ],
+      "look": {
+        "silhouette": "#33ddff"
+      }
+    },
+    {
+      "character": "Knight",
+      "spawn": [
+        0.9,
+        0,
+        0.5
+      ],
+      "yaw": 3.141593,
+      "moves": [
+        {
+          "frames": 60
+        }
+      ],
+      "look": {}
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "position": [
+        -0.9,
+        1.6,
+        3
+      ],
+      "lookAt": [
+        -0.9,
+        0.8,
+        0.5
+      ],
+      "fov": 40
+    },
+    {
+      "name": "high",
+      "position": [
+        -0.9,
+        6,
+        4
+      ],
+      "lookAt": [
+        -0.9,
+        0.8,
+        0.5
+      ],
+      "fov": 40
+    }
+  ],
+  "captures": [
+    59
+  ],
+  "assert": [
+    {
+      "type": "feetOn",
+      "frame": 59,
+      "surfaceY": 0
+    }
+  ]
+}

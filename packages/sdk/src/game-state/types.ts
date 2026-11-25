@@ -4,6 +4,10 @@ import {
   type WorldConstants,
 } from './world-constants.ts';
 
+import type { PlacedProp } from '../placement/props.ts';
+import type { DeskClaimant } from '../realtime/desk-claim.ts';
+import type { SpellCast, SpellEffect, SpellId } from '../spells/index.ts';
+
 export type PlayerId = string;
 
 export type Vec3 = { x: number; y: number; z: number };
@@ -17,6 +21,34 @@ export type AvatarData = {
   colors?: Record<string, string>;
   accessories?: string[];
 };
+
+export const PLAYER_POSES = ['swim', 'scooter', 'tricycle'] as const;
+export type PlayerPose = (typeof PLAYER_POSES)[number];
+
+export const HELD_ITEMS = ['wand'] as const;
+export type HeldItem = (typeof HELD_ITEMS)[number];
+export const EMOTE_IDS = ['wave', 'thumbs-up', 'heart', 'laugh', 'clap', 'party', 'question'] as const;
+export type EmoteId = (typeof EMOTE_IDS)[number];
+
+export const PING_INTENTS = ['ping', 'invite', 'wave'] as const;
+export type PingIntent = (typeof PING_INTENTS)[number];
+
+export const EMOTE_INFO: Record<EmoteId, { glyph: string; label: string }> = {
+  wave: { glyph: '👋', label: 'Wave' },
+  'thumbs-up': { glyph: '👍', label: 'Thumbs up' },
+  heart: { glyph: '❤️', label: 'Heart' },
+  laugh: { glyph: '😂', label: 'Laugh' },
+  clap: { glyph: '👏', label: 'Clap' },
+  party: { glyph: '🎉', label: 'Party' },
+  question: { glyph: '❓', label: 'Question' },
+};
+
+export const EMOTE_BUBBLE_MS = 3000;
+
+export const STATUS_TEXT_MAX = 60;
+export const STATUS_EMOJI_MAX = 16;
+
+export const isStatusEmoji = (s: string): boolean => !/[\p{L}\p{N}\p{P}]/u.test(s);
 
 export type PlayerState = {
   id: PlayerId;
@@ -34,11 +66,21 @@ export type PlayerState = {
   jitsiParticipantId: string | null;
   status: PresenceStatus;
   mic: MicState;
-  /** Id of the placed object instance the player sits on. */
+  /** Seat id (`seatId`) the player sits on: the instance id for its first seat. */
   seat?: string | null;
+  pose?: PlayerPose | null;
+  poseRack?: string | null;
+  held?: HeldItem | null;
+  heldStand?: string | null;
+  statusText?: string | null;
+  statusEmoji?: string | null;
+  focus?: boolean;
+  handRaised?: boolean;
   tRecv?: number;
   /** Local-only: receive time of this player's last `presence:status`. */
   lastStatusAt?: number;
+  /** Local-only: last input time (self) or receive time minus the peer's reported `idleMs`; same clock as `lastStatusAt`. */
+  lastActiveAt?: number;
   /** Local-only: when this remote player was first upserted here. */
   firstSeenAt?: number;
 };
@@ -48,11 +90,15 @@ export type MicState = 'none' | 'muted' | 'silent' | 'speaking';
 
 export type DepartedPlayer = { name: string; leftAt: number };
 
+export type ChatScope = 'nearby' | 'direct';
+
 export type ChatMessage = {
   id: string;
   authorId: PlayerId;
   text: string;
   t: number;
+  scope?: ChatScope;
+  to?: PlayerId;
 };
 
 export type Stroke = {
@@ -133,6 +179,12 @@ export type AnimationSettings = {
   idleAnimSpeed: number;
   /** Maximum angular velocity for the smooth-turn animation, in rad/s. */
   turnSpeed: number;
+  /** Multiplier on the character's horizontal intent speed used while
+   * traversing a step-up. */
+  stepUpSpeedFactor: number;
+  /** Multiplier on the broadcast velocity while climbing, which sets the
+   * walk-animation rate on every client. */
+  climbAnimFactor: number;
 };
 
 /**
@@ -371,7 +423,7 @@ export type VoiceZone = {
   max: { x: number; z: number };
 };
 
-/** A resolved desk area: a voice-zone rectangle whose single chair, if any, is `seatInstanceId`. */
+/** A resolved desk area: a voice-zone rectangle whose single chair, if any, is `seatInstanceId` (the chair's first seat). */
 export type DeskAreaState = {
   id: string;
   label: string;
@@ -419,6 +471,14 @@ export type OfficeState = {
   worldObjects: WorldObjects;
   /** Desk area id -> login. Only the realtime server distributes it. */
   deskClaims: Record<string, string>;
+  /** Login -> what the server knows about each claimant. Only the realtime server distributes it. */
+  deskClaimants: Record<string, DeskClaimant>;
+  /** Props players placed in this office. Only the realtime server distributes them. */
+  placedProps: PlacedProp[];
+  /** Running spell effect per target. Never snapshotted: the realtime server replays them as `spell:effect`. */
+  spellEffects: Record<PlayerId, SpellEffect>;
+  /** Local-only: the spell the wand casts next. Never snapshotted or broadcast. */
+  selectedSpell: SpellId;
   /** Local-only: never snapshotted or broadcast. */
   voiceZones: VoiceZone[];
   /** Local-only: never snapshotted or broadcast. */
@@ -437,7 +497,10 @@ export type GameEvent =
   | { kind: 'whiteboard:stroke'; stroke: Stroke }
   | { kind: 'combat:hit'; targetId: PlayerId; dmg: number; byId: PlayerId }
   | { kind: 'combat:killed'; targetId: PlayerId; byId: PlayerId }
-  | { kind: 'ping:received'; fromId: PlayerId; at: number }
+  | { kind: 'ping:received'; fromId: PlayerId; at: number; intent?: PingIntent }
+  | { kind: 'spell:cast'; casterId: PlayerId; cast: SpellCast; at: number }
+  | { kind: 'poke:received'; fromId: PlayerId; targetId: PlayerId | null; at: number }
+  | { kind: 'emote:received'; fromId: PlayerId; emote: EmoteId; at: number }
   | { kind: 'inventory:added'; item: InventoryItem }
   | { kind: 'inventory:removed'; itemId: string }
   | { kind: 'voice:room-changed'; roomId: string | null }

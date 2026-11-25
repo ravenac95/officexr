@@ -33,10 +33,47 @@ export function applyNetEventToStore(
         event.mic,
         clock.now(),
         { room: event.jitsiRoom ?? null, participantId: event.jitsiParticipantId ?? null },
+        event.idleMs,
+        { statusText: event.statusText, statusEmoji: event.statusEmoji, focus: event.focus },
       );
       return;
     case 'presence:seat':
       actions.applyRemoteSeat(event.actorId, event.instanceId, clock.now());
+      return;
+    case 'presence:pose':
+      actions.applyRemotePose(event.actorId, event.pose, clock.now(), event.rack ?? null);
+      return;
+    case 'presence:held':
+      actions.applyRemoteHeld(event.actorId, event.held, clock.now(), event.stand ?? null);
+      return;
+    case 'spell:cast':
+      actions.receiveSpellCast(
+        event.actorId,
+        { spell: event.spell, origin: event.origin, dir: event.dir, distance: event.distance, targetId: event.targetId },
+        clock.now(),
+      );
+      return;
+    case 'spell:effect': {
+      const startsAt = clock.now() - event.elapsedMs;
+      actions.setSpellEffect(event.targetId, {
+        spell: event.spell,
+        casterId: event.casterId,
+        startsAt,
+        endsAt: clock.now() + event.remainingMs,
+      });
+      return;
+    }
+    case 'office:props':
+      actions.setPlacedProps(event.props);
+      return;
+    case 'presence:hand':
+      actions.applyRemoteHand(event.actorId, event.raised, clock.now());
+      return;
+    case 'emote:send':
+      actions.receiveEmote(event.actorId, event.emote, clock.now());
+      return;
+    case 'poke:send':
+      actions.receivePoke(event.actorId, event.targetId, clock.now());
       return;
     case 'chat:message': {
       const msg: ChatMessage = {
@@ -48,6 +85,12 @@ export function applyNetEventToStore(
       actions.applyRemoteChat(msg);
       return;
     }
+    case 'chat:nearby':
+      actions.applyRemoteChat({ id: `${event.actorId}:${event.seq}`, authorId: event.actorId, text: event.text, t: event.t, scope: 'nearby' });
+      return;
+    case 'chat:direct':
+      actions.applyRemoteChat({ id: `${event.actorId}:${event.seq}`, authorId: event.actorId, text: event.text, t: event.t, scope: 'direct', to: event.targetId });
+      return;
     case 'whiteboard:stroke':
       actions.applyRemoteStroke(event.stroke);
       return;
@@ -59,7 +102,7 @@ export function applyNetEventToStore(
       return;
     case 'ping:send':
       // ponytail: actorId is client-supplied, so the sender can be spoofed until the server enforces identity.
-      actions.receivePing(event.actorId, clock.now());
+      actions.receivePing(event.actorId, clock.now(), event.intent);
       return;
     case 'zombie:state':
       actions.applyZombieState(event.state);
@@ -77,7 +120,7 @@ export function applyNetEventToStore(
       actions.applyRemoteWorldObjects(event.objects);
       return;
     case 'desk:claims':
-      actions.setDeskClaims(event.claims);
+      actions.setDeskClaims(event.claims, event.claimants);
       return;
     case 'snapshot:request':
     case 'snapshot:offer':

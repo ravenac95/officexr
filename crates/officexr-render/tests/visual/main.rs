@@ -25,14 +25,19 @@ use bevy::render::RenderPlugin;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::time::TimeUpdateStrategy;
 use bevy::winit::WinitPlugin;
+use officexr_render::effects::Aura;
+use officexr_render::occlusion::{OcclusionInput, ViewOcclusion};
 use officexr_render::overlays::{Overlay, ViewOverlays};
 use officexr_render::picking::{Modifiers, PickHub, PointerMsg, PointerMsgAction};
 use officexr_render::placement::VOXEL_SIZE;
 use officexr_render::proximity::{Proximity, ViewProximity};
+use officexr_render::screens::{ScreenInput, ViewScreens};
 use officexr_render::views::View;
+use officexr_render::water::{ViewWater, WaterVolume};
 use officexr_render::{
-    AssetBase, AvatarBound, LayoutIndex, ObjectKinds, OffscreenTarget, PlayerRender, Players,
-    SceneCamera, Seat, WorldSceneData, offscreen_app, scene_sim, sim_input,
+    AssetBase, AvatarBound, BodyOffset, LayoutIndex, NamedClip, ObjectKinds, OffscreenTarget,
+    PlayerRender, Players, SceneCamera, Seat, Tint, WorldSceneData, offscreen_app, scene_sim,
+    sim_input,
 };
 use officexr_sim::SimPeer;
 use officexr_sim::physics::character_movement::XZ;
@@ -81,6 +86,18 @@ struct Scenario {
     /// The sim frame `proximity` is sent on.
     #[serde(default)]
     proximity_from: usize,
+    /// As `setOcclusion` takes it, from the first step.
+    #[serde(default)]
+    occlusion: Option<Value>,
+    /// As `setWater` takes them.
+    #[serde(default)]
+    water: Vec<Value>,
+    /// As `setScreens` takes them; instances are `i<index>`, layout ones first.
+    #[serde(default)]
+    screens: Vec<Value>,
+    /// Sparks and bolts, as `setPlayers`' `effects` takes them less their `age`.
+    #[serde(default)]
+    effects: Vec<EffectSpec>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -107,7 +124,7 @@ struct Layout {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Character {
     character: String,
     /// Shown in a name tag, unless empty or `paused`.
@@ -118,6 +135,48 @@ struct Character {
     moves: Vec<Move>,
     /// Sits at this body root and yaw instead of where the moves lead.
     seat: Option<SeatSpec>,
+    /// Faces this yaw (radians, store convention) until a move turns it.
+    #[serde(default)]
+    yaw: f32,
+    /// What a pose, an item or a spell adds, on every frame.
+    #[serde(default)]
+    look: LookSpec,
+    /// Sim frames a poke starts on.
+    #[serde(default)]
+    pokes_at: Vec<usize>,
+    /// Sim frames a cast starts on.
+    #[serde(default)]
+    casts_at: Vec<usize>,
+}
+
+/// `setPlayers`' look fields.
+#[derive(Deserialize, Default, Clone)]
+#[serde(default, deny_unknown_fields)]
+struct LookSpec {
+    clip: Option<NamedClip>,
+    body: BodyOffset,
+    vehicle: Option<String>,
+    wand: bool,
+    tint: Option<TintSpec>,
+    frozen: bool,
+    silhouette: Option<String>,
+    aura: Option<Aura>,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+struct TintSpec {
+    color: String,
+    strength: f32,
+    glow: bool,
+}
+
+/// An effect from sim frame `from`, its `age` counted from there.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EffectSpec {
+    from: usize,
+    effect: Value,
 }
 
 #[derive(Deserialize, Clone, Copy)]
@@ -185,6 +244,7 @@ struct Step {
 struct Timeline {
     hover: Option<(Vec2, Vec2)>,
     frames: Vec<Vec<PlayerRender>>,
+    effects: Vec<(usize, Value)>,
     steps: Vec<Step>,
     cameras: Vec<CameraPose>,
     next: usize,
@@ -268,7 +328,7 @@ fn simulate(scenario: &Scenario, scene_json: &str, players: &Players) -> Vec<Vec
         })
         .collect();
     let frame_count = dirs.iter().map(Vec::len).max().unwrap_or(0);
-    let mut yaws = vec![0.0f32; sims.len()];
+    let mut yaws: Vec<f32> = scenario.characters.iter().map(|c| c.yaw).collect();
     let mut frames: Vec<Vec<PlayerRender>> = Vec::with_capacity(frame_count);
     for f in 0..frame_count {
         let peers: Vec<SimPeer> = sims
@@ -299,7 +359,24 @@ fn simulate(scenario: &Scenario, scene_json: &str, players: &Players) -> Vec<Vec
                 };
                 let r = sim.step(&sim_input(players, dir, players.player_speed, yaws[i]));
                 let v = |p: officexr_sim::Vec3| Vec3::new(p.x as f32, p.y as f32, p.z as f32);
+                let c = &scenario.characters[i];
+                let started = |at: &[usize]| at.iter().filter(|&&s| s <= f).count() as u32;
+                let hex = |h: &str| Color::from(Srgba::hex(h).expect("a #rrggbb colour"));
                 PlayerRender {
+                    clip: c.look.clip.clone(),
+                    body: c.look.body,
+                    vehicle: c.look.vehicle.clone(),
+                    wand: c.look.wand,
+                    pokes: started(&c.pokes_at),
+                    casts: started(&c.casts_at),
+                    tint: c.look.tint.as_ref().map(|t| Tint {
+                        color: hex(&t.color),
+                        strength: t.strength,
+                        glow: t.glow,
+                    }),
+                    frozen: c.look.frozen,
+                    silhouette: c.look.silhouette.as_deref().map(hex),
+                    aura: c.look.aura,
                     id: format!("p{i}"),
                     character: scenario.characters[i].character.clone(),
                     pos: scenario.characters[i]
@@ -483,6 +560,16 @@ fn drive(
         );
     }
     players.players.clone_from(&t.frames[step.frame]);
+    players.effects = t
+        .effects
+        .iter()
+        .filter(|(from, _)| *from <= step.frame)
+        .map(|(from, effect)| {
+            let mut effect = effect.clone();
+            effect["age"] = json!((step.frame - from) as f32 / 60.0);
+            serde_json::from_value(effect).expect("an effect")
+        })
+        .collect();
     *camera = scene_camera(&t.cameras[step.camera]);
     if !step.files.is_empty() {
         let mut shot = commands.spawn(Screenshot::image(target.0.clone()));
@@ -535,6 +622,29 @@ fn add_overlays(
     }
 }
 
+/// The scenario's world effects, as the play view's `setOcclusion`, `setWater` and `setScreens` send them.
+#[derive(Resource)]
+struct ScenarioEffects {
+    occlusion: Option<OcclusionInput>,
+    water: Vec<WaterVolume>,
+    screens: Vec<ScreenInput>,
+}
+
+/// Gives the primary view the scenario's world effects once it exists.
+fn add_effects(
+    mut commands: Commands,
+    effects: Res<ScenarioEffects>,
+    views: Query<Entity, (With<View>, Without<ViewWater>)>,
+) {
+    for view in &views {
+        commands.entity(view).insert((
+            ViewOcclusion(effects.occlusion.clone()),
+            ViewWater(effects.water.clone()),
+            ViewScreens(effects.screens.clone()),
+        ));
+    }
+}
+
 /// Renders `steps`; fails for each model that didn't load.
 fn render(
     scenario: &Scenario,
@@ -569,6 +679,11 @@ fn render(
                 .hover
                 .map(|p| (Vec2::from(p), Vec2::new(w as f32, h as f32))),
             frames,
+            effects: scenario
+                .effects
+                .iter()
+                .map(|e| (e.from, e.effect.clone()))
+                .collect(),
             steps,
             cameras: scenario.cameras.clone(),
             next: 0,
@@ -580,6 +695,15 @@ fn render(
         .insert_resource(ScenarioOverlays(
             serde_json::from_value(Value::from(scenario.overlays.clone())).expect("overlays"),
         ))
+        .insert_resource(ScenarioEffects {
+            occlusion: scenario
+                .occlusion
+                .clone()
+                .map(|o| serde_json::from_value(o).expect("occlusion")),
+            water: serde_json::from_value(Value::from(scenario.water.clone())).expect("water"),
+            screens: serde_json::from_value(Value::from(scenario.screens.clone()))
+                .expect("screens"),
+        })
         .insert_resource(ScenarioProximity(
             scenario
                 .proximity
@@ -590,7 +714,12 @@ fn render(
         // Before `drive` moves on, so it sees the step about to render.
         .add_systems(
             PreUpdate,
-            (drive, add_overlays, add_proximity.before(drive)),
+            (
+                drive,
+                add_overlays,
+                add_effects,
+                add_proximity.before(drive),
+            ),
         );
     app.run();
     let failed = failed.lock().unwrap();

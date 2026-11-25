@@ -9,19 +9,23 @@
 
 mod avatars;
 mod compressed_gltf;
+pub mod effects;
 mod layouts;
 mod lighting;
 #[cfg(feature = "mugshot")]
 mod mugshot;
 mod objects;
+pub mod occlusion;
 mod offscreen;
 pub mod overlays;
 pub mod picking;
 pub mod placement;
 pub mod proximity;
 pub mod scene;
+pub mod screens;
 mod sky;
 pub mod views;
+pub mod water;
 mod world_label;
 
 use bevy::asset::embedded_asset;
@@ -39,8 +43,9 @@ use bevy::prelude::*;
 use bevy::ui::UiSystems;
 
 pub use avatars::{
-    AnimSpeeds, AnimationState, Bound as AvatarBound, Bump, Motion, PlayerAnimation, PlayerRender,
-    Players, Seat, next_motion,
+    AnimSpeeds, AnimationState, BodyOffset, Bound as AvatarBound, Bump, FALLBACK_HEIGHT_M, Motion,
+    NamedClip, OVERHEAD_GAP_M, PlayerAnimation, PlayerRender, Players, Seat, SilhouetteMaterial,
+    Tint, next_motion,
 };
 pub use layouts::LayoutIndex;
 pub use lighting::{HemisphereFill, ObjectMaterial, snap_to_shadow_texel};
@@ -50,6 +55,7 @@ pub use objects::{ObjectIndex, ObjectKinds, apply_overrides};
 pub use offscreen::{OffscreenTarget, offscreen_app, straight_rgba};
 pub use scene::*;
 pub use sky::{SkyMaterial, sun_sky_params};
+pub use views::PlayerAnchor;
 use views::{View, ViewCamera, ViewScene};
 
 const CAMERA_FAR: f32 = 2000.0;
@@ -121,14 +127,18 @@ impl Plugin for OfficeXrRenderPlugin {
         embedded_asset!(app, "grid.wesl");
         embedded_asset!(app, "bell.png");
         embedded_asset!(app, "proximity.wesl");
+        embedded_asset!(app, "water.wesl");
         app.add_plugins((
             MaterialPlugin::<ObjectMaterial>::default(),
             MaterialPlugin::<SkyMaterial>::default(),
             MaterialPlugin::<overlays::OverlayMaterial>::default(),
             MaterialPlugin::<overlays::GridMaterial>::default(),
             MaterialPlugin::<proximity::GlowMaterial>::default(),
+            MaterialPlugin::<water::WaterMaterial>::default(),
             lighting::plugin,
             avatars::plugin,
+            avatars::render_plugin,
+            effects::plugin,
             scene_systems,
             #[cfg(feature = "picking")]
             picking::plugin,
@@ -168,7 +178,21 @@ fn gltf_loader(app: &App) -> GltfLoader {
 fn scene_systems(app: &mut App) {
     app.add_plugins(views::plugin)
         .init_resource::<proximity::GlowMeshes>()
-        .add_systems(PostUpdate, apply_camera.before(TransformSystems::Propagate))
+        // Before the camera system sizes the new projection to its target:
+        // after it, the frusta would cull with the projection's default aspect.
+        .add_systems(
+            PostUpdate,
+            apply_camera
+                .before(TransformSystems::Propagate)
+                .before(bevy::camera::CameraUpdateSystems),
+        )
+        // After the controls posed this frame's camera; shows and hides before visibility propagates.
+        .add_systems(
+            PostUpdate,
+            occlusion::occlude
+                .before(TransformSystems::Propagate)
+                .before(VisibilitySystems::VisibilityPropagate),
+        )
         // With this frame's camera and anchor poses, before the UI lays the labels out.
         .add_systems(
             PostUpdate,
@@ -188,6 +212,7 @@ fn scene_systems(app: &mut App) {
                     overlays::sync_overlays,
                     proximity::sync_glow,
                     proximity::sync_bubbles,
+                    water::sync_water,
                 )
                     .chain(),
                 (
@@ -196,6 +221,7 @@ fn scene_systems(app: &mut App) {
                     overlays::dress_ghosts,
                     overlays::pulse_ghosts,
                     layouts::spawn_loaded_layouts,
+                    screens::sync_screens,
                 )
                     .chain(),
                 (
@@ -321,6 +347,7 @@ pub(crate) mod tests {
         .init_asset::<overlays::OverlayMaterial>()
         .init_asset::<overlays::GridMaterial>()
         .init_asset::<proximity::GlowMaterial>()
+        .init_asset::<water::WaterMaterial>()
         .init_asset::<Gltf>()
         .init_asset::<GltfNode>()
         .init_asset::<GltfMesh>()

@@ -13,12 +13,14 @@ export interface SeatingState {
 export interface PlayControlsSource {
   /** Walks to `targetId` and keeps following them; the current target again stops. */
   goTo(targetId: PlayerId): void;
+  /** Returns the spot it walks to, or null, with no walk started, when none is in reach or no route leads there. */
+  goToGround(x: number, z: number): { x: number; z: number } | null;
   cancel(): void;
   getState(): AutoWalkState;
   /** Notifies changes to both `getState` and `getSeating`. */
   subscribe(cb: () => void): () => void;
-  /** Sits on `instanceId`, or on the touched seat; the player must touch it, and a refusal shows a toast. */
-  sit(instanceId?: string): void;
+  /** Sits on the seat `seatId`, or on the nearest free touched seat; the player must touch it, and a refusal shows a toast. */
+  sit(seatId?: string): void;
   stand(): void;
   /** Walks to the self player's desk chair and sits on arrival; a no-op without one. */
   returnToDesk(): void;
@@ -27,8 +29,9 @@ export interface PlayControlsSource {
 
 export interface PlayControls extends SeatingState {
   goTo(targetId: PlayerId): void;
+  goToGround(x: number, z: number): { x: number; z: number } | null;
   cancel(): void;
-  sit(instanceId?: string): void;
+  sit(seatId?: string): void;
   stand(): void;
   returnToDesk(): void;
   state: AutoWalkState;
@@ -51,6 +54,7 @@ export function usePlayControls(): PlayControls {
   return useMemo(
     () => ({
       goTo: controls.goTo,
+      goToGround: controls.goToGround,
       cancel: controls.cancel,
       sit: controls.sit,
       stand: controls.stand,

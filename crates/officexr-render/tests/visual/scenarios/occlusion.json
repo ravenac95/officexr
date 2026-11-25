@@ -1,0 +1,573 @@
+{
+  "size": [
+    800,
+    480
+  ],
+  "instances": [
+    {
+      "kindId": "stone",
+      "position": [
+        -12,
+        -4,
+        -16
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        -16
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        -16
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        -16
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        -16
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        8,
+        -4,
+        -16
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        12,
+        -4,
+        -16
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -12,
+        -4,
+        -12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        -12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        -12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        -12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        -12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        8,
+        -4,
+        -12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        12,
+        -4,
+        -12
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -12,
+        -4,
+        -8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        -8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        -8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        -8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        -8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        8,
+        -4,
+        -8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        12,
+        -4,
+        -8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -12,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        8,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        12,
+        -4,
+        -4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -12,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        8,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        12,
+        -4,
+        0
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -12,
+        -4,
+        4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        8,
+        -4,
+        4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        12,
+        -4,
+        4
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -12,
+        -4,
+        8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -8,
+        -4,
+        8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        -4,
+        -4,
+        8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        0,
+        -4,
+        8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        4,
+        -4,
+        8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        8,
+        -4,
+        8
+      ]
+    },
+    {
+      "kindId": "stone",
+      "position": [
+        12,
+        -4,
+        8
+      ]
+    },
+    {
+      "kindId": "colored_block_blue",
+      "position": [
+        -8,
+        0,
+        -8
+      ]
+    },
+    {
+      "kindId": "colored_block_blue",
+      "position": [
+        -4,
+        0,
+        -8
+      ]
+    },
+    {
+      "kindId": "colored_block_blue",
+      "position": [
+        0,
+        0,
+        -8
+      ]
+    },
+    {
+      "kindId": "colored_block_blue",
+      "position": [
+        4,
+        0,
+        -8
+      ]
+    },
+    {
+      "kindId": "colored_block_blue",
+      "position": [
+        -8,
+        4,
+        -8
+      ]
+    },
+    {
+      "kindId": "colored_block_blue",
+      "position": [
+        -4,
+        4,
+        -8
+      ]
+    },
+    {
+      "kindId": "colored_block_blue",
+      "position": [
+        0,
+        4,
+        -8
+      ]
+    },
+    {
+      "kindId": "colored_block_blue",
+      "position": [
+        4,
+        4,
+        -8
+      ]
+    },
+    {
+      "kindId": "colored_block_blue",
+      "position": [
+        12,
+        0,
+        -8
+      ]
+    },
+    {
+      "kindId": "colored_block_blue",
+      "position": [
+        12,
+        4,
+        -8
+      ]
+    },
+    {
+      "kindId": "bricks_A",
+      "position": [
+        -4,
+        6,
+        -4
+      ]
+    },
+    {
+      "kindId": "bricks_A",
+      "position": [
+        0,
+        6,
+        -4
+      ]
+    },
+    {
+      "kindId": "bricks_A",
+      "position": [
+        -4,
+        6,
+        0
+      ]
+    },
+    {
+      "kindId": "bricks_A",
+      "position": [
+        0,
+        6,
+        0
+      ]
+    }
+  ],
+  "characters": [
+    {
+      "character": "Knight",
+      "name": "",
+      "spawn": [
+        0,
+        2,
+        0
+      ],
+      "moves": [
+        {
+          "frames": 45
+        }
+      ]
+    }
+  ],
+  "occlusion": {
+    "targets": [
+      [
+        0,
+        1.55,
+        0
+      ],
+      [
+        0,
+        1.0,
+        0
+      ]
+    ],
+    "cutaway": [
+      0,
+      0,
+      0
+    ]
+  },
+  "cameras": [
+    {
+      "name": "front",
+      "position": [
+        0,
+        7,
+        -11
+      ],
+      "lookAt": [
+        0,
+        1,
+        0
+      ],
+      "fov": 50
+    }
+  ],
+  "captures": [
+    44
+  ],
+  "assert": [
+    {
+      "type": "feetOn",
+      "frame": 44,
+      "surfaceY": 0
+    }
+  ]
+}

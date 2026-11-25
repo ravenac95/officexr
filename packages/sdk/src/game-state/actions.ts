@@ -6,9 +6,13 @@ import type {
   CharacterConfigs,
   ChatMessage,
   CubeKindId,
+  EmoteId,
+  PingIntent,
   InventoryItem,
   MicState,
   PlayerId,
+  PlayerPose,
+  HeldItem,
   PlayerState,
   PresenceStatus,
   RealtimeStatus,
@@ -21,9 +25,22 @@ import type {
   WorldObjects,
   ZombieState,
 } from './types.ts';
+import type { PlacedProp } from '../placement/props.ts';
+import type { DeskClaimant } from '../realtime/desk-claim.ts';
+import { effectFromCast, type SpellCast, type SpellEffect, type SpellId } from '../spells/index.ts';
+import { STATUS_EMOJI_MAX, STATUS_TEXT_MAX, isStatusEmoji } from './types.ts';
 import { DEPARTED_LINGER_MS } from './presence.ts';
 import { worldSettingsFromConstants, type WorldConstants } from './world-constants.ts';
 import { cloneWorldMap } from './world-map.ts';
+
+export type RichStatus = { statusText?: string | null; statusEmoji?: string | null; focus?: boolean };
+
+const cleanStatusText = (text: string | null | undefined): string | null =>
+  text?.trim().slice(0, STATUS_TEXT_MAX) || null;
+const cleanStatusEmoji = (emoji: string | null | undefined): string | null => {
+  const s = emoji?.trim().slice(0, STATUS_EMOJI_MAX);
+  return s && isStatusEmoji(s) ? s : null;
+};
 
 export interface Actions {
   // local intents
@@ -33,11 +50,14 @@ export interface Actions {
   callParticipantJoined(participantId: string, displayName: string): void;
   callParticipantLeft(participantId: string): void;
   clearCallRoster(): void;
+  markSelfActive(now: number): void;
   setSelfPresence(patch: { status?: PresenceStatus; mic?: MicState }): void;
+  setSelfRichStatus(patch: RichStatus): void;
+  setSelfHand(raised: boolean): void;
   appendChat(msg: ChatMessage): void;
   appendStroke(stroke: Stroke): void;
   applyHit(targetId: PlayerId, dmg: number, byId: PlayerId): void;
-  receivePing(fromId: PlayerId, at: number): void;
+  receivePing(fromId: PlayerId, at: number, intent?: PingIntent): void;
   addInventoryItem(item: InventoryItem): void;
   removeInventoryItem(itemId: string): void;
   /** Replace the world constants (and so the derived `worldSettings`).
@@ -67,8 +87,14 @@ export interface Actions {
   setDeskAreas(areas: DeskAreaState[]): void;
   /** Sit on the placed object instance `instanceId`, or stand up with null. */
   setSelfSeat(instanceId: string | null): void;
+  setSelfPose(pose: PlayerPose | null, rack?: string | null): void;
+  setSelfHeld(held: HeldItem | null, stand?: string | null): void;
+  setSelectedSpell(spell: SpellId): void;
+  /** Replace the office's placed props. Never broadcast: only the realtime server distributes them. */
+  setPlacedProps(props: PlacedProp[]): void;
+  setSpellEffect(targetId: PlayerId, effect: SpellEffect): void;
   /** Replace all desk claims. Never broadcast: only the realtime server distributes them. */
-  setDeskClaims(claims: Record<string, string>): void;
+  setDeskClaims(claims: Record<string, string>, claimants?: Record<string, DeskClaimant>): void;
 
   // remote applications (called by sync engine)
   applyRemotePosition(
@@ -85,9 +111,17 @@ export interface Actions {
     mic: MicState,
     now: number,
     jitsi: { room: string | null; participantId: string | null },
+    idleMs?: number,
+    rich?: RichStatus,
   ): void;
+  applyRemoteHand(playerId: PlayerId, raised: boolean, now: number): void;
+  receiveEmote(fromId: PlayerId, emote: EmoteId, at: number): void;
   applyRemoteAvatar(playerId: PlayerId, avatar: AvatarData, name: string, now: number): void;
   applyRemoteSeat(playerId: PlayerId, instanceId: string | null, now: number): void;
+  applyRemotePose(playerId: PlayerId, pose: PlayerPose | null, now: number, rack?: string | null): void;
+  applyRemoteHeld(playerId: PlayerId, held: HeldItem | null, now: number, stand?: string | null): void;
+  receiveSpellCast(casterId: PlayerId, cast: SpellCast, now: number): void;
+  receivePoke(fromId: PlayerId, targetId: PlayerId | null, at: number): void;
   applyRemoteChat(msg: ChatMessage): void;
   applyRemoteStroke(stroke: Stroke): void;
   applyZombieState(z: ZombieState): void;
@@ -196,8 +230,24 @@ export function createActions(store: Store, bus?: Bus): Actions {
       store.setState((s) => (Object.keys(s.callRoster).length > 0 ? { callRoster: {} } : s));
     },
 
+    markSelfActive(now) {
+      patchSelf({ lastActiveAt: now });
+    },
+
     setSelfPresence({ status, mic }) {
       patchSelf({ ...(status && { status }), ...(mic && { mic }) });
+    },
+
+    setSelfRichStatus({ statusText, statusEmoji, focus }) {
+      patchSelf({
+        ...(statusText !== undefined && { statusText: cleanStatusText(statusText) }),
+        ...(statusEmoji !== undefined && { statusEmoji: cleanStatusEmoji(statusEmoji) }),
+        ...(focus !== undefined && { focus }),
+      });
+    },
+
+    setSelfHand(raised) {
+      patchSelf({ handRaised: raised });
     },
 
     setWorldConstants(next) {
@@ -268,8 +318,28 @@ export function createActions(store: Store, bus?: Bus): Actions {
       patchSelf({ seat: instanceId });
     },
 
-    setDeskClaims(claims) {
-      store.setState(() => ({ deskClaims: { ...claims } }));
+    setSelfPose(pose, rack = null) {
+      patchSelf({ pose, poseRack: pose === null ? null : rack });
+    },
+
+    setSelfHeld(held, stand = null) {
+      patchSelf({ held, heldStand: held === null ? null : stand });
+    },
+
+    setSelectedSpell(spell) {
+      store.setState(() => ({ selectedSpell: spell }));
+    },
+
+    setPlacedProps(props) {
+      store.setState(() => ({ placedProps: [...props] }));
+    },
+
+    setSpellEffect(targetId, effect) {
+      store.setState((s) => ({ spellEffects: { ...s.spellEffects, [targetId]: effect } }));
+    },
+
+    setDeskClaims(claims, claimants = {}) {
+      store.setState(() => ({ deskClaims: { ...claims }, deskClaimants: { ...claimants } }));
     },
 
     setWorldObjects(objects) {
@@ -320,8 +390,8 @@ export function createActions(store: Store, bus?: Bus): Actions {
       if (killed) bus?.emit({ kind: 'combat:killed', targetId, byId });
     },
 
-    receivePing(fromId, at) {
-      bus?.emit({ kind: 'ping:received', fromId, at });
+    receivePing(fromId, at, intent) {
+      bus?.emit({ kind: 'ping:received', fromId, at, ...(intent && { intent }) });
     },
 
     addInventoryItem(item) {
@@ -344,15 +414,19 @@ export function createActions(store: Store, bus?: Bus): Actions {
       upsertRemote(playerId, { pos, vel, yaw, tRecv, isAirborne }, tRecv);
     },
 
-    applyRemotePresence(playerId, status, mic, now, jitsi) {
+    applyRemotePresence(playerId, status, mic, now, jitsi, idleMs, rich) {
       upsertRemote(
         playerId,
         {
           status,
           mic,
+          statusText: cleanStatusText(rich?.statusText),
+          statusEmoji: cleanStatusEmoji(rich?.statusEmoji),
+          focus: rich?.focus ?? false,
           jitsiRoom: jitsi.room,
           jitsiParticipantId: jitsi.participantId,
           lastStatusAt: now,
+          lastActiveAt: idleMs === undefined ? undefined : now - idleMs,
         },
         now,
       );
@@ -364,6 +438,37 @@ export function createActions(store: Store, bus?: Bus): Actions {
 
     applyRemoteSeat(playerId, instanceId, now) {
       upsertRemote(playerId, { seat: instanceId }, now);
+    },
+
+    applyRemotePose(playerId, pose, now, rack = null) {
+      upsertRemote(playerId, { pose, poseRack: pose === null ? null : rack }, now);
+    },
+
+    applyRemoteHeld(playerId, held, now, stand = null) {
+      upsertRemote(playerId, { held, heldStand: held === null ? null : stand }, now);
+    },
+
+    receiveSpellCast(casterId, cast, now) {
+      if (cast.targetId) {
+        const effect = effectFromCast(casterId, cast, now);
+        store.setState((s) => {
+          const live = Object.entries(s.spellEffects).filter(([, e]) => e.endsAt > now);
+          return { spellEffects: { ...Object.fromEntries(live), [cast.targetId as string]: effect } };
+        });
+      }
+      bus?.emit({ kind: 'spell:cast', casterId, cast, at: now });
+    },
+
+    receivePoke(fromId, targetId, at) {
+      bus?.emit({ kind: 'poke:received', fromId, targetId, at });
+    },
+
+    applyRemoteHand(playerId, raised, now) {
+      upsertRemote(playerId, { handRaised: raised }, now);
+    },
+
+    receiveEmote(fromId, emote, at) {
+      bus?.emit({ kind: 'emote:received', fromId, emote, at });
     },
 
     applyRemoteChat(msg) {

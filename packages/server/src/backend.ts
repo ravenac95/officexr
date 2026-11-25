@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+import { resolveCommit } from '@officexr/realtime-server/commit';
 import { createOfficeApi } from '@officexr/realtime-server/office-api';
 import { RealtimeServer } from '@officexr/realtime-server/server';
 import type connect from 'connect';
@@ -5,7 +7,12 @@ import { createApp, type AppOptions } from './app';
 import { authConfigFromEnv, parseCookieDomain } from './auth';
 import { parseFrontendOrigins } from './cors';
 import { createDb } from './db';
+import { createDeployment, highestMigration, pgAppliedVersion } from './deployment';
+import { integrationsFromEnv } from './integrationsConfig';
 import { jaasConfigFromEnv } from './jaasToken';
+
+const MIGRATIONS_DIR = fileURLToPath(new URL('../../../supabase/migrations', import.meta.url));
+const CLAIMS_REFRESH_MS = 3 * 60_000;
 
 export interface BackendOptions {
   dev?: AppOptions['dev'];
@@ -29,6 +36,13 @@ export async function createBackend(env: Record<string, string | undefined>, { d
   const frontendOrigins = parseFrontendOrigins(env.FRONTEND_ORIGINS);
   const cookieDomain = parseCookieDomain(env.COOKIE_DOMAIN, URL.parse(auth.publicUrl ?? '')?.hostname ?? '');
   const db = createDb(env.SUPABASE_DB_URL);
+  const integrations = integrationsFromEnv({
+    env,
+    publicUrl: auth.publicUrl,
+    googleClientId: auth.googleClientId,
+    googleClientSecret: auth.googleClientSecret,
+    calendarLinks: db.calendarLinks,
+  });
   const officeApi = createOfficeApi({ baseUrl: apiUrl, tokenSecret: env.OFFICEXR_REALTIME_TOKEN_SECRET });
   const realtime = new RealtimeServer({
     tokenSecret: env.OFFICEXR_REALTIME_TOKEN_SECRET,
@@ -36,6 +50,15 @@ export async function createBackend(env: Record<string, string | undefined>, { d
     worldConstantsUrl,
     sessionPolicy: officeApi.allowsMultiSession,
     deskClaims: officeApi,
+    placedProps: officeApi,
+    blocks: { blockedBy: async (login) => (await db.blocks.list(login)).map((person) => person.login) },
+    deployment: createDeployment({
+      commit: resolveCommit(env),
+      builtAt: env.OFFICEXR_BUILT_AT,
+      expected: highestMigration(MIGRATIONS_DIR),
+      applied: () => pgAppliedVersion(db.query),
+    }),
+    claimsRefreshMs: integrations.calendar || integrations.slack ? CLAIMS_REFRESH_MS : 0,
   });
   const app = await createApp({
     ...db,
@@ -45,6 +68,7 @@ export async function createBackend(env: Record<string, string | undefined>, { d
     realtime,
     realtimeTokenSecret: env.OFFICEXR_REALTIME_TOKEN_SECRET,
     jaas: jaasConfigFromEnv(env),
+    ...integrations,
     studioDataDir: env.OFFICEXR_STUDIO_DATA_DIR,
     dev,
   });

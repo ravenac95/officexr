@@ -1,4 +1,4 @@
-import type { BackgroundConstants, LightingConstants } from '@officexr/sdk';
+import type { BackgroundConstants, FixedCameraConstants, LightingConstants } from '@officexr/sdk';
 
 export type BackgroundViewConfig = BackgroundConstants;
 
@@ -8,4 +8,10 @@ export type LightingViewConfig = LightingConstants & {
    * changing the sky/ground tint. Editor and mugshot views set it;
    * undefined or 0 adds nothing. */
   ambientFillIntensity?: number;
+};
+
+/** The fixed camera's world constants plus the per-view framing a host can override. */
+export type FixedCameraViewConfig = FixedCameraConstants & {
+  /** Keeps the local player's chest at the screen centre. */
+  centred?: boolean;
 };
