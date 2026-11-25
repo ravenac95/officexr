@@ -3,10 +3,11 @@
 //!
 //! Each of the character's meshes gets a twin sharing its mesh and skin,
 //! drawn with [`SilhouetteMaterial`], which passes only where the depth test
-//! fails. three.js stencils the body out so limbs crossing the torso aren't
-//! tinted; Bevy's material API has no stencil, so the test is instead made
-//! from a point [`REACH_M`] nearer the camera, which the body's own depth
-//! never hides.
+//! fails. three.js stencils the body out so its own head and limbs crossing
+//! it aren't tinted; Bevy's depth target has no stencil, so the test is
+//! instead made from where the view ray enters a vertical capsule around the
+//! avatar ([`SilhouetteMaterial::set_capsule`]): the body's own parts all lie
+//! inside it, a wall in front lies outside.
 
 use bevy::light::NotShadowCaster;
 use bevy::mesh::MeshVertexBufferLayoutRef;
@@ -21,9 +22,8 @@ use bevy::shader::ShaderRef;
 
 /// `silhouetteColor.ts`'s `SILHOUETTE_OPACITY`.
 pub const SILHOUETTE_OPACITY: f32 = 0.5;
-/// Deeper than any limb crosses in front of the torso, shallower than the
-/// thinnest wall gap a player stands behind.
-const REACH_M: f32 = 0.45;
+/// Room round the bind-pose model for poses, swings and bumps.
+const CAPSULE_SLACK_M: f32 = 0.15;
 
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
 pub struct SilhouetteMaterial {
@@ -34,7 +34,10 @@ pub struct SilhouetteMaterial {
 #[derive(ShaderType, Debug, Clone)]
 struct SilhouetteUniform {
     color: LinearRgba,
-    reach: f32,
+    /// The capsule's axis, feet to head, in world space.
+    base: Vec3,
+    radius: f32,
+    top: Vec3,
 }
 
 impl SilhouetteMaterial {
@@ -42,9 +45,25 @@ impl SilhouetteMaterial {
         Self {
             uniform: SilhouetteUniform {
                 color: color.to_linear().with_alpha(SILHOUETTE_OPACITY),
-                reach: REACH_M,
+                base: Vec3::ZERO,
+                radius: 0.0,
+                top: Vec3::ZERO,
             },
         }
+    }
+
+    /// Wraps the avatar in `capsule`.
+    pub fn set_capsule(&mut self, capsule: Capsule) {
+        let u = &mut self.uniform;
+        (u.base, u.top, u.radius) = (capsule.base, capsule.top, capsule.radius);
+    }
+
+    /// Whether `capsule` is far enough from the one set to be worth re-uploading.
+    pub fn capsule_moved(&self, capsule: &Capsule) -> bool {
+        let u = &self.uniform;
+        u.base.distance(capsule.base) >= 0.01
+            || u.top.distance(capsule.top) >= 0.01
+            || (u.radius - capsule.radius).abs() >= 0.01
     }
 }
 
@@ -77,6 +96,26 @@ impl Material for SilhouetteMaterial {
             depth.depth_write_enabled = Some(false);
         }
         Ok(())
+    }
+}
+
+/// A vertical capsule round an avatar, in world space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Capsule {
+    base: Vec3,
+    top: Vec3,
+    radius: f32,
+}
+
+impl Capsule {
+    /// Round a model standing at `feet`, `height` tall and reaching `reach`
+    /// out from its axis, with room to move.
+    pub fn new(feet: Vec3, height: f32, reach: f32) -> Self {
+        Self {
+            base: feet,
+            top: feet + Vec3::Y * height,
+            radius: reach + CAPSULE_SLACK_M,
+        }
     }
 }
 

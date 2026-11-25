@@ -414,6 +414,8 @@ pub(crate) struct Avatar {
     rig: Option<Entity>,
     /// The bind-pose model height, once measured.
     height: f32,
+    /// How far the bind-pose model reaches out from its vertical axis, once measured.
+    reach: f32,
     /// The character's own materials, which its look recolours, and the look they have.
     materials: Vec<Handle<ObjectMaterial>>,
     look: (AvatarLook, bool),
@@ -772,6 +774,7 @@ fn sync_view_avatars(
             character_root,
             rig: None,
             height: FALLBACK_HEIGHT_M,
+            reach: FALLBACK_HEIGHT_M / 2.0,
             materials: vec![],
             look: (AvatarLook::default(), false),
             silhouette: None,
@@ -897,7 +900,7 @@ fn bind_avatars(
                 );
             }
         }
-        if let Some(height) = overhead::model_height(
+        if let Some(extent) = overhead::model_extent(
             root,
             &parts.children,
             &parts.parents,
@@ -905,7 +908,8 @@ fn bind_avatars(
             &parts.mesh3d,
             &meshes,
         ) {
-            state.height = height;
+            state.height = extent.height;
+            state.reach = extent.radius;
         }
         let silhouette = silhouettes.add(SilhouetteMaterial::new(Color::WHITE));
         // Characters take the same hemisphere fill as every other object.
@@ -1194,6 +1198,7 @@ fn dress_avatars(
     base: Res<AssetBase>,
     assets: Res<AssetServer>,
     mut avatars: Query<(&mut Avatar, &ChildOf), With<Bound>>,
+    globals: Query<&GlobalTransform>,
     rigs: Query<&AnimationPlayer>,
     children: Query<&Children>,
     mut wands: Query<&mut Visibility, (With<Wand>, Without<Finger>)>,
@@ -1275,6 +1280,9 @@ fn dress_avatars(
             *applied = color;
             if let (Some(c), Some(mut material)) = (color, silhouettes.get_mut(handle.id())) {
                 *material = SilhouetteMaterial::new(c);
+                if let Some(capsule) = capsule_of(&avatar, &globals) {
+                    material.set_capsule(capsule);
+                }
             }
             for e in children.iter_descendants(avatar.character_root) {
                 if let Ok(mut v) = twins.get_mut(e) {
@@ -1282,7 +1290,28 @@ fn dress_avatars(
                 }
             }
         }
+        if let Some((handle, Some(_))) = &avatar.silhouette
+            && let Some(capsule) = capsule_of(&avatar, &globals)
+            // Only re-upload once the avatar has moved off the capsule last sent.
+            && silhouettes
+                .get(handle.id())
+                .is_some_and(|m| m.capsule_moved(&capsule))
+            && let Some(mut material) = silhouettes.get_mut(handle.id())
+        {
+            material.set_capsule(capsule);
+        }
     }
+}
+
+/// The capsule round `avatar`'s character model as it stands now, scaled by any spell.
+fn capsule_of(avatar: &Avatar, globals: &Query<&GlobalTransform>) -> Option<silhouette::Capsule> {
+    let root = globals.get(avatar.character_root).ok()?;
+    let scale = root.scale();
+    Some(silhouette::Capsule::new(
+        root.translation(),
+        avatar.height * scale.y,
+        avatar.reach * scale.x.max(scale.z),
+    ))
 }
 
 /// Gives a vehicle model's materials the hemisphere fill avatars and objects have.

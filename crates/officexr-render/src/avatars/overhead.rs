@@ -19,17 +19,25 @@ pub const FALLBACK_HEIGHT_M: f32 = 2.3;
 /// Between the top of the head and the bottom of the stack.
 pub const OVERHEAD_GAP_M: f32 = 0.05;
 
-/// The highest bind-pose vertex under `root`, in `root`'s space, or `None`
-/// before its meshes have loaded.
-pub(super) fn model_height(
+/// How far a model reaches in `root`'s space: up from its origin, and out from its vertical axis.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct ModelExtent {
+    pub height: f32,
+    pub radius: f32,
+}
+
+/// The bind-pose [`ModelExtent`] of the meshes under `root`, or `None`
+/// before they have loaded.
+pub(super) fn model_extent(
     root: Entity,
     children: &Query<&Children>,
     parents: &Query<&ChildOf>,
     transforms: &Query<&Transform>,
     mesh3d: &Query<&Mesh3d>,
     meshes: &Assets<Mesh>,
-) -> Option<f32> {
+) -> Option<ModelExtent> {
     let mut top: Option<f32> = None;
+    let mut radius = 0.0_f32;
     for e in children.iter_descendants(root) {
         let Some(mesh) = mesh3d.get(e).ok().and_then(|m| meshes.get(m)) else {
             continue;
@@ -55,11 +63,13 @@ pub(super) fn model_height(
             at = parent.parent();
         }
         for p in positions {
-            let y = to_root.transform_point3(Vec3::from(*p)).y;
-            top = Some(top.map_or(y, |t: f32| t.max(y)));
+            let p = to_root.transform_point3(Vec3::from(*p));
+            top = Some(top.map_or(p.y, |t: f32| t.max(p.y)));
+            radius = radius.max(p.xz().length());
         }
     }
     top.filter(|h| h.is_finite() && *h > 0.0)
+        .map(|height| ModelExtent { height, radius })
 }
 
 /// The world point the stack over `avatar` stands on.
@@ -115,7 +125,7 @@ mod tests {
     }
 
     #[test]
-    fn a_models_height_is_its_highest_vertex_through_its_transforms() {
+    fn a_models_extent_is_its_highest_and_widest_vertex_through_its_transforms() {
         let mut app = App::new();
         app.init_resource::<Assets<Mesh>>();
         let mesh = app
@@ -132,7 +142,7 @@ mod tests {
             Transform::from_xyz(0.0, 1.0, 0.0),
             ChildOf(armature),
         ));
-        let height = app
+        let extent = app
             .world_mut()
             .run_system_once(
                 move |children: Query<&Children>,
@@ -140,10 +150,12 @@ mod tests {
                       transforms: Query<&Transform>,
                       mesh3d: Query<&Mesh3d>,
                       meshes: Res<Assets<Mesh>>| {
-                    model_height(root, &children, &parents, &transforms, &mesh3d, &meshes)
+                    model_extent(root, &children, &parents, &transforms, &mesh3d, &meshes)
                 },
             )
             .unwrap();
-        assert_eq!(height, Some(2.5));
+        let extent = extent.unwrap();
+        assert_eq!(extent.height, 2.5);
+        assert!((extent.radius - 0.5_f32.hypot(0.5)).abs() < 1e-6);
     }
 }
